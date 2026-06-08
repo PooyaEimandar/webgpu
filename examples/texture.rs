@@ -412,17 +412,14 @@ fn decode_texture_image(bytes: &[u8]) -> RenderResult<TextureImage> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_texture_image() -> RenderResult<TextureImage> {
-    use std::io::Read;
-
-    let response = ureq::get(TEXTURE_URL).call().map_err(|error| {
+    let mut response = ureq::get(TEXTURE_URL).call().map_err(|error| {
         RenderError::message(format!(
             "failed to fetch texture from {TEXTURE_URL}: {error}"
         ))
     })?;
-    let mut bytes = Vec::new();
-    response
-        .into_reader()
-        .read_to_end(&mut bytes)
+    let bytes = response
+        .body_mut()
+        .read_to_vec()
         .map_err(RenderError::source)?;
 
     decode_texture_image(&bytes)
