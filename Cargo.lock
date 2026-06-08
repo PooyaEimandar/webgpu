@@ -1158,9 +1158,9 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "http"
-version = "1.4.1"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
+checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
 dependencies = [
  "bytes",
  "itoa",
@@ -2515,7 +2515,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "sib"
 version = "0.1.0"
-source = "git+https://github.com/PooyaEimandar/sib#fa0eb716a4f11688feb0dc091c99f240a7dce844"
+source = "git+https://github.com/PooyaEimandar/sib#93e31d05b41dcd98e99dcf3ef93e45af234f8810"
 dependencies = [
  "arc-swap",
  "async-trait",

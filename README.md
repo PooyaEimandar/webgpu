@@ -9,6 +9,7 @@ Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com
 | `triangle` | Renders a colored indexed triangle using vertex and index buffers, WGSL vertex/fragment shaders, a render pipeline, and a depth attachment. | ![Basic indexed triangle](screenshots/triangle.png) |
 | `texture` | Renders a textured indexed quad using a runtime-loaded PNG texture, a sampler, uniform buffer transforms, and fragment shader lighting. | ![Textured indexed quad](screenshots/texture.png) |
 | `texturecubemap` | Renders a skybox and reflective sphere from a runtime-loaded cubemap using six JPEG faces, a cube texture view, and a cube sampler. | ![Runtime-loaded cubemap reflection](screenshots/texturecubemap.png) |
+| `texturearray` | Renders seven stacked squares sampling separate layers from a runtime-built 2D texture array with two async-loaded images, RGB layers, and procedural layers. | ![Runtime-built texture array](screenshots/texturearray.png) |
 
 ## Running
 
@@ -16,8 +17,6 @@ Native:
 
 ```sh
 cargo run --example triangle
-cargo run --example texture
-cargo run --example texturecubemap
 ```
 
 WASM:
