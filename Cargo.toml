@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
+image = { version = "0.25.9", default-features = false, features = ["png"] }
 sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -19,6 +20,10 @@ sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-h1-server",
     "render",
 ] }
+ureq = "2.12.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.99"
 wasm-bindgen = "0.2.122"
+wasm-bindgen-futures = "0.4.72"
+web-sys = { version = "0.3.99", features = ["Response", "Window"] }

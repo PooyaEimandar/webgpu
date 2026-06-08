@@ -7,7 +7,7 @@ Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com
 | Example | Description | Screenshot |
 | --- | --- | --- |
 | `triangle` | Renders a colored indexed triangle using vertex and index buffers, WGSL vertex/fragment shaders, a render pipeline, and a depth attachment. | ![Basic indexed triangle](screenshots/triangle.png) |
-| `texture` | Renders a textured indexed quad using generated mip levels, a sampled texture, a sampler, uniform buffer transforms, and fragment shader lighting. | ![Textured indexed quad](screenshots/texture.png) |
+| `texture` | Renders a textured indexed quad using a runtime-loaded PNG texture, a sampler, uniform buffer transforms, and fragment shader lighting. | ![Textured indexed quad](screenshots/texture.png) |
 
 ## Running
 

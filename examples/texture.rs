@@ -1,10 +1,10 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderResult, buffer, glam, shader, texture, wgpu,
-    winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, buffer, glam, shader,
+    texture, wgpu, winit,
 };
 
-const TEXTURE_SIZE: u32 = 256;
+const TEXTURE_URL: &str = "https://raw.githubusercontent.com/PooyaEimandar/sib/main/sib.png";
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -65,29 +65,29 @@ fn wgpu_clip_matrix() -> glam::Mat4 {
 const VERTICES: &[Vertex] = &[
     Vertex {
         position: [1.0, 1.0, 0.0],
-        uv: [1.0, 1.0],
+        uv: [1.0, 0.0],
         normal: [0.0, 0.0, 1.0],
     },
     Vertex {
         position: [-1.0, 1.0, 0.0],
-        uv: [0.0, 1.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-    Vertex {
-        position: [-1.0, -1.0, 0.0],
         uv: [0.0, 0.0],
         normal: [0.0, 0.0, 1.0],
     },
     Vertex {
+        position: [-1.0, -1.0, 0.0],
+        uv: [0.0, 1.0],
+        normal: [0.0, 0.0, 1.0],
+    },
+    Vertex {
         position: [1.0, -1.0, 0.0],
-        uv: [1.0, 0.0],
+        uv: [1.0, 1.0],
         normal: [0.0, 0.0, 1.0],
     },
 ];
 
 const INDICES: &[u32] = &[0, 1, 2, 2, 3, 0];
 
-struct TextureLevel {
+struct TextureImage {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
@@ -102,6 +102,16 @@ struct TextureExample {
     index_buffer: Option<wgpu::Buffer>,
     sampled_texture: Option<texture::Texture>,
     depth_texture: Option<texture::Texture>,
+    texture_image: Option<TextureImage>,
+}
+
+impl TextureExample {
+    fn new(texture_image: TextureImage) -> Self {
+        Self {
+            texture_image: Some(texture_image),
+            ..Default::default()
+        }
+    }
 }
 
 impl Example for TextureExample {
@@ -121,7 +131,11 @@ impl Example for TextureExample {
         let uniforms = Uniforms::new(context.aspect_ratio());
         let uniform_buffer =
             buffer::uniform_buffer(&context.device, Some("texture uniforms"), &uniforms);
-        let sampled_texture = create_sampled_texture(context);
+        let texture_image = self
+            .texture_image
+            .take()
+            .ok_or_else(|| RenderError::message("texture image was not loaded"))?;
+        let sampled_texture = create_sampled_texture(context, &texture_image);
 
         let bind_group_layout =
             context
@@ -318,18 +332,17 @@ impl Example for TextureExample {
     }
 }
 
-fn create_sampled_texture(context: &RenderContext) -> texture::Texture {
-    let levels = build_mip_chain();
+fn create_sampled_texture(context: &RenderContext, image: &TextureImage) -> texture::Texture {
     let size = wgpu::Extent3d {
-        width: TEXTURE_SIZE,
-        height: TEXTURE_SIZE,
+        width: image.width,
+        height: image.height,
         depth_or_array_layers: 1,
     };
-    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let texture = context.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("metal plate texture"),
+        label: Some("runtime sib texture"),
         size,
-        mip_level_count: levels.len() as u32,
+        mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
@@ -337,49 +350,41 @@ fn create_sampled_texture(context: &RenderContext) -> texture::Texture {
         view_formats: &[],
     });
 
-    for (mip_level, level) in levels.iter().enumerate() {
-        context.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: mip_level as u32,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &level.rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(level.width * 4),
-                rows_per_image: Some(level.height),
-            },
-            wgpu::Extent3d {
-                width: level.width,
-                height: level.height,
-                depth_or_array_layers: 1,
-            },
-        );
-    }
+    context.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &image.rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(image.width * 4),
+            rows_per_image: Some(image.height),
+        },
+        size,
+    );
 
     let view = texture.create_view(&wgpu::TextureViewDescriptor {
-        label: Some("metal plate texture view"),
+        label: Some("runtime sib texture view"),
         format: Some(format),
         dimension: Some(wgpu::TextureViewDimension::D2),
         aspect: wgpu::TextureAspect::All,
         base_mip_level: 0,
-        mip_level_count: Some(levels.len() as u32),
+        mip_level_count: Some(1),
         base_array_layer: 0,
         array_layer_count: Some(1),
         usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
     });
     let sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("metal plate sampler"),
-        address_mode_u: wgpu::AddressMode::Repeat,
-        address_mode_v: wgpu::AddressMode::Repeat,
-        address_mode_w: wgpu::AddressMode::Repeat,
+        label: Some("runtime sib texture sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::MipmapFilterMode::Linear,
-        lod_min_clamp: 0.0,
-        lod_max_clamp: levels.len() as f32,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
         ..Default::default()
     });
 
@@ -392,112 +397,73 @@ fn create_sampled_texture(context: &RenderContext) -> texture::Texture {
     }
 }
 
-fn build_mip_chain() -> Vec<TextureLevel> {
-    let mut levels = vec![TextureLevel {
-        width: TEXTURE_SIZE,
-        height: TEXTURE_SIZE,
-        rgba: metal_plate_rgba(TEXTURE_SIZE, TEXTURE_SIZE),
-    }];
+fn decode_texture_image(bytes: &[u8]) -> RenderResult<TextureImage> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .map_err(RenderError::source)?
+        .to_rgba8();
+    let (width, height) = image.dimensions();
 
-    while levels
-        .last()
-        .is_some_and(|level| level.width > 1 || level.height > 1)
-    {
-        let next = downsample(levels.last().expect("mip level exists"));
-        levels.push(next);
-    }
-
-    levels
-}
-
-fn metal_plate_rgba(width: u32, height: u32) -> Vec<u8> {
-    let mut rgba = vec![0; (width * height * 4) as usize];
-
-    for y in 0..height {
-        for x in 0..width {
-            let fx = x as f32 / width as f32;
-            let fy = y as f32 / height as f32;
-            let grain = hash_noise(x, y) * 18.0 - 9.0;
-            let brushed = ((fx * 42.0 + fy * 5.0).sin() * 9.0) + ((fx * 210.0).sin() * 3.0);
-            let seam = x % 64 <= 1 || y % 64 <= 1;
-            let checker = if ((x / 64) + (y / 64)) % 2 == 0 {
-                9.0
-            } else {
-                -7.0
-            };
-            let rivet = rivet_light(x, y);
-            let value = (104.0 + checker + grain + brushed + rivet).clamp(28.0, 220.0);
-            let groove = if seam { 0.62 } else { 1.0 };
-            let i = ((y * width + x) * 4) as usize;
-
-            rgba[i] = (value * 0.78 * groove).clamp(0.0, 255.0) as u8;
-            rgba[i + 1] = (value * 0.86 * groove).clamp(0.0, 255.0) as u8;
-            rgba[i + 2] = (value * 0.95 * groove).clamp(0.0, 255.0) as u8;
-            rgba[i + 3] = (130.0 + rivet.max(0.0) * 1.8).clamp(0.0, 255.0) as u8;
-        }
-    }
-
-    rgba
-}
-
-fn rivet_light(x: u32, y: u32) -> f32 {
-    let local_x = (x % 64) as f32 - 32.0;
-    let local_y = (y % 64) as f32 - 32.0;
-    let distance = (local_x * local_x + local_y * local_y).sqrt();
-
-    if distance > 9.0 {
-        return 0.0;
-    }
-
-    let dome = (1.0 - distance / 9.0).max(0.0);
-    let highlight = ((-local_x - local_y) / 13.0).clamp(-1.0, 1.0) * 28.0;
-    dome * 40.0 + highlight
-}
-
-fn hash_noise(x: u32, y: u32) -> f32 {
-    let mut n = x
-        .wrapping_mul(1973)
-        .wrapping_add(y.wrapping_mul(9277))
-        .wrapping_add(0x68bc_21eb);
-    n = (n ^ (n >> 15)).wrapping_mul(2246822519);
-    ((n ^ (n >> 13)) & 0xffff) as f32 / 65535.0
-}
-
-fn downsample(level: &TextureLevel) -> TextureLevel {
-    let width = (level.width / 2).max(1);
-    let height = (level.height / 2).max(1);
-    let mut rgba = vec![0; (width * height * 4) as usize];
-
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = [0u32; 4];
-            for oy in 0..2 {
-                for ox in 0..2 {
-                    let source_x = (x * 2 + ox).min(level.width - 1);
-                    let source_y = (y * 2 + oy).min(level.height - 1);
-                    let source = ((source_y * level.width + source_x) * 4) as usize;
-                    for channel in 0..4 {
-                        sum[channel] += level.rgba[source + channel] as u32;
-                    }
-                }
-            }
-
-            let target = ((y * width + x) * 4) as usize;
-            for channel in 0..4 {
-                rgba[target + channel] = (sum[channel] / 4) as u8;
-            }
-        }
-    }
-
-    TextureLevel {
+    Ok(TextureImage {
         width,
         height,
-        rgba,
-    }
+        rgba: image.into_raw(),
+    })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn load_texture_image() -> RenderResult<TextureImage> {
+    use std::io::Read;
+
+    let response = ureq::get(TEXTURE_URL).call().map_err(|error| {
+        RenderError::message(format!(
+            "failed to fetch texture from {TEXTURE_URL}: {error}"
+        ))
+    })?;
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(RenderError::source)?;
+
+    decode_texture_image(&bytes)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn load_texture_image() -> RenderResult<TextureImage> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let window =
+        web_sys::window().ok_or_else(|| RenderError::message("browser window is not available"))?;
+    let response_value = JsFuture::from(window.fetch_with_str(TEXTURE_URL))
+        .await
+        .map_err(|error| RenderError::message(format!("failed to fetch texture: {error:?}")))?;
+    let response: web_sys::Response = response_value
+        .dyn_into()
+        .map_err(|_| RenderError::message("texture fetch did not return a Response"))?;
+
+    if !response.ok() {
+        return Err(RenderError::message(format!(
+            "failed to fetch texture from {TEXTURE_URL}: HTTP {}",
+            response.status()
+        )));
+    }
+
+    let array_buffer = JsFuture::from(
+        response
+            .array_buffer()
+            .map_err(|error| RenderError::message(format!("failed to read texture: {error:?}")))?,
+    )
+    .await
+    .map_err(|error| RenderError::message(format!("failed to read texture: {error:?}")))?;
+    let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+
+    decode_texture_image(&bytes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn run_texture() -> RenderResult<()> {
-    sib::render::run(TextureExample::default())
+    sib::render::run(TextureExample::new(load_texture_image()?))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -511,5 +477,15 @@ fn main() {}
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
-    run_texture().map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
+    wasm_bindgen_futures::spawn_local(async {
+        match load_texture_image().await {
+            Ok(texture_image) => {
+                if let Err(error) = sib::render::run(TextureExample::new(texture_image)) {
+                    panic!("{error}");
+                }
+            }
+            Err(error) => panic!("{error}"),
+        }
+    });
+    Ok(())
 }

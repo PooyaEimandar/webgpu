@@ -1,124 +1,127 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>webgpu examples</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-        background: #0b0c0f;
-        color: #f4f7fb;
-      }
 
-      * {
-        box-sizing: border-box;
-      }
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>webgpu examples</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      background: #0b0c0f;
+      color: #f4f7fb;
+    }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 34%),
-          #0b0c0f;
-      }
+    * {
+      box-sizing: border-box;
+    }
 
-      main {
-        width: min(1040px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 48px 0;
-      }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 34%),
+        #0b0c0f;
+    }
 
-      h1 {
-        margin: 0 0 10px;
-        font-size: clamp(2rem, 7vw, 4.5rem);
-        line-height: 0.95;
-        letter-spacing: 0;
-      }
+    main {
+      width: min(1040px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0;
+    }
 
-      p {
-        margin: 0 0 28px;
-        max-width: 680px;
-        color: #b8c0cc;
-        font-size: 1rem;
-        line-height: 1.6;
-      }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 7vw, 4.5rem);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
 
-      .examples {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 16px;
-      }
+    p {
+      margin: 0 0 28px;
+      max-width: 680px;
+      color: #b8c0cc;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
 
-      a {
-        display: block;
-        overflow: hidden;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 8px;
-        background: #151820;
-        color: inherit;
-        text-decoration: none;
-      }
+    .examples {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
 
-      a:focus-visible {
-        outline: 2px solid #8db3ff;
-        outline-offset: 3px;
-      }
+    a {
+      display: block;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      background: #151820;
+      color: inherit;
+      text-decoration: none;
+    }
 
-      a:hover {
-        border-color: rgba(141, 179, 255, 0.65);
-        background: #1a1f2a;
-      }
+    a:focus-visible {
+      outline: 2px solid #8db3ff;
+      outline-offset: 3px;
+    }
 
-      img {
-        display: block;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        object-fit: cover;
-        background: #000;
-      }
+    a:hover {
+      border-color: rgba(141, 179, 255, 0.65);
+      background: #1a1f2a;
+    }
 
-      .content {
-        padding: 16px;
-      }
+    img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      background: #000;
+    }
 
-      strong {
-        display: block;
-        margin-bottom: 8px;
-        font-size: 1.05rem;
-      }
+    .content {
+      padding: 16px;
+    }
 
-      span {
-        display: block;
-        color: #aab3c0;
-        font-size: 0.92rem;
-        line-height: 1.5;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>webgpu</h1>
-      <p>Rust WebGPU examples porting Sascha Willems' Vulkan samples with WASM and native support.</p>
-      <div class="examples" aria-label="Examples">
-        <a href="./triangle/">
-          <img src="./screenshots/triangle.png" alt="Colored indexed triangle screenshot" />
-          <span class="content">
-            <strong>triangle</strong>
-            <span>Colored indexed triangle with vertex and index buffers.</span>
-          </span>
-        </a>
-        <a href="./texture/">
-          <img src="./screenshots/texture.png" alt="Textured indexed quad screenshot" />
-          <span class="content">
-            <strong>texture</strong>
-            <span>Textured indexed quad with mip levels, sampler, and fragment shader sampling.</span>
-          </span>
-        </a>
-      </div>
-    </main>
-  </body>
+    strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 1.05rem;
+    }
+
+    span {
+      display: block;
+      color: #aab3c0;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>webgpu</h1>
+    <p>Rust WebGPU examples porting Sascha Willems' Vulkan samples with WASM and native support.</p>
+    <div class="examples" aria-label="Examples">
+      <a href="./triangle/">
+        <img src="./screenshots/triangle.png" alt="Colored indexed triangle screenshot" />
+        <span class="content">
+          <strong>triangle</strong>
+          <span>Colored indexed triangle with vertex and index buffers.</span>
+        </span>
+      </a>
+      <a href="./texture/">
+        <img src="./screenshots/texture.png" alt="Textured indexed quad screenshot" />
+        <span class="content">
+          <strong>texture</strong>
+          <span>Textured indexed quad with a runtime-loaded PNG texture and sampler.</span>
+        </span>
+      </a>
+    </div>
+  </main>
+</body>
+
 </html>
