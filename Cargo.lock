@@ -2453,7 +2453,8 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sib"
-version = "0.0.17"
+version = "0.1.0"
+source = "git+https://github.com/PooyaEimandar/sib#fa0eb716a4f11688feb0dc091c99f240a7dce844"
 dependencies = [
  "arc-swap",
  "async-trait",

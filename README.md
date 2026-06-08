@@ -1,6 +1,6 @@
 # webgpu
 
-Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com/SaschaWillems/vulkan) with WASM and native support.
+Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com/SaschaWillems/vulkan) with WASM and native support. View the WASM examples on [GitHub Page](https://pooyaeimandar.github.io/webgpu/).
 
 ## Examples
 
@@ -19,7 +19,7 @@ cargo run --example triangle
 WASM:
 
 ```sh
-scripts/build-wasm.sh
+scripts/build-wasm.sh --release
 cargo run --bin serve
 ```
 
