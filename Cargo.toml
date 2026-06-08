@@ -1,0 +1,20 @@
+[package]
+name = "webgpu"
+version = "0.1.0"
+edition = "2024"
+description = "Rust WebGPU/wgpu examples inspired by Sascha Willems' Vulkan examples."
+license = "MIT"
+
+[dependencies]
+bytemuck = { version = "1.25.0", features = ["derive"] }
+sib = { path = "../sib", features = ["render"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sib = { path = "../sib", features = [
+    "net-file-server",
+    "net-h1-server",
+    "render",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.122"

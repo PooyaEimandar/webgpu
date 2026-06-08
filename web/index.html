@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>webgpu triangle</title>
+    <style>
+      :root {
+        --viewport-width: 100vw;
+        --viewport-height: 100vh;
+      }
+
+      html,
+      body {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: #000;
+        overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: none;
+      }
+
+      canvas {
+        display: block;
+        width: var(--viewport-width) !important;
+        height: var(--viewport-height) !important;
+        max-width: 100vw;
+        max-height: 100vh;
+      }
+
+      canvas:focus {
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import init from "./triangle.js";
+
+      const root = document.documentElement;
+
+      const viewportSize = () => {
+        const viewport = window.visualViewport;
+        const width = Math.max(
+          1,
+          Math.round(
+            viewport?.width ?? window.innerWidth ?? root.clientWidth ?? 1,
+          ),
+        );
+        const height = Math.max(
+          1,
+          Math.round(
+            viewport?.height ?? window.innerHeight ?? root.clientHeight ?? 1,
+          ),
+        );
+
+        return { width, height };
+      };
+
+      const resizeCanvasToViewport = () => {
+        const { width, height } = viewportSize();
+        root.style.setProperty("--viewport-width", `${width}px`);
+        root.style.setProperty("--viewport-height", `${height}px`);
+
+        for (const canvas of document.querySelectorAll("canvas")) {
+          canvas.style.width = `${width}px`;
+          canvas.style.height = `${height}px`;
+        }
+      };
+
+      let resizeFrame = 0;
+      const scheduleResize = () => {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(resizeCanvasToViewport);
+      };
+
+      resizeCanvasToViewport();
+      window.addEventListener("resize", scheduleResize, { passive: true });
+      window.visualViewport?.addEventListener("resize", scheduleResize, {
+        passive: true,
+      });
+      window.visualViewport?.addEventListener("scroll", scheduleResize, {
+        passive: true,
+      });
+      new MutationObserver(scheduleResize).observe(document.body, {
+        childList: true,
+      });
+
+      init().then(resizeCanvasToViewport);
+    </script>
+  </body>
+</html>
