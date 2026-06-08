@@ -20,17 +20,16 @@ impl StaticFiles {
             .split_once('?')
             .map_or(request_path, |(path, _)| path);
         let request_path = request_path.trim_start_matches('/');
-        let request_path = if request_path.is_empty() {
-            "index.html"
-        } else {
-            request_path
-        };
+        let serve_index = request_path.is_empty() || request_path.ends_with('/');
 
         let mut path = PathBuf::new();
         for component in PathBuf::from(request_path).components() {
             if let Component::Normal(segment) = component {
                 path.push(segment);
             }
+        }
+        if serve_index {
+            path.push("index.html");
         }
 
         self.root.join(path)
