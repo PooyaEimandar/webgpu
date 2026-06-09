@@ -1,6 +1,12 @@
 # webgpu
 
-Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com/SaschaWillems/vulkan) with WASM and native support. View the WASM examples on [GitHub Pages](https://pooyaeimandar.github.io/webgpu/).
+Rust WebGPU examples porting  with WASM and native support based on . View the WASM examples on [GitHub Pages](https://pooyaeimandar.github.io/webgpu/).
+
+Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com/SaschaWillems/vulkan), with WASM and native support, based on the [Sib render module](https://github.com/PooyaEimandar/sib).
+
+## Demo
+
+Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 
 ## Examples
 
