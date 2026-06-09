@@ -33,6 +33,46 @@
       padding: 48px 0;
     }
 
+    .source-link {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: auto;
+      min-height: 40px;
+      padding: 9px 12px;
+      border-color: rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: #f4f7fb;
+      color: #0b0c0f;
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .source-link:hover {
+      border-color: rgba(141, 179, 255, 0.8);
+      background: #ffffff;
+    }
+
+    .source-link img {
+      width: 20px;
+      height: 20px;
+      aspect-ratio: auto;
+      object-fit: contain;
+      background: transparent;
+    }
+
+    .source-link span {
+      display: block;
+      color: inherit;
+      font-size: inherit;
+      line-height: inherit;
+    }
+
     h1 {
       margin: 0 0 10px;
       font-size: clamp(2rem, 7vw, 4.5rem);
@@ -102,6 +142,11 @@
 </head>
 
 <body>
+  <a class="source-link" href="https://github.com/PooyaEimandar/webgpu" target="_blank" rel="noopener noreferrer"
+    aria-label="Source code on GitHub">
+    <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="" />
+    <span>Source code</span>
+  </a>
   <main>
     <h1>webgpu</h1>
     <p>Rust WebGPU examples porting Sascha Willems' Vulkan samples with WASM and native support.</p>
