@@ -15,6 +15,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `texturecubemap` | Renders a skybox and reflective sphere from a runtime-loaded cubemap using six JPEG faces, a cube texture view, and a cube sampler. | ![Runtime-loaded cubemap reflection](screenshots/texturecubemap.png) |
 | `texturearray` | Renders seven stacked squares sampling separate layers from a runtime-built 2D texture array with two async-loaded images, RGB layers, and procedural layers. | ![Runtime-built texture array](screenshots/texturearray.png) |
 | `textoverlay` | Renders glyph atlas text over a 3D scene using an overlay render pass, Unicode shaping, and RTL text. | ![Text overlay](screenshots/textoverlay.png) |
+| `textmesh` | Converts shaped LTR and RTL font outlines into extruded indexed mesh geometry with vertex colors and lighting. | ![3D text mesh](screenshots/textmesh.png) |
 
 ## Running
 
