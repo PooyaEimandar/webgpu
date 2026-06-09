@@ -33,7 +33,7 @@ done
 
 OUT_DIR="${WEBGPU_WEB_ROOT:-target/web}"
 if [ -z "$EXAMPLES" ]; then
-  EXAMPLES=" triangle texture texturecubemap texturearray"
+  EXAMPLES=" triangle texture texturecubemap texturearray textoverlay"
 fi
 
 mkdir -p "$OUT_DIR"

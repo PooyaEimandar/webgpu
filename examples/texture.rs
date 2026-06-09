@@ -280,10 +280,10 @@ fn load_texture_image() -> RenderResult<texture::ImageRgba8> {
 async fn load_texture_image() -> RenderResult<texture::ImageRgba8> {
     AssetLoader::new()
         .fetch_image_rgba8(AssetRequest {
-        label: "runtime sib texture",
-        url: TEXTURE_URL,
-    })
-    .await
+            label: "runtime sib texture",
+            url: TEXTURE_URL,
+        })
+        .await
 }
 
 #[cfg(not(target_arch = "wasm32"))]

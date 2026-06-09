@@ -14,6 +14,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `texture` | Renders a textured indexed quad using a runtime-loaded PNG texture, a sampler, uniform buffer transforms, and fragment shader lighting. | ![Textured indexed quad](screenshots/texture.png) |
 | `texturecubemap` | Renders a skybox and reflective sphere from a runtime-loaded cubemap using six JPEG faces, a cube texture view, and a cube sampler. | ![Runtime-loaded cubemap reflection](screenshots/texturecubemap.png) |
 | `texturearray` | Renders seven stacked squares sampling separate layers from a runtime-built 2D texture array with two async-loaded images, RGB layers, and procedural layers. | ![Runtime-built texture array](screenshots/texturearray.png) |
+| `textoverlay` | Renders glyph atlas text over a 3D scene using an overlay render pass, Unicode shaping, and RTL text. | ![Text overlay](screenshots/textoverlay.png) |
 
 ## Running
 

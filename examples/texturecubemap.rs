@@ -520,9 +520,7 @@ async fn load_cubemap_images() -> RenderResult<Vec<texture::ImageRgba8>> {
         })
         .collect::<Vec<_>>();
 
-    AssetLoader::new()
-        .fetch_images_rgba8_batch(&requests)
-        .await
+    AssetLoader::new().fetch_images_rgba8_batch(&requests).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]

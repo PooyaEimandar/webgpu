@@ -134,14 +134,13 @@ impl AssetLoader {
         use wasm_bindgen::JsCast;
         use wasm_bindgen_futures::JsFuture;
 
-        let window =
-            web_sys::window().ok_or_else(|| RenderError::message("browser window is not available"))?;
-        let response_value =
-            JsFuture::from(window.fetch_with_str(url))
-                .await
-                .map_err(|error| {
-                    RenderError::message(js_error_message("failed to fetch asset", error))
-                })?;
+        let window = web_sys::window()
+            .ok_or_else(|| RenderError::message("browser window is not available"))?;
+        let response_value = JsFuture::from(window.fetch_with_str(url))
+            .await
+            .map_err(|error| {
+                RenderError::message(js_error_message("failed to fetch asset", error))
+            })?;
         let response: web_sys::Response = response_value
             .dyn_into()
             .map_err(|_| RenderError::message("asset fetch did not return a Response"))?;
@@ -192,10 +191,9 @@ self.onmessage = async (event) => {
         parts.push(&wasm_bindgen::JsValue::from_str(worker_script));
         let options = web_sys::BlobPropertyBag::new();
         options.set_type("text/javascript");
-        let blob =
-            web_sys::Blob::new_with_str_sequence_and_options(&parts, &options).map_err(|error| {
-                RenderError::message(js_error_message("failed to create worker blob", error))
-            })?;
+        let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options).map_err(
+            |error| RenderError::message(js_error_message("failed to create worker blob", error)),
+        )?;
         let worker_url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|error| {
             RenderError::message(js_error_message("failed to create worker url", error))
         })?;
@@ -278,11 +276,14 @@ self.onmessage = async (event) => {
             RenderError::message(js_error_message("failed to revoke worker url", error))
         })?;
 
-        let payload = result
-            .map_err(|error| RenderError::message(js_error_message("asset worker failed", error)))?;
+        let payload = result.map_err(|error| {
+            RenderError::message(js_error_message("asset worker failed", error))
+        })?;
         let assets_value =
             js_sys::Reflect::get(&payload, &wasm_bindgen::JsValue::from_str("assets")).map_err(
-                |error| RenderError::message(js_error_message("worker payload missing assets", error)),
+                |error| {
+                    RenderError::message(js_error_message("worker payload missing assets", error))
+                },
             )?;
         let assets = js_sys::Array::from(&assets_value);
         let mut loaded_assets = Vec::with_capacity(assets.length() as usize);
@@ -294,8 +295,8 @@ self.onmessage = async (event) => {
                 .unwrap_or_else(|| "runtime asset".to_owned());
             let buffer = js_sys::Reflect::get(&asset, &wasm_bindgen::JsValue::from_str("buffer"))
                 .map_err(|error| {
-                    RenderError::message(js_error_message("worker asset missing buffer", error))
-                })?;
+                RenderError::message(js_error_message("worker asset missing buffer", error))
+            })?;
             let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
             loaded_assets.push(AssetBytes { label, bytes });
         }
