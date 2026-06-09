@@ -11,14 +11,18 @@ path = "src/main.rs"
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["derive"] }
+gltf = { version = "1.4.1", default-features = false, features = [
+    "names",
+    "utils",
+] }
 image = { version = "0.25.9", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
+sib = { path = "../sib", features = ["render"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-sib = { git = "https://github.com/PooyaEimandar/sib", features = [
+sib = { path = "../sib", features = [
     "net-file-server",
     "net-h1-server",
     "render",
