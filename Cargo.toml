@@ -20,10 +20,10 @@ image = { version = "0.25.9", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-sib = { git = "https://github.com/yourusername/sib", features = ["render"] }
+sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-sib = { git = "https://github.com/yourusername/sib", features = [
+sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-file-server",
     "net-h1-server",
     "render",
