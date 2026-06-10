@@ -17,6 +17,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `textoverlay` | Renders glyph atlas text over a 3D scene using an overlay render pass, Unicode shaping, and RTL text. | ![Text overlay](screenshots/textoverlay.png) |
 | `textmesh` | Converts shaped LTR and RTL font outlines into extruded indexed mesh geometry with vertex colors and lighting. | ![3D text mesh](screenshots/textmesh.png) |
 | `gltf` | Loads an official glTF 2.0 textured box from URL, converts buffers and material data to render meshes, and samples its base color texture. | ![glTF textured box](screenshots/gltf.png) |
+| `pipelines` | Renders the original treasure glTF scene through Phong, toon, and wireframe render pipelines in separate viewports. | ![Multiple render pipelines](screenshots/pipelines.png) |
 
 ## Running
 

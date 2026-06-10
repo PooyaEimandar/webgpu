@@ -53,6 +53,11 @@ impl AssetLoader {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn fetch_url_bytes(&self, url: &str) -> RenderResult<Vec<u8>> {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return std::fs::read(url)
+                .map_err(|error| RenderError::message(format!("failed to read {url}: {error}")));
+        }
+
         let mut response = ureq::get(url).call().map_err(|error| {
             RenderError::message(format!("failed to fetch asset from {url}: {error}"))
         })?;
@@ -74,6 +79,12 @@ impl AssetLoader {
             let label = request.label.to_owned();
             let url = request.url.to_owned();
             handles.push(std::thread::spawn(move || -> Result<AssetBytes, String> {
+                if !url.starts_with("http://") && !url.starts_with("https://") {
+                    let bytes = std::fs::read(&url)
+                        .map_err(|error| format!("failed to read {label}: {error}"))?;
+                    return Ok(AssetBytes { label, bytes });
+                }
+
                 let mut response = ureq::get(&url)
                     .call()
                     .map_err(|error| format!("failed to fetch {label}: {error}"))?;

@@ -33,7 +33,7 @@ done
 
 OUT_DIR="${WEBGPU_WEB_ROOT:-target/web}"
 if [ -z "$EXAMPLES" ]; then
-  EXAMPLES=" triangle texture texturecubemap texturearray textoverlay textmesh gltf"
+  EXAMPLES=" triangle texture texturecubemap texturearray textoverlay textmesh gltf pipelines"
 fi
 
 mkdir -p "$OUT_DIR"
@@ -53,5 +53,9 @@ cp web/index.html "$OUT_DIR/index.html"
 if [ -d screenshots ]; then
   mkdir -p "$OUT_DIR/screenshots"
   cp screenshots/*.png "$OUT_DIR/screenshots/" 2>/dev/null || true
+fi
+if [ -d assets ]; then
+  mkdir -p "$OUT_DIR/assets"
+  cp -R assets/. "$OUT_DIR/assets/"
 fi
 touch "$OUT_DIR/.nojekyll"

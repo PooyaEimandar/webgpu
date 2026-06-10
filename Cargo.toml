@@ -10,6 +10,7 @@ name = "serve"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 gltf = { version = "1.4.1", default-features = false, features = [
     "names",
