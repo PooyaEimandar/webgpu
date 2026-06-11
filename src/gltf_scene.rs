@@ -5,9 +5,13 @@ use sib::render::{RenderError, RenderResult, glam, mesh, texture, wgpu};
 
 pub const BOX_TEXTURED_GLTF_URL: &str = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BoxTextured/glTF/BoxTextured.gltf";
 #[cfg(not(target_arch = "wasm32"))]
+pub const VENUS_GLTF_URL: &str = "assets/models/venus.gltf";
+#[cfg(target_arch = "wasm32")]
+pub const VENUS_GLTF_URL: &str = "../assets/models/venus.gltf";
+#[cfg(not(target_arch = "wasm32"))]
 pub const TREASURE_SMOOTH_GLTF_URL: &str = "assets/models/treasure_smooth.gltf";
 #[cfg(target_arch = "wasm32")]
-pub const TREASURE_SMOOTH_GLTF_URL: &str = "/assets/models/treasure_smooth.gltf";
+pub const TREASURE_SMOOTH_GLTF_URL: &str = "../assets/models/treasure_smooth.gltf";
 
 #[derive(Clone, Debug)]
 pub struct GltfScene {

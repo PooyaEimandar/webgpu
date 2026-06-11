@@ -3466,7 +3466,9 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "bytemuck",
+ "bytes",
  "gltf",
+ "http",
  "image",
  "js-sys",
  "sib",

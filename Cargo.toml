@@ -11,11 +11,13 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.1"
+bytes = "1.11.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 gltf = { version = "1.4.1", default-features = false, features = [
     "names",
     "utils",
 ] }
+http = "1.4.2"
 image = { version = "0.25.9", default-features = false, features = [
     "jpeg",
     "png",

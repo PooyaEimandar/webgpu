@@ -19,6 +19,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `gltf` | Loads an official glTF 2.0 textured box from URL, converts buffers and material data to render meshes, and samples its base color texture. | ![glTF textured box](screenshots/gltf.png) |
 | `pipelines` | Renders the original treasure glTF scene through Phong, toon, and wireframe render pipelines in separate viewports. | ![Multiple render pipelines](screenshots/pipelines.png) |
 | `gears` | Renders animated procedural toothed gears using indexed mesh buffers, per-gear uniform transforms, depth testing, and fragment shader lighting. | ![Animated procedural gears](screenshots/gears.png) |
+| `stencilbuffer` | Renders a toon-shaded Venus mesh, writes stencil during the first draw, then draws a normal-expanded outline where stencil differs. | ![Stencil buffer outline](screenshots/stencilbuffer.png) |
 
 ## Running
 
