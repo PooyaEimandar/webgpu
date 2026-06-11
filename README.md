@@ -18,6 +18,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `textmesh` | Converts shaped LTR and RTL font outlines into extruded indexed mesh geometry with vertex colors and lighting. | ![3D text mesh](screenshots/textmesh.png) |
 | `gltf` | Loads an official glTF 2.0 textured box from URL, converts buffers and material data to render meshes, and samples its base color texture. | ![glTF textured box](screenshots/gltf.png) |
 | `pipelines` | Renders the original treasure glTF scene through Phong, toon, and wireframe render pipelines in separate viewports. | ![Multiple render pipelines](screenshots/pipelines.png) |
+| `gears` | Renders animated procedural toothed gears using indexed mesh buffers, per-gear uniform transforms, depth testing, and fragment shader lighting. | ![Animated procedural gears](screenshots/gears.png) |
 
 ## Running
 
