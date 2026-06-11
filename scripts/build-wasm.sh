@@ -52,7 +52,8 @@ done
 cp web/index.html "$OUT_DIR/index.html"
 if [ -d screenshots ]; then
   mkdir -p "$OUT_DIR/screenshots"
-  cp screenshots/*.png "$OUT_DIR/screenshots/" 2>/dev/null || true
+  cp screenshots/*.webp "$OUT_DIR/screenshots/" 2>/dev/null || true
+  cp screenshots/*.jpg "$OUT_DIR/screenshots/" 2>/dev/null || true
 fi
 if [ -d assets ]; then
   mkdir -p "$OUT_DIR/assets"

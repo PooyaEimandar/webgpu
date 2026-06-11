@@ -122,6 +122,11 @@
       background: #000;
     }
 
+    .examples picture {
+      display: block;
+      background: #000;
+    }
+
     .content {
       padding: 16px;
     }
@@ -152,70 +157,100 @@
     <p>Rust WebGPU examples porting Sascha Willems' Vulkan samples with WASM and native support.</p>
     <div class="examples" aria-label="Examples">
       <a href="./triangle/">
-        <img src="./screenshots/triangle.png" alt="Colored indexed triangle screenshot" />
+        <picture>
+          <source srcset="./screenshots/triangle.webp" type="image/webp" />
+          <img src="./screenshots/triangle.jpg" alt="Colored indexed triangle screenshot" />
+        </picture>
         <span class="content">
           <strong>triangle</strong>
           <span>Colored indexed triangle with vertex and index buffers.</span>
         </span>
       </a>
       <a href="./texture/">
-        <img src="./screenshots/texture.png" alt="Textured indexed quad screenshot" />
+        <picture>
+          <source srcset="./screenshots/texture.webp" type="image/webp" />
+          <img src="./screenshots/texture.jpg" alt="Textured indexed quad screenshot" />
+        </picture>
         <span class="content">
           <strong>texture</strong>
           <span>Textured indexed quad with a runtime-loaded PNG texture and sampler.</span>
         </span>
       </a>
       <a href="./texturecubemap/">
-        <img src="./screenshots/texturecubemap.png" alt="Runtime-loaded cubemap reflection screenshot" />
+        <picture>
+          <source srcset="./screenshots/texturecubemap.webp" type="image/webp" />
+          <img src="./screenshots/texturecubemap.jpg" alt="Runtime-loaded cubemap reflection screenshot" />
+        </picture>
         <span class="content">
           <strong>texture cubemap</strong>
           <span>Skybox and reflective sphere from six runtime-loaded cubemap faces.</span>
         </span>
       </a>
       <a href="./texturearray/">
-        <img src="./screenshots/texturearray.png" alt="Runtime-built texture array screenshot" />
+        <picture>
+          <source srcset="./screenshots/texturearray.webp" type="image/webp" />
+          <img src="./screenshots/texturearray.jpg" alt="Runtime-built texture array screenshot" />
+        </picture>
         <span class="content">
           <strong>texture array</strong>
           <span>Seven stacked squares sampling separate layers from a runtime-built texture array.</span>
         </span>
       </a>
       <a href="./textoverlay/">
-        <img src="./screenshots/textoverlay.png" alt="Text overlay screenshot" />
+        <picture>
+          <source srcset="./screenshots/textoverlay.webp" type="image/webp" />
+          <img src="./screenshots/textoverlay.jpg" alt="Text overlay screenshot" />
+        </picture>
         <span class="content">
           <strong>text overlay</strong>
           <span>Glyph atlas text rendered over a 3D scene with Unicode shaping and RTL text.</span>
         </span>
       </a>
       <a href="./textmesh/">
-        <img src="./screenshots/textmesh.png" alt="3D text mesh screenshot" />
+        <picture>
+          <source srcset="./screenshots/textmesh.webp" type="image/webp" />
+          <img src="./screenshots/textmesh.jpg" alt="3D text mesh screenshot" />
+        </picture>
         <span class="content">
           <strong>text mesh</strong>
           <span>Shaped LTR and RTL font outlines converted into indexed 3D mesh geometry.</span>
         </span>
       </a>
       <a href="./gltf/">
-        <img src="./screenshots/gltf.png" alt="glTF textured box screenshot" />
+        <picture>
+          <source srcset="./screenshots/gltf.webp" type="image/webp" />
+          <img src="./screenshots/gltf.jpg" alt="glTF textured box screenshot" />
+        </picture>
         <span class="content">
           <strong>glTF</strong>
           <span>Official glTF 2.0 textured box loaded from URL and converted to mesh data.</span>
         </span>
       </a>
       <a href="./pipelines/">
-        <img src="./screenshots/pipelines.png" alt="Multiple render pipelines screenshot" />
+        <picture>
+          <source srcset="./screenshots/pipelines.webp" type="image/webp" />
+          <img src="./screenshots/pipelines.jpg" alt="Multiple render pipelines screenshot" />
+        </picture>
         <span class="content">
           <strong>pipelines</strong>
           <span>Original treasure glTF scene rendered through Phong, toon, and wireframe pipelines.</span>
         </span>
       </a>
       <a href="./gears/">
-        <img src="./screenshots/gears.png" alt="Animated procedural gears screenshot" />
+        <picture>
+          <source srcset="./screenshots/gears.webp" type="image/webp" />
+          <img src="./screenshots/gears.jpg" alt="Animated procedural gears screenshot" />
+        </picture>
         <span class="content">
           <strong>gears</strong>
           <span>Animated procedural toothed gears with per-gear transforms, depth, and lighting.</span>
         </span>
       </a>
       <a href="./stencilbuffer/">
-        <img src="./screenshots/stencilbuffer.png" alt="Stencil buffer outline screenshot" />
+        <picture>
+          <source srcset="./screenshots/stencilbuffer.webp" type="image/webp" />
+          <img src="./screenshots/stencilbuffer.jpg" alt="Stencil buffer outline screenshot" />
+        </picture>
         <span class="content">
           <strong>stencil buffer</strong>
           <span>Toon-shaded Venus mesh with a normal-expanded outline masked by stencil operations.</span>
