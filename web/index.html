@@ -4,7 +4,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>webgpu examples</title>
+  <title>Rust WebGPU Examples | Vulkan Samples in WASM</title>
+  <meta name="description"
+    content="Rust WebGPU and wgpu examples porting Sascha Willems' Vulkan samples with browser WASM and native rendering support." />
+  <meta name="author" content="Pooya Eimandar" />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#0b0c0f" />
+  <meta name="application-name" content="webgpu examples" />
+  <meta name="keywords"
+    content="Rust, WebGPU, wgpu, WASM, Vulkan examples, graphics programming, glTF, shader, rendering" />
+  <link rel="canonical" href="https://pooyaeimandar.github.io/webgpu/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="webgpu examples" />
+  <meta property="og:title" content="Rust WebGPU Examples" />
+  <meta property="og:description"
+    content="A Rust WebGPU gallery porting Vulkan rendering examples to browser WASM and native wgpu." />
+  <meta property="og:url" content="https://pooyaeimandar.github.io/webgpu/" />
+  <meta property="og:image" content="https://pooyaeimandar.github.io/webgpu/screenshots/gltfskinning.jpg" />
+  <meta property="og:image:alt" content="Animated glTF vertex skinning rendered with WebGPU" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Rust WebGPU Examples" />
+  <meta name="twitter:description"
+    content="Rust WebGPU and wgpu examples for WASM and native rendering, inspired by Sascha Willems' Vulkan samples." />
+  <meta name="twitter:image" content="https://pooyaeimandar.github.io/webgpu/screenshots/gltfskinning.jpg" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Rust WebGPU Examples",
+      "url": "https://pooyaeimandar.github.io/webgpu/",
+      "description": "Rust WebGPU and wgpu examples porting Sascha Willems' Vulkan samples with browser WASM and native rendering support.",
+      "author": {
+        "@type": "Person",
+        "name": "Pooya Eimandar",
+        "url": "https://github.com/PooyaEimandar"
+      },
+      "mainEntity": {
+        "@type": "ItemList",
+        "name": "WebGPU rendering examples",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "triangle", "url": "https://pooyaeimandar.github.io/webgpu/triangle/" },
+          { "@type": "ListItem", "position": 2, "name": "vertex attributes", "url": "https://pooyaeimandar.github.io/webgpu/vertexattributes/" },
+          { "@type": "ListItem", "position": 3, "name": "CPU particle system", "url": "https://pooyaeimandar.github.io/webgpu/particlesystem/" },
+          { "@type": "ListItem", "position": 4, "name": "texture", "url": "https://pooyaeimandar.github.io/webgpu/texture/" },
+          { "@type": "ListItem", "position": 5, "name": "texture cubemap", "url": "https://pooyaeimandar.github.io/webgpu/texturecubemap/" },
+          { "@type": "ListItem", "position": 6, "name": "texture array", "url": "https://pooyaeimandar.github.io/webgpu/texturearray/" },
+          { "@type": "ListItem", "position": 7, "name": "text overlay", "url": "https://pooyaeimandar.github.io/webgpu/textoverlay/" },
+          { "@type": "ListItem", "position": 8, "name": "text mesh", "url": "https://pooyaeimandar.github.io/webgpu/textmesh/" },
+          { "@type": "ListItem", "position": 9, "name": "glTF", "url": "https://pooyaeimandar.github.io/webgpu/gltf/" },
+          { "@type": "ListItem", "position": 10, "name": "glTF vertex skinning", "url": "https://pooyaeimandar.github.io/webgpu/gltfskinning/" },
+          { "@type": "ListItem", "position": 11, "name": "pipelines", "url": "https://pooyaeimandar.github.io/webgpu/pipelines/" },
+          { "@type": "ListItem", "position": 12, "name": "gears", "url": "https://pooyaeimandar.github.io/webgpu/gears/" },
+          { "@type": "ListItem", "position": 13, "name": "stencil buffer", "url": "https://pooyaeimandar.github.io/webgpu/stencilbuffer/" }
+        ]
+      }
+    }
+  </script>
   <style>
     :root {
       color-scheme: dark;
@@ -153,8 +208,8 @@
     <span>Source code</span>
   </a>
   <main>
-    <h1>webgpu</h1>
-    <p>Rust WebGPU examples porting Sascha Willems' Vulkan samples with WASM and native support.</p>
+    <h1>Rust WebGPU examples</h1>
+    <p>WASM and native wgpu ports of Sascha Willems' Vulkan rendering samples.</p>
     <div class="examples" aria-label="Examples">
       <a href="./triangle/">
         <picture>
