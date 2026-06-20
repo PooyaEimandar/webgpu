@@ -184,13 +184,15 @@ impl AssetLoader {
         let worker_script = r#"
 self.onmessage = async (event) => {
   try {
-    const assets = await Promise.all(event.data.urls.map(async ({ label, url }) => {
-      const response = await fetch(url);
+    const baseUrl = event.data.baseUrl;
+    const assets = [];
+    for (const { label, url } of event.data.urls) {
+      const response = await fetch(new URL(url, baseUrl).href);
       if (!response.ok) {
         throw new Error(`${label}: HTTP ${response.status}`);
       }
-      return { label, buffer: await response.arrayBuffer() };
-    }));
+      assets.push({ label, buffer: await response.arrayBuffer() });
+    }
     const transfers = assets.map((asset) => asset.buffer);
     self.postMessage({ ok: true, assets }, transfers);
   } catch (error) {
@@ -211,6 +213,7 @@ self.onmessage = async (event) => {
         let worker = web_sys::Worker::new(&worker_url).map_err(|error| {
             RenderError::message(js_error_message("failed to start asset worker", error))
         })?;
+        let page_url = current_page_url()?;
         let urls = js_sys::Array::new();
 
         for request in requests {
@@ -235,6 +238,14 @@ self.onmessage = async (event) => {
         }
 
         let message = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &message,
+            &wasm_bindgen::JsValue::from_str("baseUrl"),
+            &wasm_bindgen::JsValue::from_str(&page_url),
+        )
+        .map_err(|error| {
+            RenderError::message(js_error_message("failed to prepare worker base url", error))
+        })?;
         js_sys::Reflect::set(&message, &wasm_bindgen::JsValue::from_str("urls"), &urls).map_err(
             |error| {
                 RenderError::message(js_error_message("failed to prepare worker message", error))
@@ -352,4 +363,21 @@ self.onmessage = async (event) => {
 fn js_error_message(context: &str, error: wasm_bindgen::JsValue) -> String {
     let detail = error.as_string().unwrap_or_else(|| format!("{error:?}"));
     format!("{context}: {detail}")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_page_url() -> RenderResult<String> {
+    let location = js_sys::Reflect::get(
+        &js_sys::global(),
+        &wasm_bindgen::JsValue::from_str("location"),
+    )
+    .map_err(|error| {
+        RenderError::message(js_error_message("page location is unavailable", error))
+    })?;
+    let href = js_sys::Reflect::get(&location, &wasm_bindgen::JsValue::from_str("href")).map_err(
+        |error| RenderError::message(js_error_message("page url is unavailable", error)),
+    )?;
+
+    href.as_string()
+        .ok_or_else(|| RenderError::message("page url is not a string"))
 }
