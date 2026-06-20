@@ -11,13 +11,13 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.1"
-bytes = "1.11.1"
+bytes = "1.12.0"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 gltf = { version = "1.4.1", default-features = false, features = [
     "names",
     "utils",
 ] }
-http = "1.4.2"
+http = { version = "1.4.2" }
 image = { version = "0.25.9", default-features = false, features = [
     "jpeg",
     "png",
@@ -33,10 +33,10 @@ sib = { git = "https://github.com/PooyaEimandar/sib", features = [
 ureq = "3.3.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3.100"
-wasm-bindgen = "0.2.123"
-wasm-bindgen-futures = "0.4.73"
-web-sys = { version = "0.3.100", features = [
+js-sys = "0.3.102"
+wasm-bindgen = "0.2.125"
+wasm-bindgen-futures = "0.4.75"
+web-sys = { version = "0.3.102", features = [
     "Blob",
     "BlobPropertyBag",
     "console",
