@@ -340,10 +340,9 @@ impl Example for IndirectDrawExample {
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
 
-        let assets = self
-            .assets
-            .take()
-            .expect("indirect draw assets loaded before renderer initialization");
+        let assets = self.assets.take().ok_or_else(|| {
+            RenderError::message("indirect draw assets loaded before renderer initialization")
+        })?;
         self.draw_count = assets.plants.draws.len() as u32;
         self.object_count = self.draw_count * PLANT_INSTANCE_COUNT;
 
@@ -510,21 +509,21 @@ impl Example for IndirectDrawExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("indirect draw overlay initialized")
+            .ok_or_else(|| RenderError::message("indirect draw overlay initialized"))?
             .prepare(context)?;
 
         let pipelines = self
             .pipelines
             .as_ref()
-            .expect("indirect draw pipelines initialized");
+            .ok_or_else(|| RenderError::message("indirect draw pipelines initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("indirect draw bind group initialized");
+            .ok_or_else(|| RenderError::message("indirect draw bind group initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("indirect draw depth texture initialized");
+            .ok_or_else(|| RenderError::message("indirect draw depth texture initialized"))?;
 
         {
             let mut pass = render_pass::begin_color_depth(
@@ -542,13 +541,19 @@ impl Example for IndirectDrawExample {
             );
             pass.set_bind_group(0, bind_group, &[]);
 
-            let sky_mesh = self.sky_mesh.as_ref().expect("sky mesh initialized");
+            let sky_mesh = self
+                .sky_mesh
+                .as_ref()
+                .ok_or_else(|| RenderError::message("sky mesh initialized"))?;
             pass.set_pipeline(&pipelines.sky);
             pass.set_vertex_buffer(0, sky_mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(sky_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..sky_mesh.index_count, 0, 0..1);
 
-            let ground_mesh = self.ground_mesh.as_ref().expect("ground mesh initialized");
+            let ground_mesh = self
+                .ground_mesh
+                .as_ref()
+                .ok_or_else(|| RenderError::message("ground mesh initialized"))?;
             pass.set_pipeline(&pipelines.ground);
             pass.set_vertex_buffer(0, ground_mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(
@@ -557,15 +562,18 @@ impl Example for IndirectDrawExample {
             );
             pass.draw_indexed(0..ground_mesh.index_count, 0, 0..1);
 
-            let plant_mesh = self.plant_mesh.as_ref().expect("plant mesh initialized");
+            let plant_mesh = self
+                .plant_mesh
+                .as_ref()
+                .ok_or_else(|| RenderError::message("plant mesh initialized"))?;
             let instance_buffer = self
                 .instance_buffer
                 .as_ref()
-                .expect("instance buffer initialized");
+                .ok_or_else(|| RenderError::message("instance buffer initialized"))?;
             let indirect_buffer = self
                 .indirect_buffer
                 .as_ref()
-                .expect("indirect buffer initialized");
+                .ok_or_else(|| RenderError::message("indirect buffer initialized"))?;
             let instance_stride = std::mem::size_of::<InstanceData>() as wgpu::BufferAddress;
             let instance_group_stride = instance_stride * PLANT_INSTANCE_COUNT as u64;
             let indirect_stride =
@@ -588,13 +596,13 @@ impl Example for IndirectDrawExample {
                 render_pass::begin_color_load(encoder, Some("indirect draw overlay pass"), view);
             self.overlay
                 .as_ref()
-                .expect("indirect draw overlay initialized")
+                .ok_or_else(|| RenderError::message("indirect draw overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("indirect draw overlay initialized")
+            .ok_or_else(|| RenderError::message("indirect draw overlay initialized"))?
             .trim();
 
         Ok(())
@@ -1249,10 +1257,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_indirect_assets().await {
             Ok(assets) => {
                 if let Err(error) = sib::render::run(IndirectDrawExample::new(assets)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

@@ -434,31 +434,28 @@ impl Example for TextureCubemap {
         let skybox_pipeline = self
             .skybox_pipeline
             .as_ref()
-            .expect("texture cubemap skybox pipeline initialized");
+            .ok_or_else(|| RenderError::message("texture cubemap skybox pipeline initialized"))?;
         let reflect_pipeline = self
             .reflect_pipeline
             .as_ref()
-            .expect("texture cubemap reflect pipeline initialized");
+            .ok_or_else(|| RenderError::message("texture cubemap reflect pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("texture cubemap bind group initialized");
-        let skybox_vertex_buffer = self
-            .skybox_vertex_buffer
-            .as_ref()
-            .expect("texture cubemap skybox vertex buffer initialized");
-        let sphere_vertex_buffer = self
-            .sphere_vertex_buffer
-            .as_ref()
-            .expect("texture cubemap sphere vertex buffer initialized");
-        let sphere_index_buffer = self
-            .sphere_index_buffer
-            .as_ref()
-            .expect("texture cubemap sphere index buffer initialized");
+            .ok_or_else(|| RenderError::message("texture cubemap bind group initialized"))?;
+        let skybox_vertex_buffer = self.skybox_vertex_buffer.as_ref().ok_or_else(|| {
+            RenderError::message("texture cubemap skybox vertex buffer initialized")
+        })?;
+        let sphere_vertex_buffer = self.sphere_vertex_buffer.as_ref().ok_or_else(|| {
+            RenderError::message("texture cubemap sphere vertex buffer initialized")
+        })?;
+        let sphere_index_buffer = self.sphere_index_buffer.as_ref().ok_or_else(|| {
+            RenderError::message("texture cubemap sphere index buffer initialized")
+        })?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("texture cubemap depth texture initialized");
+            .ok_or_else(|| RenderError::message("texture cubemap depth texture initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,
@@ -543,10 +540,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_cubemap_images().await {
             Ok(cubemap_images) => {
                 if let Err(error) = sib::render::run(TextureCubemap::new(cubemap_images)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

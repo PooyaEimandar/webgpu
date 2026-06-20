@@ -226,23 +226,23 @@ impl Example for TextureExample {
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("texture pipeline initialized");
+            .ok_or_else(|| RenderError::message("texture pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("texture bind group initialized");
+            .ok_or_else(|| RenderError::message("texture bind group initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("texture vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("texture vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("texture index buffer initialized");
+            .ok_or_else(|| RenderError::message("texture index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("texture depth texture initialized");
+            .ok_or_else(|| RenderError::message("texture depth texture initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,
@@ -306,10 +306,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_texture_image().await {
             Ok(texture_image) => {
                 if let Err(error) = sib::render::run(TextureExample::new(texture_image)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

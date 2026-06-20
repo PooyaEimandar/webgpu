@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderResult, buffer, render_pass, shader, texture,
-    wgpu, winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, buffer, render_pass,
+    shader, texture, wgpu, winit,
 };
 
 #[repr(C)]
@@ -135,19 +135,19 @@ impl Example for Triangle {
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("triangle pipeline initialized");
+            .ok_or_else(|| RenderError::message("triangle pipeline initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("triangle vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("triangle vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("triangle index buffer initialized");
+            .ok_or_else(|| RenderError::message("triangle index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("triangle depth texture initialized");
+            .ok_or_else(|| RenderError::message("triangle depth texture initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,

@@ -482,10 +482,9 @@ impl Example for GltfSkinningExample {
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
 
-        let scene = self
-            .scene
-            .take()
-            .expect("glTF skinning scene loaded before renderer initialization");
+        let scene = self.scene.take().ok_or_else(|| {
+            RenderError::message("glTF skinning scene loaded before renderer initialization")
+        })?;
         self.material = scene.material;
         self.bounds = scene.mesh.bounds;
 
@@ -612,25 +611,25 @@ impl Example for GltfSkinningExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("glTF skinning overlay initialized")
+            .ok_or_else(|| RenderError::message("glTF skinning overlay initialized"))?
             .prepare(context)?;
 
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("glTF skinning pipeline initialized");
+            .ok_or_else(|| RenderError::message("glTF skinning pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("glTF skinning bind group initialized");
+            .ok_or_else(|| RenderError::message("glTF skinning bind group initialized"))?;
         let gpu_mesh = self
             .gpu_mesh
             .as_ref()
-            .expect("glTF skinning mesh initialized");
+            .ok_or_else(|| RenderError::message("glTF skinning mesh initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("glTF skinning depth initialized");
+            .ok_or_else(|| RenderError::message("glTF skinning depth initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,
@@ -661,13 +660,13 @@ impl Example for GltfSkinningExample {
             );
             self.overlay
                 .as_ref()
-                .expect("glTF skinning overlay initialized")
+                .ok_or_else(|| RenderError::message("glTF skinning overlay initialized"))?
                 .render(&mut render_pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("glTF skinning overlay initialized")
+            .ok_or_else(|| RenderError::message("glTF skinning overlay initialized"))?
             .trim();
 
         Ok(())
@@ -759,6 +758,11 @@ fn skinned_scene_from_gltf(
         .map(|animation| animation_from_gltf(animation, buffers))
         .transpose()?;
 
+    let base_color_image = match base_color_image {
+        Some(image) => image,
+        None => white_image()?,
+    };
+
     Ok(SkinnedGltfScene {
         mesh,
         nodes,
@@ -769,7 +773,7 @@ fn skinned_scene_from_gltf(
         skins,
         animation,
         material,
-        base_color_image: base_color_image.unwrap_or_else(white_image),
+        base_color_image,
         sampler_options,
     })
 }
@@ -1386,9 +1390,8 @@ fn resolve_url(base_url: &str, uri: &str) -> String {
     }
 }
 
-fn white_image() -> texture::ImageRgba8 {
+fn white_image() -> RenderResult<texture::ImageRgba8> {
     texture::ImageRgba8::new(1, 1, vec![255, 255, 255, 255])
-        .expect("1x1 white image should be valid")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1413,10 +1416,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_skinned_gltf_scene(CESIUM_MAN_GLTF_URL).await {
             Ok(scene) => {
                 if let Err(error) = sib::render::run(GltfSkinningExample::new(scene)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

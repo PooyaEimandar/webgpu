@@ -313,23 +313,23 @@ impl Example for TextureArrayExample {
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("texture array pipeline initialized");
+            .ok_or_else(|| RenderError::message("texture array pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("texture array bind group initialized");
+            .ok_or_else(|| RenderError::message("texture array bind group initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("texture array vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("texture array vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("texture array index buffer initialized");
+            .ok_or_else(|| RenderError::message("texture array index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("texture array depth texture initialized");
+            .ok_or_else(|| RenderError::message("texture array depth texture initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,
@@ -447,10 +447,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_texture_array_images().await {
             Ok(images) => {
                 if let Err(error) = sib::render::run(TextureArrayExample::new(images)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

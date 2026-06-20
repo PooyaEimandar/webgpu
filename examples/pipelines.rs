@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, mesh, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, TREASURE_SMOOTH_GLTF_URL,
@@ -234,10 +234,9 @@ impl Example for PipelinesExample {
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
 
-        let scene = self
-            .scene
-            .take()
-            .expect("glTF scene loaded before renderer initialization");
+        let scene = self.scene.take().ok_or_else(|| {
+            RenderError::message("glTF scene loaded before renderer initialization")
+        })?;
         self.bounds = scene.mesh.bounds;
 
         let shader = shader::wgsl_module(
@@ -347,23 +346,29 @@ impl Example for PipelinesExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("pipelines overlay initialized")
+            .ok_or_else(|| RenderError::message("pipelines overlay initialized"))?
             .prepare(context)?;
 
-        let pipelines = self.pipelines.as_ref().expect("pipelines initialized");
+        let pipelines = self
+            .pipelines
+            .as_ref()
+            .ok_or_else(|| RenderError::message("pipelines initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("pipelines bind group initialized");
-        let gpu_mesh = self.gpu_mesh.as_ref().expect("pipelines mesh initialized");
+            .ok_or_else(|| RenderError::message("pipelines bind group initialized"))?;
+        let gpu_mesh = self
+            .gpu_mesh
+            .as_ref()
+            .ok_or_else(|| RenderError::message("pipelines mesh initialized"))?;
         let wire_index_buffer = self
             .wire_index_buffer
             .as_ref()
-            .expect("pipelines wire index buffer initialized");
+            .ok_or_else(|| RenderError::message("pipelines wire index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("pipelines depth initialized");
+            .ok_or_else(|| RenderError::message("pipelines depth initialized"))?;
         let panels = panel_rects(context);
 
         let mut pass = render_pass::begin_color_depth(
@@ -411,13 +416,13 @@ impl Example for PipelinesExample {
                 render_pass::begin_color_load(encoder, Some("pipelines overlay pass"), view);
             self.overlay
                 .as_ref()
-                .expect("pipelines overlay initialized")
+                .ok_or_else(|| RenderError::message("pipelines overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("pipelines overlay initialized")
+            .ok_or_else(|| RenderError::message("pipelines overlay initialized"))?
             .trim();
 
         Ok(())
@@ -577,10 +582,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_colored_gltf_scene(TREASURE_SMOOTH_GLTF_URL).await {
             Ok(scene) => {
                 if let Err(error) = sib::render::run(PipelinesExample::new(scene)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

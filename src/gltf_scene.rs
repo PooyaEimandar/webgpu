@@ -354,7 +354,10 @@ fn scene_from_gltf(
         )?;
     }
 
-    let base_color_image = base_color_image.unwrap_or_else(white_image);
+    let base_color_image = match base_color_image {
+        Some(image) => image,
+        None => white_image()?,
+    };
     let mesh = mesh::Mesh::new(vertices, indices)?;
 
     Ok(GltfScene {
@@ -700,7 +703,6 @@ fn resolve_url(base_url: &str, uri: &str) -> String {
     }
 }
 
-fn white_image() -> texture::ImageRgba8 {
+fn white_image() -> RenderResult<texture::ImageRgba8> {
     texture::ImageRgba8::new(1, 1, vec![255, 255, 255, 255])
-        .expect("1x1 white image should be valid")
 }

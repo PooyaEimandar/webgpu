@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -374,25 +374,25 @@ impl Example for InstancingExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("instancing overlay initialized")
+            .ok_or_else(|| RenderError::message("instancing overlay initialized"))?
             .prepare(context)?;
 
         let pipelines = self
             .pipelines
             .as_ref()
-            .expect("instancing pipelines initialized");
+            .ok_or_else(|| RenderError::message("instancing pipelines initialized"))?;
         let planet_bind_group = self
             .planet_bind_group
             .as_ref()
-            .expect("instancing planet bind group initialized");
+            .ok_or_else(|| RenderError::message("instancing planet bind group initialized"))?;
         let rocks_bind_group = self
             .rocks_bind_group
             .as_ref()
-            .expect("instancing rocks bind group initialized");
+            .ok_or_else(|| RenderError::message("instancing rocks bind group initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("instancing depth texture initialized");
+            .ok_or_else(|| RenderError::message("instancing depth texture initialized"))?;
 
         {
             let mut pass = render_pass::begin_color_depth(
@@ -419,20 +419,24 @@ impl Example for InstancingExample {
                 0,
                 self.rock_vertex_buffer
                     .as_ref()
-                    .expect("instancing rock vertex buffer initialized")
+                    .ok_or_else(|| {
+                        RenderError::message("instancing rock vertex buffer initialized")
+                    })?
                     .slice(..),
             );
             pass.set_vertex_buffer(
                 1,
                 self.instance_buffer
                     .as_ref()
-                    .expect("instancing instance buffer initialized")
+                    .ok_or_else(|| RenderError::message("instancing instance buffer initialized"))?
                     .slice(..),
             );
             pass.set_index_buffer(
                 self.rock_index_buffer
                     .as_ref()
-                    .expect("instancing rock index buffer initialized")
+                    .ok_or_else(|| {
+                        RenderError::message("instancing rock index buffer initialized")
+                    })?
                     .slice(..),
                 wgpu::IndexFormat::Uint32,
             );
@@ -444,13 +448,13 @@ impl Example for InstancingExample {
                 render_pass::begin_color_load(encoder, Some("instancing overlay pass"), view);
             self.overlay
                 .as_ref()
-                .expect("instancing overlay initialized")
+                .ok_or_else(|| RenderError::message("instancing overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("instancing overlay initialized")
+            .ok_or_else(|| RenderError::message("instancing overlay initialized"))?
             .trim();
 
         Ok(())

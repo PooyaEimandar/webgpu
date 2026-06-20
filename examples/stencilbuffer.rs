@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, mesh, shader, text, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, mesh, shader, text, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, VENUS_GLTF_URL, load_colored_gltf_scene,
@@ -206,10 +206,9 @@ impl Example for StencilBufferExample {
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
 
-        let scene = self
-            .scene
-            .take()
-            .expect("glTF scene loaded before renderer initialization");
+        let scene = self.scene.take().ok_or_else(|| {
+            RenderError::message("glTF scene loaded before renderer initialization")
+        })?;
         self.bounds = scene.mesh.bounds;
 
         let shader = shader::wgsl_module(
@@ -301,25 +300,24 @@ impl Example for StencilBufferExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("stencilbuffer overlay initialized")
+            .ok_or_else(|| RenderError::message("stencilbuffer overlay initialized"))?
             .prepare(context)?;
 
         let pipelines = self
             .pipelines
             .as_ref()
-            .expect("stencilbuffer pipelines initialized");
+            .ok_or_else(|| RenderError::message("stencilbuffer pipelines initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("stencilbuffer bind group initialized");
+            .ok_or_else(|| RenderError::message("stencilbuffer bind group initialized"))?;
         let gpu_mesh = self
             .gpu_mesh
             .as_ref()
-            .expect("stencilbuffer mesh initialized");
-        let depth_stencil_target = self
-            .depth_stencil_target
-            .as_ref()
-            .expect("stencilbuffer depth stencil target initialized");
+            .ok_or_else(|| RenderError::message("stencilbuffer mesh initialized"))?;
+        let depth_stencil_target = self.depth_stencil_target.as_ref().ok_or_else(|| {
+            RenderError::message("stencilbuffer depth stencil target initialized")
+        })?;
 
         let mut pass = begin_color_depth_stencil(
             encoder,
@@ -354,13 +352,13 @@ impl Example for StencilBufferExample {
             );
             self.overlay
                 .as_ref()
-                .expect("stencilbuffer overlay initialized")
+                .ok_or_else(|| RenderError::message("stencilbuffer overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("stencilbuffer overlay initialized")
+            .ok_or_else(|| RenderError::message("stencilbuffer overlay initialized"))?
             .trim();
 
         Ok(())
@@ -501,10 +499,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_colored_gltf_scene(VENUS_GLTF_URL).await {
             Ok(scene) => {
                 if let Err(error) = sib::render::run(StencilBufferExample::new(scene)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

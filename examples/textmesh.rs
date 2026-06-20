@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderResult, bind_group, buffer, camera, glam,
-    render_pass, shader, text_mesh, texture, wgpu, winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, camera,
+    glam, render_pass, shader, text_mesh, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -208,23 +208,23 @@ impl Example for TextMeshExample {
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("text mesh pipeline initialized");
+            .ok_or_else(|| RenderError::message("text mesh pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("text mesh bind group initialized");
+            .ok_or_else(|| RenderError::message("text mesh bind group initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("text mesh vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("text mesh vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("text mesh index buffer initialized");
+            .ok_or_else(|| RenderError::message("text mesh index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("text mesh depth texture initialized");
+            .ok_or_else(|| RenderError::message("text mesh depth texture initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,

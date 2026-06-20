@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, mesh, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{BOX_TEXTURED_GLTF_URL, GltfMaterial, GltfScene, load_gltf_scene};
 
@@ -158,10 +158,9 @@ impl Example for GltfExample {
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
 
-        let scene = self
-            .scene
-            .take()
-            .expect("glTF scene loaded before renderer initialization");
+        let scene = self.scene.take().ok_or_else(|| {
+            RenderError::message("glTF scene loaded before renderer initialization")
+        })?;
         self.material = scene.material;
         self.bounds = scene.mesh.bounds;
 
@@ -287,16 +286,25 @@ impl Example for GltfExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("glTF overlay initialized")
+            .ok_or_else(|| RenderError::message("glTF overlay initialized"))?
             .prepare(context)?;
 
-        let pipeline = self.pipeline.as_ref().expect("glTF pipeline initialized");
+        let pipeline = self
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| RenderError::message("glTF pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("glTF bind group initialized");
-        let gpu_mesh = self.gpu_mesh.as_ref().expect("glTF mesh initialized");
-        let depth_texture = self.depth_texture.as_ref().expect("glTF depth initialized");
+            .ok_or_else(|| RenderError::message("glTF bind group initialized"))?;
+        let gpu_mesh = self
+            .gpu_mesh
+            .as_ref()
+            .ok_or_else(|| RenderError::message("glTF mesh initialized"))?;
+        let depth_texture = self
+            .depth_texture
+            .as_ref()
+            .ok_or_else(|| RenderError::message("glTF depth initialized"))?;
 
         let mut render_pass = render_pass::begin_color_depth(
             encoder,
@@ -324,13 +332,13 @@ impl Example for GltfExample {
                 render_pass::begin_color_load(encoder, Some("glTF overlay render pass"), view);
             self.overlay
                 .as_ref()
-                .expect("glTF overlay initialized")
+                .ok_or_else(|| RenderError::message("glTF overlay initialized"))?
                 .render(&mut render_pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("glTF overlay initialized")
+            .ok_or_else(|| RenderError::message("glTF overlay initialized"))?
             .trim();
 
         Ok(())
@@ -357,10 +365,10 @@ pub fn start() -> Result<(), wasm_bindgen::JsValue> {
         match load_gltf_scene(BOX_TEXTURED_GLTF_URL).await {
             Ok(scene) => {
                 if let Err(error) = sib::render::run(GltfExample::new(scene)) {
-                    panic!("{error}");
+                    webgpu::log_error(error);
                 }
             }
-            Err(error) => panic!("{error}"),
+            Err(error) => webgpu::log_error(error),
         }
     });
     Ok(())

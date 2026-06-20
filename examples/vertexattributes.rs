@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, buffer, camera, glam,
-    render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
+    glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -417,25 +417,25 @@ impl Example for VertexAttributesExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("vertex attributes overlay initialized")
+            .ok_or_else(|| RenderError::message("vertex attributes overlay initialized"))?
             .prepare(context)?;
 
         let pipelines = self
             .pipelines
             .as_ref()
-            .expect("vertex attributes pipelines initialized");
+            .ok_or_else(|| RenderError::message("vertex attributes pipelines initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("vertex attributes bind group initialized");
+            .ok_or_else(|| RenderError::message("vertex attributes bind group initialized"))?;
         let gpu_mesh = self
             .gpu_mesh
             .as_ref()
-            .expect("vertex attributes mesh initialized");
+            .ok_or_else(|| RenderError::message("vertex attributes mesh initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("vertex attributes depth initialized");
+            .ok_or_else(|| RenderError::message("vertex attributes depth initialized"))?;
 
         {
             let mut render_pass = render_pass::begin_color_depth(
@@ -479,13 +479,13 @@ impl Example for VertexAttributesExample {
             );
             self.overlay
                 .as_ref()
-                .expect("vertex attributes overlay initialized")
+                .ok_or_else(|| RenderError::message("vertex attributes overlay initialized"))?
                 .render(&mut render_pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("vertex attributes overlay initialized")
+            .ok_or_else(|| RenderError::message("vertex attributes overlay initialized"))?
             .trim();
 
         Ok(())
@@ -755,7 +755,7 @@ fn main() {}
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
     if let Err(error) = sib::render::run(VertexAttributesExample::default()) {
-        panic!("{error}");
+        webgpu::log_error(error);
     }
     Ok(())
 }

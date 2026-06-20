@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -315,29 +315,29 @@ impl Example for TextOverlayExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("text overlay initialized")
+            .ok_or_else(|| RenderError::message("text overlay initialized"))?
             .prepare(context)?;
 
         let pipeline = self
             .pipeline
             .as_ref()
-            .expect("text overlay scene pipeline initialized");
+            .ok_or_else(|| RenderError::message("text overlay scene pipeline initialized"))?;
         let bind_group = self
             .bind_group
             .as_ref()
-            .expect("text overlay bind group initialized");
+            .ok_or_else(|| RenderError::message("text overlay bind group initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("text overlay vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("text overlay vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("text overlay index buffer initialized");
+            .ok_or_else(|| RenderError::message("text overlay index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("text overlay depth texture initialized");
+            .ok_or_else(|| RenderError::message("text overlay depth texture initialized"))?;
 
         {
             let mut render_pass = render_pass::begin_color_depth(
@@ -365,13 +365,13 @@ impl Example for TextOverlayExample {
                 render_pass::begin_color_load(encoder, Some("text overlay render pass"), view);
             self.overlay
                 .as_ref()
-                .expect("text overlay initialized")
+                .ok_or_else(|| RenderError::message("text overlay initialized"))?
                 .render(&mut render_pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("text overlay initialized")
+            .ok_or_else(|| RenderError::message("text overlay initialized"))?
             .trim();
 
         Ok(())

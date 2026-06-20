@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
+    buffer, camera, glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -288,6 +288,10 @@ impl Example for GearsExample {
         let mut indices = Vec::new();
         let aspect_ratio = context.surface_config.width.max(1) as f32
             / context.surface_config.height.max(1) as f32;
+        let bind_group_layout = self
+            .bind_group_layout
+            .as_ref()
+            .ok_or_else(|| RenderError::message("gears bind group layout initialized"))?;
 
         self.gears = specs
             .into_iter()
@@ -303,9 +307,7 @@ impl Example for GearsExample {
                 let bind_group = bind_group::uniform_bind_group(
                     &context.device,
                     Some("gear bind group"),
-                    self.bind_group_layout
-                        .as_ref()
-                        .expect("gears bind group layout initialized"),
+                    bind_group_layout,
                     &uniform_buffer,
                 );
 
@@ -370,22 +372,25 @@ impl Example for GearsExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("gears overlay initialized")
+            .ok_or_else(|| RenderError::message("gears overlay initialized"))?
             .prepare(context)?;
 
-        let pipeline = self.pipeline.as_ref().expect("gears pipeline initialized");
+        let pipeline = self
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| RenderError::message("gears pipeline initialized"))?;
         let vertex_buffer = self
             .vertex_buffer
             .as_ref()
-            .expect("gears vertex buffer initialized");
+            .ok_or_else(|| RenderError::message("gears vertex buffer initialized"))?;
         let index_buffer = self
             .index_buffer
             .as_ref()
-            .expect("gears index buffer initialized");
+            .ok_or_else(|| RenderError::message("gears index buffer initialized"))?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("gears depth initialized");
+            .ok_or_else(|| RenderError::message("gears depth initialized"))?;
 
         {
             let mut pass = render_pass::begin_color_depth(
@@ -419,13 +424,13 @@ impl Example for GearsExample {
             let mut pass = render_pass::begin_color_load(encoder, Some("gears overlay pass"), view);
             self.overlay
                 .as_ref()
-                .expect("gears overlay initialized")
+                .ok_or_else(|| RenderError::message("gears overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("gears overlay initialized")
+            .ok_or_else(|| RenderError::message("gears overlay initialized"))?
             .trim();
 
         Ok(())

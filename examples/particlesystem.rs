@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderResult, buffer, camera, glam,
-    render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
+    glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -554,25 +554,23 @@ impl Example for ParticleSystemExample {
     ) -> RenderResult<()> {
         self.overlay
             .as_mut()
-            .expect("particle system overlay initialized")
+            .ok_or_else(|| RenderError::message("particle system overlay initialized"))?
             .prepare(context)?;
 
         let pipelines = self
             .pipelines
             .as_ref()
-            .expect("particle system pipelines initialized");
-        let environment_bind_group = self
-            .environment_bind_group
-            .as_ref()
-            .expect("particle system environment bind group initialized");
-        let particle_bind_group = self
-            .particle_bind_group
-            .as_ref()
-            .expect("particle system particle bind group initialized");
+            .ok_or_else(|| RenderError::message("particle system pipelines initialized"))?;
+        let environment_bind_group = self.environment_bind_group.as_ref().ok_or_else(|| {
+            RenderError::message("particle system environment bind group initialized")
+        })?;
+        let particle_bind_group = self.particle_bind_group.as_ref().ok_or_else(|| {
+            RenderError::message("particle system particle bind group initialized")
+        })?;
         let depth_texture = self
             .depth_texture
             .as_ref()
-            .expect("particle system depth initialized");
+            .ok_or_else(|| RenderError::message("particle system depth initialized"))?;
 
         {
             let mut pass = render_pass::begin_color_depth(
@@ -595,13 +593,19 @@ impl Example for ParticleSystemExample {
                 0,
                 self.environment_vertex_buffer
                     .as_ref()
-                    .expect("particle system environment vertex buffer initialized")
+                    .ok_or_else(|| {
+                        RenderError::message(
+                            "particle system environment vertex buffer initialized",
+                        )
+                    })?
                     .slice(..),
             );
             pass.set_index_buffer(
                 self.environment_index_buffer
                     .as_ref()
-                    .expect("particle system environment index buffer initialized")
+                    .ok_or_else(|| {
+                        RenderError::message("particle system environment index buffer initialized")
+                    })?
                     .slice(..),
                 wgpu::IndexFormat::Uint32,
             );
@@ -613,14 +617,16 @@ impl Example for ParticleSystemExample {
                 0,
                 self.particle_quad_buffer
                     .as_ref()
-                    .expect("particle system quad buffer initialized")
+                    .ok_or_else(|| RenderError::message("particle system quad buffer initialized"))?
                     .slice(..),
             );
             pass.set_vertex_buffer(
                 1,
                 self.particle_instance_buffer
                     .as_ref()
-                    .expect("particle system instance buffer initialized")
+                    .ok_or_else(|| {
+                        RenderError::message("particle system instance buffer initialized")
+                    })?
                     .slice(..),
             );
             pass.draw(
@@ -634,13 +640,13 @@ impl Example for ParticleSystemExample {
                 render_pass::begin_color_load(encoder, Some("particle system overlay pass"), view);
             self.overlay
                 .as_ref()
-                .expect("particle system overlay initialized")
+                .ok_or_else(|| RenderError::message("particle system overlay initialized"))?
                 .render(&mut pass)?;
         }
 
         self.overlay
             .as_mut()
-            .expect("particle system overlay initialized")
+            .ok_or_else(|| RenderError::message("particle system overlay initialized"))?
             .trim();
 
         Ok(())
@@ -1100,7 +1106,7 @@ fn main() {}
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
     if let Err(error) = sib::render::run(ParticleSystemExample::default()) {
-        panic!("{error}");
+        webgpu::log_error(error);
     }
     Ok(())
 }
