@@ -30,42 +30,77 @@ struct EnvironmentVertexInput {
 struct EnvironmentVertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
-  @location(1) world_position: vec3<f32>,
-  @location(2) normal: vec3<f32>,
-  @location(3) tangent: vec4<f32>,
+  @location(1) light_vec: vec3<f32>,
+  @location(2) light_vec_b: vec3<f32>,
+  @location(3) view_vec: vec3<f32>,
 };
+
+fn safe_normalize(value: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+  let length_squared = dot(value, value);
+  if (length_squared > 0.00000001) {
+    return value * inverseSqrt(length_squared);
+  }
+  return fallback;
+}
 
 @vertex
 fn vs_environment(input: EnvironmentVertexInput) -> EnvironmentVertexOutput {
-  let world_position = uniforms.matrix1 * vec4<f32>(input.position, 1.0);
+  let vertex_position = uniforms.matrix1 * vec4<f32>(input.position, 1.0);
+
+  let object_normal = safe_normalize(input.normal, vec3<f32>(0.0, 1.0, 0.0));
+  let object_tangent = safe_normalize(input.tangent.xyz, vec3<f32>(1.0, 0.0, 0.0));
+  let object_bitangent = safe_normalize(
+    cross(object_normal, object_tangent) * input.tangent.w,
+    vec3<f32>(0.0, 0.0, 1.0),
+  );
+
+  let tangent = safe_normalize((uniforms.matrix2 * vec4<f32>(object_tangent, 0.0)).xyz, object_tangent);
+  let bitangent = safe_normalize((uniforms.matrix2 * vec4<f32>(object_bitangent, 0.0)).xyz, object_bitangent);
+  let normal = safe_normalize((uniforms.matrix2 * vec4<f32>(object_normal, 0.0)).xyz, object_normal);
+
+  let light_vector = uniforms.vector0.xyz - vertex_position.xyz;
+  let object_light_vector = uniforms.vector0.xyz - input.position;
 
   var output: EnvironmentVertexOutput;
-  output.position = uniforms.matrix0 * world_position;
+  output.position = uniforms.matrix0 * vertex_position;
   output.uv = input.uv;
-  output.world_position = world_position.xyz;
-  output.normal = normalize((uniforms.matrix2 * vec4<f32>(input.normal, 0.0)).xyz);
-  output.tangent = vec4<f32>(
-    normalize((uniforms.matrix2 * vec4<f32>(input.tangent.xyz, 0.0)).xyz),
-    input.tangent.w,
+  output.light_vec = vec3<f32>(
+    dot(light_vector, tangent),
+    dot(light_vector, bitangent),
+    dot(light_vector, normal),
+  );
+  output.light_vec_b = vec3<f32>(
+    dot(object_light_vector, object_tangent),
+    dot(object_light_vector, object_bitangent),
+    dot(object_light_vector, object_normal),
+  );
+  output.view_vec = vec3<f32>(
+    dot(input.position, object_tangent),
+    dot(input.position, object_bitangent),
+    dot(input.position, object_normal),
   );
   return output;
 }
 
 @fragment
 fn fs_environment(input: EnvironmentVertexOutput) -> @location(0) vec4<f32> {
-  let base_color = textureSample(texture_a, sampler_a, input.uv).rgb;
-  let normal_sample = textureSample(texture_b, sampler_b, input.uv).xyz * 2.0 - vec3<f32>(1.0);
-  let normal = normalize(input.normal);
-  let tangent = normalize(input.tangent.xyz);
-  let bitangent = normalize(cross(normal, tangent) * input.tangent.w);
-  let mapped_normal = normalize(mat3x3<f32>(tangent, bitangent, normal) * normal_sample);
-  let light_vec = uniforms.vector0.xyz - input.world_position;
-  let distance_sqr = max(dot(light_vec, light_vec), 0.0001);
-  let light_dir = light_vec * inverseSqrt(distance_sqr);
-  let attenuation = max(clamp(1.0 - sqrt(distance_sqr) / 45.0, 0.0, 1.0), 0.25);
-  let diffuse = max(dot(mapped_normal, light_dir), 0.0);
-  let warm_specular = vec3<f32>(0.85, 0.5, 0.0) * pow(max(dot(reflect(-light_dir, mapped_normal), vec3<f32>(0.0, 0.0, -1.0)), 0.0), 4.0);
-  let color = (base_color * attenuation + (diffuse * base_color + 0.5 * warm_specular)) * attenuation;
+  let light_radius = 45.0;
+  let inv_radius = 1.0 / light_radius;
+  let specular_color = vec3<f32>(0.85, 0.5, 0.0);
+  let rgb = textureSample(texture_a, sampler_a, input.uv).rgb;
+  let normal = safe_normalize(
+    (textureSample(texture_b, sampler_b, input.uv).rgb - vec3<f32>(0.5)) * 2.0,
+    vec3<f32>(0.0, 0.0, 1.0),
+  );
+  let dist_sqr = max(dot(input.light_vec_b, input.light_vec_b), 0.0001);
+  let l_vec = input.light_vec_b * inverseSqrt(dist_sqr);
+  let atten = clamp(1.0 - inv_radius * sqrt(dist_sqr), 0.0, 1.0);
+  let diffuse = clamp(dot(l_vec, normal), 0.0, 1.0);
+  let light = safe_normalize(-input.light_vec, vec3<f32>(0.0, 0.0, 1.0));
+  let view = safe_normalize(input.view_vec, vec3<f32>(0.0, 0.0, 1.0));
+  let reflect_dir = reflect(-light, normal);
+  let specular = pow(max(dot(view, reflect_dir), 0.0), 4.0);
+  let color = (rgb * atten + (diffuse * rgb + 0.5 * specular * specular_color)) * atten;
   return vec4<f32>(color, 1.0);
 }
 
@@ -92,9 +127,8 @@ struct ParticleVertexOutput {
 @vertex
 fn vs_particle(input: ParticleVertexInput) -> ParticleVertexOutput {
   let center = uniforms.matrix1 * vec4<f32>(input.position.xyz, 1.0);
-  let size = uniforms.vector0.x * input.size;
-  let offset = input.corner * size;
-  let view_position = center + vec4<f32>(offset.x, offset.y, 0.0, 0.0);
+  let billboard_size = max(uniforms.vector0.x, 0.001) * input.size;
+  let view_position = center + vec4<f32>(input.corner * billboard_size, 0.0, 0.0);
 
   var output: ParticleVertexOutput;
   output.position = uniforms.matrix0 * view_position;
@@ -117,12 +151,23 @@ fn fs_particle(input: ParticleVertexOutput) -> @location(0) vec4<f32> {
     rot_cos * centered_uv.x + rot_sin * centered_uv.y,
     rot_cos * centered_uv.y - rot_sin * centered_uv.x,
   ) + rot_center;
+  let inside_border = select(
+    0.0,
+    1.0,
+    rotated_uv.x >= 0.0 && rotated_uv.x <= 1.0 && rotated_uv.y >= 0.0 && rotated_uv.y <= 1.0,
+  );
+  let sample_uv = clamp(rotated_uv, vec2<f32>(0.0), vec2<f32>(1.0));
 
-  let smoke_color = textureSample(texture_a, sampler_a, rotated_uv);
-  let fire_color = textureSample(texture_b, sampler_b, rotated_uv);
+  let smoke_color = textureSample(texture_a, sampler_a, sample_uv) * inside_border;
+  let fire_color = textureSample(texture_b, sampler_b, sample_uv) * inside_border;
   let is_flame = input.particle_type < 0.5;
   let color = select(smoke_color, fire_color, is_flame);
-  let out_alpha = select(smoke_color.a * alpha, 0.0, is_flame);
+  let fire_brightness = max(max(fire_color.r, fire_color.g), fire_color.b);
+  let fire_coverage = fire_color.a * smoothstep(0.35, 0.9, fire_brightness) * clamp(alpha, 0.0, 1.0) * 0.55;
+  let out_alpha = select(smoke_color.a * alpha, fire_coverage, is_flame);
 
-  return vec4<f32>(color.rgb * input.color.rgb * alpha, out_alpha);
+  return vec4<f32>(
+    color.rgb * input.color.rgb * alpha,
+    out_alpha,
+  );
 }

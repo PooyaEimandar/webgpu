@@ -3,13 +3,50 @@ use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
     glam, render_pass, shader, text, texture, wgpu, winit,
 };
+use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+const FIREPLACE_OBJ_URL: &str = "assets/models/fireplace.obj";
+#[cfg(target_arch = "wasm32")]
+const FIREPLACE_OBJ_URL: &str = "../assets/models/fireplace.obj";
+#[cfg(not(target_arch = "wasm32"))]
+const FIREPLACE_COLORMAP_URL: &str = "assets/textures/fireplace_colormap_bc3.ktx";
+#[cfg(target_arch = "wasm32")]
+const FIREPLACE_COLORMAP_URL: &str = "../assets/textures/fireplace_colormap_bc3.ktx";
+#[cfg(not(target_arch = "wasm32"))]
+const FIREPLACE_NORMALMAP_URL: &str = "assets/textures/fireplace_normalmap_bc3.ktx";
+#[cfg(target_arch = "wasm32")]
+const FIREPLACE_NORMALMAP_URL: &str = "../assets/textures/fireplace_normalmap_bc3.ktx";
+#[cfg(not(target_arch = "wasm32"))]
+const PARTICLE_FIRE_URL: &str = "assets/textures/particle_fire.ktx";
+#[cfg(target_arch = "wasm32")]
+const PARTICLE_FIRE_URL: &str = "../assets/textures/particle_fire.ktx";
+#[cfg(not(target_arch = "wasm32"))]
+const PARTICLE_SMOKE_URL: &str = "assets/textures/particle_smoke.ktx";
+#[cfg(target_arch = "wasm32")]
+const PARTICLE_SMOKE_URL: &str = "../assets/textures/particle_smoke.ktx";
 const PARTICLE_COUNT: usize = 512;
+const PARTICLE_BILLBOARD_SCALE: f32 = 4.8;
+const SMOKE_ALPHA_DECAY: f32 = 1.35;
+const SMOKE_SIZE_DECAY: f32 = 0.58;
+const SMOKE_MIN_SIZE_SCALE: f32 = 0.34;
+const SMOKE_RESPAWN_ALPHA: f32 = 0.08;
+const SMOKE_RESPAWN_SIZE: f32 = 0.16;
 const FLAME_RADIUS: f32 = 8.0;
 const EMITTER_POS: glam::Vec3 = glam::Vec3::new(0.0, -6.0, 0.0);
+const SMOKE_TAIL_Y: f32 = EMITTER_POS.y - FLAME_RADIUS * 1.05;
+const SMOKE_TAIL_LIFT: f32 = FLAME_RADIUS * 0.38;
+const SMOKE_FADE_IN_DISTANCE: f32 = FLAME_RADIUS * 0.48;
+const SMOKE_TAIL_RADIUS_SCALE: f32 = 0.28;
+const SMOKE_TAIL_TRANSITION_CHANCE: f32 = 0.24;
 const MIN_VEL: glam::Vec3 = glam::Vec3::new(-3.0, 0.5, -3.0);
 const MAX_VEL: glam::Vec3 = glam::Vec3::new(3.0, 7.0, 3.0);
+const CAMERA_ZOOM: f32 = -75.0;
+const CAMERA_ROTATION_X: f32 = -15.0;
+const CAMERA_ROTATION_Y: f32 = 45.0;
+const GL_COMPRESSED_RGBA_S3TC_DXT5_EXT: u32 = 0x83f3;
+const KTX_IDENTIFIER: &[u8; 12] = b"\xABKTX 11\xBB\r\n\x1A\n";
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -93,15 +130,15 @@ struct EnvironmentUniforms {
 }
 
 impl EnvironmentUniforms {
-    fn new(aspect_ratio: f32, frame: u64) -> Self {
+    fn new(aspect_ratio: f32, timer: f32) -> Self {
         let camera = SceneCamera::new(aspect_ratio);
-        let model = glam::Mat4::IDENTITY;
+        let model = camera.view;
         let normal = model.inverse().transpose();
-        let t = frame as f32 * 0.018;
-        let light_position = glam::Vec3::new(t.sin() * 4.5, -11.0, -2.5 + t.cos() * 2.5);
+        let t = timer * std::f32::consts::TAU;
+        let light_position = glam::Vec3::new(t.sin() * 1.5, 0.0, t.cos() * 1.5);
 
         Self {
-            view_projection: camera.view_projection.to_cols_array_2d(),
+            view_projection: camera.projection.to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             normal: normal.to_cols_array_2d(),
             light_position: [light_position.x, light_position.y, light_position.z, 0.0],
@@ -119,14 +156,14 @@ struct ParticleUniforms {
 }
 
 impl ParticleUniforms {
-    fn new(aspect_ratio: f32) -> Self {
-        let camera = SceneCamera::new(aspect_ratio);
+    fn new(context: &RenderContext) -> Self {
+        let camera = SceneCamera::new(context.aspect_ratio());
 
         Self {
             projection: camera.projection.to_cols_array_2d(),
             view: camera.view.to_cols_array_2d(),
             _unused: glam::Mat4::IDENTITY.to_cols_array_2d(),
-            options: [1.65, 0.0, 0.0, 0.0],
+            options: [PARTICLE_BILLBOARD_SCALE, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -135,24 +172,19 @@ impl ParticleUniforms {
 struct SceneCamera {
     projection: glam::Mat4,
     view: glam::Mat4,
-    view_projection: glam::Mat4,
 }
 
 impl SceneCamera {
     fn new(aspect_ratio: f32) -> Self {
-        let projection = camera::wgpu_clip_matrix()
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
-        let view = glam::Mat4::look_at_rh(
-            glam::Vec3::new(0.0, -4.0, -36.0),
-            glam::Vec3::new(0.0, -5.6, 0.0),
-            -glam::Vec3::Y,
-        );
+        let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
+            * camera::wgpu_clip_matrix()
+            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
+        let view = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, CAMERA_ZOOM))
+            * glam::Mat4::from_translation(glam::Vec3::new(0.0, 15.0, 0.0))
+            * glam::Mat4::from_rotation_x(CAMERA_ROTATION_X.to_radians())
+            * glam::Mat4::from_rotation_y(CAMERA_ROTATION_Y.to_radians());
 
-        Self {
-            projection,
-            view,
-            view_projection: projection * view,
-        }
+        Self { projection, view }
     }
 }
 
@@ -181,12 +213,24 @@ impl Particle {
             ParticleType::Smoke => 1.0,
         };
         let color = self.color.max(glam::Vec4::ZERO).min(glam::Vec4::ONE);
+        let (alpha, size) = match self.particle_type {
+            ParticleType::Flame => (self.alpha, self.size),
+            ParticleType::Smoke => {
+                let alpha = self.alpha.clamp(0.0, 1.0);
+                let tail_lift =
+                    ((SMOKE_TAIL_Y - self.position.y) / SMOKE_FADE_IN_DISTANCE).clamp(0.0, 1.0);
+                let visible_alpha = alpha * tail_lift * tail_lift;
+                let size_scale =
+                    SMOKE_MIN_SIZE_SCALE + (1.0 - SMOKE_MIN_SIZE_SCALE) * visible_alpha;
+                (visible_alpha, self.size * size_scale)
+            }
+        };
 
         ParticleInstance {
             position: [self.position.x, self.position.y, self.position.z, 1.0],
             color: color.to_array(),
-            alpha: self.alpha,
-            size: self.size.max(0.05),
+            alpha,
+            size: size.max(0.05),
             rotation: self.rotation,
             particle_type,
         }
@@ -221,8 +265,18 @@ struct Pipelines {
     particles: wgpu::RenderPipeline,
 }
 
+struct ParticleFireAssets {
+    environment_vertices: Vec<EnvironmentVertex>,
+    environment_indices: Vec<u32>,
+    floor_color: KtxRgba8,
+    floor_normal: KtxRgba8,
+    fire: KtxRgba8,
+    smoke: KtxRgba8,
+}
+
 #[derive(Default)]
 struct ParticleSystemExample {
+    assets: Option<ParticleFireAssets>,
     pipelines: Option<Pipelines>,
     environment_bind_group: Option<wgpu::BindGroup>,
     particle_bind_group: Option<wgpu::BindGroup>,
@@ -245,10 +299,17 @@ struct ParticleSystemExample {
     frame_stats: FrameStats,
     gpu_device_info: String,
     rng: Option<Lcg>,
-    frame: u64,
+    scene_timer: f32,
 }
 
 impl ParticleSystemExample {
+    fn new(assets: ParticleFireAssets) -> Self {
+        Self {
+            assets: Some(assets),
+            ..Default::default()
+        }
+    }
+
     fn stats_style() -> text::TextStyle {
         text::TextStyle {
             font_size: 18.0,
@@ -279,7 +340,7 @@ impl ParticleSystemExample {
         };
 
         format!(
-            "Vulkan Example - CPU based particle system\n{frame_ms:.2}ms ({fps:.0} fps)\n{}",
+            "Particle System\n{frame_ms:.2}ms ({fps:.0} fps)\n{}",
             self.gpu_device_info
         )
     }
@@ -311,8 +372,8 @@ impl ParticleSystemExample {
 
     fn update_uniforms(&mut self, context: &RenderContext) {
         let aspect_ratio = context.aspect_ratio();
-        let environment_uniforms = EnvironmentUniforms::new(aspect_ratio, self.frame);
-        let particle_uniforms = ParticleUniforms::new(aspect_ratio);
+        let environment_uniforms = EnvironmentUniforms::new(aspect_ratio, self.scene_timer);
+        let particle_uniforms = ParticleUniforms::new(context);
 
         if let Some(buffer) = &self.environment_uniform_buffer {
             context
@@ -327,7 +388,10 @@ impl ParticleSystemExample {
     }
 
     fn update_particles(&mut self, context: &RenderContext, delta_seconds: f32) {
-        let mut rng = self.rng.take().unwrap_or_else(|| Lcg::new(0x5eed_1234));
+        let mut rng = match self.rng.take() {
+            Some(rng) => rng,
+            None => Lcg::new(0x5eed_1234),
+        };
         let frame_timer = delta_seconds.clamp(1.0 / 240.0, 1.0 / 30.0);
         let particle_timer = frame_timer * 0.45;
 
@@ -340,14 +404,21 @@ impl ParticleSystemExample {
                 }
                 ParticleType::Smoke => {
                     particle.position -= particle.velocity * frame_timer;
-                    particle.alpha += particle_timer * 1.25;
-                    particle.size += particle_timer * 0.125;
+                    particle.alpha -= particle_timer * SMOKE_ALPHA_DECAY;
+                    particle.size -= particle_timer * SMOKE_SIZE_DECAY;
                     particle.color -= glam::Vec4::splat(particle_timer * 0.05);
                 }
             }
             particle.rotation += particle_timer * particle.rotation_speed;
 
-            if particle.alpha > 2.0 || particle.size <= 0.05 {
+            let should_respawn = match particle.particle_type {
+                ParticleType::Flame => particle.alpha > 2.0,
+                ParticleType::Smoke => {
+                    particle.alpha <= SMOKE_RESPAWN_ALPHA || particle.size <= SMOKE_RESPAWN_SIZE
+                }
+            };
+
+            if should_respawn {
                 transition_particle(particle, &mut rng);
             }
         }
@@ -355,6 +426,8 @@ impl ParticleSystemExample {
         self.particle_instances.clear();
         self.particle_instances
             .extend(self.particles.iter().copied().map(Particle::instance));
+        self.particle_instances
+            .sort_by(|a, b| b.particle_type.total_cmp(&a.particle_type));
 
         if let Some(buffer) = &self.particle_instance_buffer {
             context
@@ -368,13 +441,17 @@ impl ParticleSystemExample {
 impl Example for ParticleSystemExample {
     fn settings(&self) -> ExampleSettings {
         ExampleSettings {
-            title: "CPU based particle system".to_owned(),
+            title: "Particle System".to_owned(),
             ..Default::default()
         }
     }
 
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
+        let assets = self
+            .assets
+            .take()
+            .ok_or_else(|| RenderError::message("particle fire assets were not loaded"))?;
 
         let shader = shader::wgsl_module(
             &context.device,
@@ -393,8 +470,9 @@ impl Example for ParticleSystemExample {
         let environment_pipeline = create_environment_pipeline(context, &pipeline_layout, &shader);
         let particle_pipeline = create_particle_pipeline(context, &pipeline_layout, &shader);
 
-        let environment_uniforms = EnvironmentUniforms::new(context.aspect_ratio(), self.frame);
-        let particle_uniforms = ParticleUniforms::new(context.aspect_ratio());
+        let environment_uniforms =
+            EnvironmentUniforms::new(context.aspect_ratio(), self.scene_timer);
+        let particle_uniforms = ParticleUniforms::new(context);
         let environment_uniform_buffer = buffer::uniform_buffer(
             &context.device,
             Some("particle system environment uniforms"),
@@ -409,33 +487,40 @@ impl Example for ParticleSystemExample {
         let sampler_options = texture::TextureSamplerOptions {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         };
-        let floor_color_texture = texture::Texture::from_rgba8_2d_with_sampler(
+        let floor_color_texture = texture_from_ktx_rgba8(
             &context.device,
             &context.queue,
             Some("particle system floor color map"),
-            &brick_color_image(512)?,
+            &assets.floor_color,
             sampler_options,
         )?;
-        let floor_normal_texture = texture::Texture::from_rgba8_2d_with_sampler(
+        let floor_normal_texture = texture_from_ktx_rgba8(
             &context.device,
             &context.queue,
             Some("particle system floor normal map"),
-            &brick_normal_image(512)?,
+            &assets.floor_normal,
             sampler_options,
         )?;
-        let fire_texture = texture::Texture::from_rgba8_2d(
+        let particle_sampler_options = texture::TextureSamplerOptions {
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        };
+        let fire_texture = texture_from_ktx_rgba8(
             &context.device,
             &context.queue,
             Some("particle system fire sprite"),
-            &fire_sprite_image(128)?,
+            &assets.fire,
+            particle_sampler_options,
         )?;
-        let smoke_texture = texture::Texture::from_rgba8_2d(
+        let smoke_texture = texture_from_ktx_rgba8(
             &context.device,
             &context.queue,
             Some("particle system smoke sprite"),
-            &smoke_sprite_image(128)?,
+            &assets.smoke,
+            particle_sampler_options,
         )?;
 
         let environment_bind_group = texture_bind_group(
@@ -455,7 +540,8 @@ impl Example for ParticleSystemExample {
             &fire_texture,
         );
 
-        let (environment_vertices, environment_indices) = environment_mesh();
+        let environment_vertices = assets.environment_vertices;
+        let environment_indices = assets.environment_indices;
         let environment_vertex_buffer = buffer::vertex_buffer(
             &context.device,
             Some("particle system environment vertices"),
@@ -537,8 +623,8 @@ impl Example for ParticleSystemExample {
     fn update(&mut self, context: &mut RenderContext) {
         let stats_changed = self.frame_stats.tick();
         let delta_seconds = self.frame_stats.delta_seconds();
+        self.scene_timer = (self.scene_timer + delta_seconds * 8.0).fract();
         self.update_particles(context, delta_seconds);
-        self.frame = self.frame.wrapping_add(1);
         self.update_uniforms(context);
 
         if stats_changed {
@@ -579,9 +665,9 @@ impl Example for ParticleSystemExample {
                 view,
                 Some(&depth_texture.view),
                 wgpu::Color {
-                    r: 0.014,
-                    g: 0.015,
-                    b: 0.017,
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
                     a: 1.0,
                 },
                 1.0,
@@ -877,17 +963,23 @@ fn init_particle(rng: &mut Lcg) -> Particle {
 
 fn transition_particle(particle: &mut Particle, rng: &mut Lcg) {
     match particle.particle_type {
-        ParticleType::Flame if rng.range(1.0) < 0.05 => {
-            particle.alpha = 0.0;
+        ParticleType::Flame
+            if is_fire_tail(*particle) && rng.range(1.0) < SMOKE_TAIL_TRANSITION_CHANCE =>
+        {
+            particle.alpha = 0.78 + rng.range(0.18);
             particle.color = glam::Vec4::splat(0.25 + rng.range(0.25));
-            particle.position.x *= 0.5;
-            particle.position.z *= 0.5;
+            particle.position.x *= SMOKE_TAIL_RADIUS_SCALE;
+            particle.position.y = particle
+                .position
+                .y
+                .min(SMOKE_TAIL_Y - rng.range(SMOKE_TAIL_LIFT));
+            particle.position.z *= SMOKE_TAIL_RADIUS_SCALE;
             particle.velocity = glam::Vec3::new(
                 rng.range(1.0) - rng.range(1.0),
                 (MIN_VEL.y * 2.0) + rng.range(MAX_VEL.y - MIN_VEL.y),
                 rng.range(1.0) - rng.range(1.0),
             );
-            particle.size = 1.0 + rng.range(0.5);
+            particle.size = 0.72 + rng.range(0.3);
             particle.rotation_speed = rng.range(1.0) - rng.range(1.0);
             particle.particle_type = ParticleType::Smoke;
         }
@@ -897,206 +989,738 @@ fn transition_particle(particle: &mut Particle, rng: &mut Lcg) {
     }
 }
 
-fn environment_mesh() -> (Vec<EnvironmentVertex>, Vec<u32>) {
+fn is_fire_tail(particle: Particle) -> bool {
+    particle.position.y <= SMOKE_TAIL_Y
+}
+
+#[derive(Clone, Debug)]
+struct KtxRgba8 {
+    width: u32,
+    height: u32,
+    mip_levels: Vec<KtxMipLevel>,
+}
+
+#[derive(Clone, Debug)]
+struct KtxMipLevel {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ObjVertexRef {
+    position: usize,
+    uv: Option<usize>,
+    normal: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ObjVertexData {
+    position: glam::Vec3,
+    uv: glam::Vec2,
+    normal: Option<glam::Vec3>,
+}
+
+fn load_fireplace_mesh(bytes: &[u8]) -> RenderResult<(Vec<EnvironmentVertex>, Vec<u32>)> {
+    let source = std::str::from_utf8(bytes)
+        .map_err(|error| RenderError::message(format!("failed to read fireplace.obj: {error}")))?;
+    let mut positions = Vec::new();
+    let mut uvs = Vec::new();
+    let mut normals = Vec::new();
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    add_quad(
-        &mut vertices,
-        &mut indices,
-        [
-            glam::Vec3::new(-18.0, 2.2, -10.0),
-            glam::Vec3::new(18.0, 2.2, -10.0),
-            glam::Vec3::new(18.0, 2.2, 15.0),
-            glam::Vec3::new(-18.0, 2.2, 15.0),
-        ],
-        glam::Vec3::NEG_Y,
-        glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
-        [0.0, 0.0, 5.2, 3.8],
-    );
-    add_quad(
-        &mut vertices,
-        &mut indices,
-        [
-            glam::Vec3::new(-16.0, 2.2, 12.0),
-            glam::Vec3::new(16.0, 2.2, 12.0),
-            glam::Vec3::new(16.0, -19.0, 12.0),
-            glam::Vec3::new(-16.0, -19.0, 12.0),
-        ],
-        glam::Vec3::NEG_Z,
-        glam::Vec4::new(1.0, 0.0, 0.0, 1.0),
-        [0.0, 0.0, 4.0, 3.0],
-    );
-    add_quad(
-        &mut vertices,
-        &mut indices,
-        [
-            glam::Vec3::new(-16.0, 2.2, -8.0),
-            glam::Vec3::new(-16.0, 2.2, 12.0),
-            glam::Vec3::new(-16.0, -17.0, 12.0),
-            glam::Vec3::new(-16.0, -17.0, -8.0),
-        ],
-        glam::Vec3::X,
-        glam::Vec4::new(0.0, 0.0, 1.0, 1.0),
-        [0.0, 0.0, 3.2, 2.8],
-    );
-    add_quad(
-        &mut vertices,
-        &mut indices,
-        [
-            glam::Vec3::new(16.0, 2.2, 12.0),
-            glam::Vec3::new(16.0, 2.2, -8.0),
-            glam::Vec3::new(16.0, -17.0, -8.0),
-            glam::Vec3::new(16.0, -17.0, 12.0),
-        ],
-        glam::Vec3::NEG_X,
-        glam::Vec4::new(0.0, 0.0, -1.0, 1.0),
-        [0.0, 0.0, 3.2, 2.8],
-    );
+    for (line_index, raw_line) in source.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
 
-    (vertices, indices)
+        let tokens = line.split_whitespace().collect::<Vec<_>>();
+        let Some(keyword) = tokens.first().copied() else {
+            continue;
+        };
+
+        match keyword {
+            "v" => {
+                if tokens.len() < 4 {
+                    return Err(RenderError::message(format!(
+                        "fireplace.obj line {line_number}: vertex position needs 3 values"
+                    )));
+                }
+                positions.push(
+                    glam::Vec3::new(
+                        parse_f32(tokens[1], "vertex x", line_number)?,
+                        parse_f32(tokens[2], "vertex y", line_number)?,
+                        parse_f32(tokens[3], "vertex z", line_number)?,
+                    ) * 10.0,
+                );
+            }
+            "vt" => {
+                if tokens.len() < 3 {
+                    return Err(RenderError::message(format!(
+                        "fireplace.obj line {line_number}: texture coordinate needs 2 values"
+                    )));
+                }
+                uvs.push(glam::Vec2::new(
+                    parse_f32(tokens[1], "texture u", line_number)?,
+                    parse_f32(tokens[2], "texture v", line_number)?,
+                ));
+            }
+            "vn" => {
+                if tokens.len() < 4 {
+                    return Err(RenderError::message(format!(
+                        "fireplace.obj line {line_number}: vertex normal needs 3 values"
+                    )));
+                }
+                normals.push(normalized_or(
+                    glam::Vec3::new(
+                        parse_f32(tokens[1], "normal x", line_number)?,
+                        parse_f32(tokens[2], "normal y", line_number)?,
+                        parse_f32(tokens[3], "normal z", line_number)?,
+                    ),
+                    glam::Vec3::Y,
+                ));
+            }
+            "f" => {
+                if tokens.len() < 4 {
+                    return Err(RenderError::message(format!(
+                        "fireplace.obj line {line_number}: face needs at least 3 vertices"
+                    )));
+                }
+
+                let mut face = Vec::with_capacity(tokens.len() - 1);
+                for token in tokens.iter().skip(1) {
+                    face.push(parse_obj_vertex_ref(
+                        token,
+                        positions.len(),
+                        uvs.len(),
+                        normals.len(),
+                        line_number,
+                    )?);
+                }
+
+                for index in 1..face.len().saturating_sub(1) {
+                    let triangle = [face[0], face[index], face[index + 1]];
+                    push_obj_triangle(
+                        &mut vertices,
+                        &mut indices,
+                        &positions,
+                        &uvs,
+                        &normals,
+                        triangle,
+                    )?;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if vertices.is_empty() || indices.is_empty() {
+        return Err(RenderError::message(
+            "fireplace.obj did not contain drawable triangles",
+        ));
+    }
+
+    Ok((vertices, indices))
 }
 
-fn add_quad(
+fn push_obj_triangle(
     vertices: &mut Vec<EnvironmentVertex>,
     indices: &mut Vec<u32>,
-    points: [glam::Vec3; 4],
-    normal: glam::Vec3,
-    tangent: glam::Vec4,
-    uv_rect: [f32; 4],
-) {
+    positions: &[glam::Vec3],
+    uvs: &[glam::Vec2],
+    normals: &[glam::Vec3],
+    triangle: [ObjVertexRef; 3],
+) -> RenderResult<()> {
+    let data = [
+        obj_vertex_data(triangle[0], positions, uvs, normals)?,
+        obj_vertex_data(triangle[1], positions, uvs, normals)?,
+        obj_vertex_data(triangle[2], positions, uvs, normals)?,
+    ];
+    let face_normal = triangle_face_normal(data[0].position, data[1].position, data[2].position);
+    let tangent = triangle_tangent(data, face_normal);
     let start = vertices.len() as u32;
-    let [u0, v0, u1, v1] = uv_rect;
-    let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
 
-    for (point, uv) in points.into_iter().zip(uvs) {
+    for vertex in data {
+        let normal = match vertex.normal {
+            Some(normal) => normal,
+            None => face_normal,
+        };
+        let handedness = tangent_handedness(data, normal, tangent);
         vertices.push(EnvironmentVertex {
-            position: point.to_array(),
-            uv,
+            position: vertex.position.to_array(),
+            uv: vertex.uv.to_array(),
             normal: normal.to_array(),
-            tangent: tangent.to_array(),
+            tangent: [tangent.x, tangent.y, tangent.z, handedness],
         });
     }
 
-    indices.extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+    indices.extend_from_slice(&[start, start + 1, start + 2]);
+    Ok(())
 }
 
-fn fire_sprite_image(size: u32) -> RenderResult<texture::ImageRgba8> {
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    let center = (size as f32 - 1.0) * 0.5;
+fn obj_vertex_data(
+    reference: ObjVertexRef,
+    positions: &[glam::Vec3],
+    uvs: &[glam::Vec2],
+    normals: &[glam::Vec3],
+) -> RenderResult<ObjVertexData> {
+    let position = positions
+        .get(reference.position)
+        .copied()
+        .ok_or_else(|| RenderError::message("OBJ position index is outside loaded positions"))?;
+    let uv = match reference.uv {
+        Some(index) => uvs
+            .get(index)
+            .copied()
+            .ok_or_else(|| RenderError::message("OBJ uv index is outside loaded coordinates"))?,
+        None => glam::Vec2::ZERO,
+    };
+    let normal =
+        match reference.normal {
+            Some(index) => Some(normals.get(index).copied().ok_or_else(|| {
+                RenderError::message("OBJ normal index is outside loaded normals")
+            })?),
+            None => None,
+        };
 
-    for y in 0..size {
-        for x in 0..size {
-            let nx = (x as f32 - center) / center;
-            let ny = (y as f32 - center) / center;
-            let radius = (nx * nx + ny * ny).sqrt().min(1.0);
-            let heat = (1.0 - radius).powf(1.45);
-            let flicker = ((nx * 18.0).sin() * (ny * 11.0).cos() * 0.07).max(-0.05);
-            let intensity = (heat + flicker).clamp(0.0, 1.0);
-            let red = (255.0 * intensity).min(255.0) as u8;
-            let green = (60.0 + 190.0 * intensity.powf(1.2)).min(255.0) as u8;
-            let blue = (18.0 * intensity.powf(2.5)).min(255.0) as u8;
-            let alpha = (255.0 * intensity.powf(0.8)) as u8;
-            rgba.extend_from_slice(&[red, green, blue, alpha]);
+    Ok(ObjVertexData {
+        position,
+        uv,
+        normal,
+    })
+}
+
+fn parse_obj_vertex_ref(
+    token: &str,
+    position_count: usize,
+    uv_count: usize,
+    normal_count: usize,
+    line_number: usize,
+) -> RenderResult<ObjVertexRef> {
+    let mut parts = token.split('/');
+    let position_token = parts.next().ok_or_else(|| {
+        RenderError::message(format!(
+            "fireplace.obj line {line_number}: face vertex has no position"
+        ))
+    })?;
+    if position_token.is_empty() {
+        return Err(RenderError::message(format!(
+            "fireplace.obj line {line_number}: face vertex has an empty position"
+        )));
+    }
+
+    let uv_token = parts.next();
+    let normal_token = parts.next();
+    if parts.next().is_some() {
+        return Err(RenderError::message(format!(
+            "fireplace.obj line {line_number}: unsupported face token {token}"
+        )));
+    }
+
+    let uv = match uv_token {
+        Some(value) if !value.is_empty() => {
+            Some(parse_obj_index(value, uv_count, "uv", line_number)?)
+        }
+        _ => None,
+    };
+    let normal = match normal_token {
+        Some(value) if !value.is_empty() => {
+            Some(parse_obj_index(value, normal_count, "normal", line_number)?)
+        }
+        _ => None,
+    };
+
+    Ok(ObjVertexRef {
+        position: parse_obj_index(position_token, position_count, "position", line_number)?,
+        uv,
+        normal,
+    })
+}
+
+fn parse_obj_index(
+    token: &str,
+    count: usize,
+    label: &str,
+    line_number: usize,
+) -> RenderResult<usize> {
+    let raw = token.parse::<isize>().map_err(|error| {
+        RenderError::message(format!(
+            "fireplace.obj line {line_number}: invalid {label} index {token}: {error}"
+        ))
+    })?;
+    if raw == 0 {
+        return Err(RenderError::message(format!(
+            "fireplace.obj line {line_number}: OBJ {label} index cannot be zero"
+        )));
+    }
+
+    let count = count as isize;
+    let index = if raw > 0 { raw - 1 } else { count + raw };
+    if index < 0 || index >= count {
+        return Err(RenderError::message(format!(
+            "fireplace.obj line {line_number}: {label} index {raw} is out of range"
+        )));
+    }
+
+    Ok(index as usize)
+}
+
+fn parse_f32(token: &str, label: &str, line_number: usize) -> RenderResult<f32> {
+    token.parse::<f32>().map_err(|error| {
+        RenderError::message(format!(
+            "fireplace.obj line {line_number}: invalid {label} value {token}: {error}"
+        ))
+    })
+}
+
+fn triangle_face_normal(a: glam::Vec3, b: glam::Vec3, c: glam::Vec3) -> glam::Vec3 {
+    normalized_or((b - a).cross(c - a), glam::Vec3::Y)
+}
+
+fn triangle_tangent(vertices: [ObjVertexData; 3], normal: glam::Vec3) -> glam::Vec3 {
+    let edge1 = vertices[1].position - vertices[0].position;
+    let edge2 = vertices[2].position - vertices[0].position;
+    let uv1 = vertices[1].uv - vertices[0].uv;
+    let uv2 = vertices[2].uv - vertices[0].uv;
+    let denominator = uv1.x * uv2.y - uv1.y * uv2.x;
+
+    if denominator.abs() <= 0.000_001 {
+        return fallback_tangent(normal);
+    }
+
+    normalized_or(
+        (edge1 * uv2.y - edge2 * uv1.y) / denominator,
+        fallback_tangent(normal),
+    )
+}
+
+fn tangent_handedness(
+    vertices: [ObjVertexData; 3],
+    normal: glam::Vec3,
+    tangent: glam::Vec3,
+) -> f32 {
+    let edge1 = vertices[1].position - vertices[0].position;
+    let edge2 = vertices[2].position - vertices[0].position;
+    let uv1 = vertices[1].uv - vertices[0].uv;
+    let uv2 = vertices[2].uv - vertices[0].uv;
+    let denominator = uv1.x * uv2.y - uv1.y * uv2.x;
+    if denominator.abs() <= 0.000_001 {
+        return 1.0;
+    }
+
+    let bitangent = normalized_or(
+        (edge2 * uv1.x - edge1 * uv2.x) / denominator,
+        normal.cross(tangent),
+    );
+    if normal.cross(tangent).dot(bitangent) < 0.0 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+fn fallback_tangent(normal: glam::Vec3) -> glam::Vec3 {
+    let normal = normalized_or(normal, glam::Vec3::Y);
+    let axis = if normal.y.abs() < 0.9 {
+        glam::Vec3::Y
+    } else {
+        glam::Vec3::X
+    };
+    normalized_or(axis.cross(normal), glam::Vec3::X)
+}
+
+fn normalized_or(value: glam::Vec3, fallback: glam::Vec3) -> glam::Vec3 {
+    let length_squared = value.length_squared();
+    if length_squared > 0.000_000_01 {
+        value / length_squared.sqrt()
+    } else {
+        fallback
+    }
+}
+
+fn texture_from_ktx_rgba8(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: impl Into<Option<&'static str>>,
+    ktx: &KtxRgba8,
+    sampler_options: texture::TextureSamplerOptions,
+) -> RenderResult<texture::Texture> {
+    if ktx.mip_levels.is_empty() {
+        return Err(RenderError::message("texture has no mip levels"));
+    }
+
+    let size = wgpu::Extent3d {
+        width: ktx.width,
+        height: ktx.height,
+        depth_or_array_layers: 1,
+    };
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let label = label.into();
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label,
+        size,
+        mip_level_count: ktx.mip_levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    for (mip_index, mip) in ktx.mip_levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: mip_index as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &mip.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(mip.width * 4),
+                rows_per_image: Some(mip.height),
+            },
+            wgpu::Extent3d {
+                width: mip.width,
+                height: mip.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label,
+        format: Some(format),
+        dimension: Some(wgpu::TextureViewDimension::D2),
+        aspect: wgpu::TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: Some(ktx.mip_levels.len() as u32),
+        base_array_layer: 0,
+        array_layer_count: Some(1),
+        usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label,
+        address_mode_u: sampler_options.address_mode_u,
+        address_mode_v: sampler_options.address_mode_v,
+        address_mode_w: sampler_options.address_mode_w,
+        mag_filter: sampler_options.mag_filter,
+        min_filter: sampler_options.min_filter,
+        mipmap_filter: sampler_options.mipmap_filter,
+        ..Default::default()
+    });
+
+    Ok(texture::Texture {
+        texture,
+        view,
+        sampler,
+        size,
+        format,
+    })
+}
+
+fn decode_bc3_ktx_rgba8(bytes: &[u8], label: &str) -> RenderResult<KtxRgba8> {
+    if bytes.len() < 68 {
+        return Err(RenderError::message(format!(
+            "{label} KTX file is too small"
+        )));
+    }
+    let identifier = bytes
+        .get(0..12)
+        .ok_or_else(|| RenderError::message(format!("{label} KTX identifier is missing")))?;
+    if identifier != &KTX_IDENTIFIER[..] {
+        return Err(RenderError::message(format!("{label} is not a KTX 1 file")));
+    }
+
+    let endianness = read_u32_le(bytes, 12, label)?;
+    if endianness != 0x0403_0201 {
+        return Err(RenderError::message(format!(
+            "{label} KTX uses unsupported endianness"
+        )));
+    }
+    let gl_type = read_u32_le(bytes, 16, label)?;
+    let gl_format = read_u32_le(bytes, 24, label)?;
+    let internal_format = read_u32_le(bytes, 28, label)?;
+    let width = read_u32_le(bytes, 36, label)?;
+    let height = read_u32_le(bytes, 40, label)?;
+    let depth = read_u32_le(bytes, 44, label)?;
+    let array_elements = read_u32_le(bytes, 48, label)?;
+    let faces = read_u32_le(bytes, 52, label)?;
+    let mip_count = read_u32_le(bytes, 56, label)?;
+    let key_value_bytes = read_u32_le(bytes, 60, label)? as usize;
+
+    if gl_type != 0 || gl_format != 0 || internal_format != GL_COMPRESSED_RGBA_S3TC_DXT5_EXT {
+        return Err(RenderError::message(format!(
+            "{label} is not a BC3/DXT5 compressed RGBA KTX texture"
+        )));
+    }
+    if width == 0
+        || height == 0
+        || depth != 0
+        || array_elements != 0
+        || faces != 1
+        || mip_count == 0
+    {
+        return Err(RenderError::message(format!(
+            "{label} has an unsupported KTX layout"
+        )));
+    }
+
+    let mut offset = 64usize
+        .checked_add(key_value_bytes)
+        .ok_or_else(|| RenderError::message(format!("{label} KTX header is too large")))?;
+    offset = align_to_4(offset);
+    let mut mip_width = width;
+    let mut mip_height = height;
+    let mut mip_levels = Vec::with_capacity(mip_count as usize);
+
+    for mip_index in 0..mip_count {
+        let image_size = read_u32_le(bytes, offset, label)? as usize;
+        offset = offset.checked_add(4).ok_or_else(|| {
+            RenderError::message(format!("{label} KTX mip {mip_index} offset overflow"))
+        })?;
+        let end = offset.checked_add(image_size).ok_or_else(|| {
+            RenderError::message(format!("{label} KTX mip {mip_index} size overflow"))
+        })?;
+        let image = bytes.get(offset..end).ok_or_else(|| {
+            RenderError::message(format!("{label} KTX mip {mip_index} is truncated"))
+        })?;
+        mip_levels.push(KtxMipLevel {
+            width: mip_width,
+            height: mip_height,
+            rgba: decode_bc3_rgba8(image, mip_width, mip_height, label)?,
+        });
+        offset = align_to_4(end);
+        mip_width = (mip_width / 2).max(1);
+        mip_height = (mip_height / 2).max(1);
+    }
+
+    Ok(KtxRgba8 {
+        width,
+        height,
+        mip_levels,
+    })
+}
+
+fn decode_bc3_rgba8(data: &[u8], width: u32, height: u32, label: &str) -> RenderResult<Vec<u8>> {
+    let block_width = (width + 3) / 4;
+    let block_height = (height + 3) / 4;
+    let expected_size = (block_width as usize)
+        .checked_mul(block_height as usize)
+        .and_then(|value| value.checked_mul(16))
+        .ok_or_else(|| RenderError::message(format!("{label} BC3 dimensions overflow")))?;
+    if data.len() < expected_size {
+        return Err(RenderError::message(format!(
+            "{label} BC3 data is truncated: expected {expected_size} bytes, got {}",
+            data.len()
+        )));
+    }
+
+    let rgba_len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| RenderError::message(format!("{label} RGBA dimensions overflow")))?;
+    let mut rgba = vec![0; rgba_len];
+
+    for block_y in 0..block_height {
+        for block_x in 0..block_width {
+            let block_offset = ((block_y * block_width + block_x) as usize)
+                .checked_mul(16)
+                .ok_or_else(|| {
+                    RenderError::message(format!("{label} BC3 block offset overflow"))
+                })?;
+            let block_end = block_offset
+                .checked_add(16)
+                .ok_or_else(|| RenderError::message(format!("{label} BC3 block end overflow")))?;
+            let block = data
+                .get(block_offset..block_end)
+                .ok_or_else(|| RenderError::message(format!("{label} BC3 block is truncated")))?;
+            let alpha_table = bc3_alpha_table(block[0], block[1]);
+            let mut alpha_bits = 0_u64;
+            for index in 0..6 {
+                alpha_bits |= (block[2 + index] as u64) << (index * 8);
+            }
+
+            let color0 = u16::from_le_bytes([block[8], block[9]]);
+            let color1 = u16::from_le_bytes([block[10], block[11]]);
+            let colors = bc3_color_table(color0, color1);
+            let color_bits = u32::from_le_bytes([block[12], block[13], block[14], block[15]]);
+
+            for y in 0..4 {
+                for x in 0..4 {
+                    let px = block_x * 4 + x;
+                    let py = block_y * 4 + y;
+                    if px >= width || py >= height {
+                        continue;
+                    }
+
+                    let pixel_index = (y * 4 + x) as usize;
+                    let alpha_index = ((alpha_bits >> (pixel_index * 3)) & 0x7) as usize;
+                    let color_index = ((color_bits >> (pixel_index * 2)) & 0x3) as usize;
+                    let dst = ((py * width + px) * 4) as usize;
+                    rgba[dst] = colors[color_index][0];
+                    rgba[dst + 1] = colors[color_index][1];
+                    rgba[dst + 2] = colors[color_index][2];
+                    rgba[dst + 3] = alpha_table[alpha_index];
+                }
+            }
         }
     }
 
-    texture::ImageRgba8::new(size, size, rgba)
+    Ok(rgba)
 }
 
-fn smoke_sprite_image(size: u32) -> RenderResult<texture::ImageRgba8> {
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    let center = (size as f32 - 1.0) * 0.5;
+fn bc3_alpha_table(alpha0: u8, alpha1: u8) -> [u8; 8] {
+    let a0 = alpha0 as u16;
+    let a1 = alpha1 as u16;
+    let mut table = [0_u8; 8];
+    table[0] = alpha0;
+    table[1] = alpha1;
 
-    for y in 0..size {
-        for x in 0..size {
-            let nx = (x as f32 - center) / center;
-            let ny = (y as f32 - center) / center;
-            let radius = (nx * nx + ny * ny).sqrt().min(1.0);
-            let noise = ((nx * 14.0).sin() * 0.5 + (ny * 19.0).cos() * 0.5) * 0.12;
-            let density = ((1.0 - radius).powf(1.8) + noise).clamp(0.0, 1.0);
-            let value = (150.0 + density * 75.0) as u8;
-            let alpha = (255.0 * density.powf(1.35)) as u8;
-            rgba.extend_from_slice(&[value, value, value, alpha]);
-        }
+    if alpha0 > alpha1 {
+        table[2] = ((6 * a0 + a1) / 7) as u8;
+        table[3] = ((5 * a0 + 2 * a1) / 7) as u8;
+        table[4] = ((4 * a0 + 3 * a1) / 7) as u8;
+        table[5] = ((3 * a0 + 4 * a1) / 7) as u8;
+        table[6] = ((2 * a0 + 5 * a1) / 7) as u8;
+        table[7] = ((a0 + 6 * a1) / 7) as u8;
+    } else {
+        table[2] = ((4 * a0 + a1) / 5) as u8;
+        table[3] = ((3 * a0 + 2 * a1) / 5) as u8;
+        table[4] = ((2 * a0 + 3 * a1) / 5) as u8;
+        table[5] = ((a0 + 4 * a1) / 5) as u8;
+        table[6] = 0;
+        table[7] = 255;
     }
 
-    texture::ImageRgba8::new(size, size, rgba)
+    table
 }
 
-fn brick_color_image(size: u32) -> RenderResult<texture::ImageRgba8> {
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-
-    for y in 0..size {
-        for x in 0..size {
-            let brick_w = size / 4;
-            let brick_h = size / 8;
-            let row = y / brick_h.max(1);
-            let shifted_x = (x + (row % 2) * brick_w / 2) % size;
-            let mortar = shifted_x % brick_w.max(1) < 5 || y % brick_h.max(1) < 5;
-            let grain = (((x as f32 * 0.19).sin() + (y as f32 * 0.13).cos()) * 14.0) as i32;
-            let base = if mortar {
-                [74_i32, 65_i32, 58_i32]
-            } else {
-                [108_i32, 57_i32, 39_i32]
-            };
-            rgba.extend_from_slice(&[
-                (base[0] + grain).clamp(0, 255) as u8,
-                (base[1] + grain / 2).clamp(0, 255) as u8,
-                (base[2] + grain / 3).clamp(0, 255) as u8,
-                255,
-            ]);
-        }
-    }
-
-    texture::ImageRgba8::new(size, size, rgba)
+fn bc3_color_table(color0: u16, color1: u16) -> [[u8; 3]; 4] {
+    let c0 = rgb565(color0);
+    let c1 = rgb565(color1);
+    [
+        c0,
+        c1,
+        [
+            ((2 * c0[0] as u16 + c1[0] as u16) / 3) as u8,
+            ((2 * c0[1] as u16 + c1[1] as u16) / 3) as u8,
+            ((2 * c0[2] as u16 + c1[2] as u16) / 3) as u8,
+        ],
+        [
+            ((c0[0] as u16 + 2 * c1[0] as u16) / 3) as u8,
+            ((c0[1] as u16 + 2 * c1[1] as u16) / 3) as u8,
+            ((c0[2] as u16 + 2 * c1[2] as u16) / 3) as u8,
+        ],
+    ]
 }
 
-fn brick_normal_image(size: u32) -> RenderResult<texture::ImageRgba8> {
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+fn rgb565(value: u16) -> [u8; 3] {
+    [
+        (((value >> 11) & 0x1f) as u32 * 255 / 31) as u8,
+        (((value >> 5) & 0x3f) as u32 * 255 / 63) as u8,
+        ((value & 0x1f) as u32 * 255 / 31) as u8,
+    ]
+}
 
-    for y in 0..size {
-        for x in 0..size {
-            let brick_w = size / 4;
-            let brick_h = size / 8;
-            let row = y / brick_h.max(1);
-            let shifted_x = (x + (row % 2) * brick_w / 2) % size;
-            let mortar_x = (shifted_x % brick_w.max(1)) as f32;
-            let mortar_y = (y % brick_h.max(1)) as f32;
-            let edge_x = (5.0 - mortar_x.min((brick_w as f32 - mortar_x).abs())).max(0.0);
-            let edge_y = (5.0 - mortar_y.min((brick_h as f32 - mortar_y).abs())).max(0.0);
-            let slope_x = (edge_x
-                * if mortar_x < brick_w as f32 * 0.5 {
-                    -1.0
-                } else {
-                    1.0
-                })
-            .clamp(-5.0, 5.0)
-                / 24.0;
-            let slope_y = (edge_y
-                * if mortar_y < brick_h as f32 * 0.5 {
-                    -1.0
-                } else {
-                    1.0
-                })
-            .clamp(-5.0, 5.0)
-                / 24.0;
-            let normal = glam::Vec3::new(slope_x, slope_y, 1.0).normalize();
-            rgba.extend_from_slice(&[
-                ((normal.x * 0.5 + 0.5) * 255.0) as u8,
-                ((normal.y * 0.5 + 0.5) * 255.0) as u8,
-                ((normal.z * 0.5 + 0.5) * 255.0) as u8,
-                255,
-            ]);
-        }
-    }
+fn read_u32_le(bytes: &[u8], offset: usize, label: &str) -> RenderResult<u32> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| RenderError::message(format!("{label} KTX offset overflow")))?;
+    let slice = bytes
+        .get(offset..end)
+        .ok_or_else(|| RenderError::message(format!("{label} KTX is truncated")))?;
 
-    texture::ImageRgba8::new(size, size, rgba)
+    Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+fn align_to_4(value: usize) -> usize {
+    (value + 3) & !3
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_particle_fire_assets() -> RenderResult<ParticleFireAssets> {
+    let loader = AssetLoader::new();
+    let assets = loader.fetch_url_bytes_batch(&asset_requests())?;
+
+    particle_fire_assets_from_bytes(&assets)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn load_particle_fire_assets() -> RenderResult<ParticleFireAssets> {
+    let loader = AssetLoader::new();
+    let assets = loader.fetch_url_bytes_batch(&asset_requests()).await?;
+
+    particle_fire_assets_from_bytes(&assets)
+}
+
+fn asset_requests() -> [AssetRequest<'static>; 5] {
+    [
+        AssetRequest {
+            label: "fireplace.obj",
+            url: FIREPLACE_OBJ_URL,
+        },
+        AssetRequest {
+            label: "fireplace_colormap_bc3.ktx",
+            url: FIREPLACE_COLORMAP_URL,
+        },
+        AssetRequest {
+            label: "fireplace_normalmap_bc3.ktx",
+            url: FIREPLACE_NORMALMAP_URL,
+        },
+        AssetRequest {
+            label: "particle_fire.ktx",
+            url: PARTICLE_FIRE_URL,
+        },
+        AssetRequest {
+            label: "particle_smoke.ktx",
+            url: PARTICLE_SMOKE_URL,
+        },
+    ]
+}
+
+fn particle_fire_assets_from_bytes(assets: &[AssetBytes]) -> RenderResult<ParticleFireAssets> {
+    let fireplace_obj = asset_bytes(assets, "fireplace.obj")?;
+    let (environment_vertices, environment_indices) = load_fireplace_mesh(fireplace_obj)?;
+
+    Ok(ParticleFireAssets {
+        environment_vertices,
+        environment_indices,
+        floor_color: decode_bc3_ktx_rgba8(
+            asset_bytes(assets, "fireplace_colormap_bc3.ktx")?,
+            "fireplace_colormap_bc3.ktx",
+        )?,
+        floor_normal: decode_bc3_ktx_rgba8(
+            asset_bytes(assets, "fireplace_normalmap_bc3.ktx")?,
+            "fireplace_normalmap_bc3.ktx",
+        )?,
+        fire: decode_bc3_ktx_rgba8(
+            asset_bytes(assets, "particle_fire.ktx")?,
+            "particle_fire.ktx",
+        )?,
+        smoke: decode_bc3_ktx_rgba8(
+            asset_bytes(assets, "particle_smoke.ktx")?,
+            "particle_smoke.ktx",
+        )?,
+    })
+}
+
+fn asset_bytes<'a>(assets: &'a [AssetBytes], label: &str) -> RenderResult<&'a [u8]> {
+    assets
+        .iter()
+        .find(|asset| asset.label == label)
+        .map(|asset| asset.bytes.as_slice())
+        .ok_or_else(|| RenderError::message(format!("{label} was not loaded")))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> RenderResult<()> {
-    sib::render::run(ParticleSystemExample::default())
+    let assets = load_particle_fire_assets()?;
+    sib::render::run(ParticleSystemExample::new(assets))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1105,8 +1729,15 @@ fn main() {}
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
-    if let Err(error) = sib::render::run(ParticleSystemExample::default()) {
-        webgpu::log_error(error);
-    }
+    wasm_bindgen_futures::spawn_local(async {
+        match load_particle_fire_assets().await {
+            Ok(assets) => {
+                if let Err(error) = sib::render::run(ParticleSystemExample::new(assets)) {
+                    webgpu::log_error(error);
+                }
+            }
+            Err(error) => webgpu::log_error(error),
+        }
+    });
     Ok(())
 }
