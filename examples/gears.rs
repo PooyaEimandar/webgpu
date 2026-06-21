@@ -113,7 +113,7 @@ impl GearsExample {
         text::TextPlacement {
             left: 5.0,
             top: 5.0,
-            width: width.min(720.0).max(1.0),
+            width: width.clamp(1.0, 720.0),
             height: 72.0,
             ..Default::default()
         }

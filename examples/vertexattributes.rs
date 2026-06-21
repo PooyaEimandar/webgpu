@@ -659,12 +659,7 @@ fn checker_image(size: u32) -> RenderResult<texture::ImageRgba8> {
                 [226, 206, 104]
             };
             let accent = if stripe == 0 { 0 } else { 18 };
-            rgba.extend_from_slice(&[
-                (color[0] + accent).min(255),
-                (color[1] + accent).min(255),
-                (color[2] + accent).min(255),
-                255,
-            ]);
+            rgba.extend_from_slice(&[color[0] + accent, color[1] + accent, color[2] + accent, 255]);
         }
     }
     texture::ImageRgba8::new(size, size, rgba)

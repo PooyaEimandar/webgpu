@@ -166,7 +166,7 @@ impl InstancingExample {
         text::TextPlacement {
             left: 14.0,
             top: 14.0,
-            width: (context.surface_config.width as f32).min(900.0).max(1.0),
+            width: (context.surface_config.width as f32).clamp(1.0, 900.0),
             height: 140.0,
             ..Default::default()
         }
@@ -495,6 +495,7 @@ fn create_starfield_pipeline(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_pipeline(
     context: &RenderContext,
     layout: &wgpu::PipelineLayout,

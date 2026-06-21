@@ -278,7 +278,7 @@ impl IndirectDrawExample {
         text::TextPlacement {
             left: 14.0,
             top: 14.0,
-            width: (context.surface_config.width as f32).min(900.0).max(1.0),
+            width: (context.surface_config.width as f32).clamp(1.0, 900.0),
             height: 132.0,
             ..Default::default()
         }

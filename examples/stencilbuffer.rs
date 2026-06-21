@@ -139,7 +139,7 @@ impl StencilBufferExample {
         text::TextPlacement {
             left: 5.0,
             top: 5.0,
-            width: (context.surface_config.width as f32).min(760.0).max(1.0),
+            width: (context.surface_config.width as f32).clamp(1.0, 760.0),
             height: 72.0,
             ..Default::default()
         }
@@ -365,6 +365,7 @@ impl Example for StencilBufferExample {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_pipeline(
     context: &RenderContext,
     layout: &wgpu::PipelineLayout,

@@ -325,7 +325,7 @@ impl ParticleSystemExample {
         text::TextPlacement {
             left: 5.0,
             top: 5.0,
-            width: (context.surface_config.width as f32).min(820.0).max(1.0),
+            width: (context.surface_config.width as f32).clamp(1.0, 820.0),
             height: 72.0,
             ..Default::default()
         }
@@ -1507,8 +1507,8 @@ fn decode_bc3_ktx_rgba8(bytes: &[u8], label: &str) -> RenderResult<KtxRgba8> {
 }
 
 fn decode_bc3_rgba8(data: &[u8], width: u32, height: u32, label: &str) -> RenderResult<Vec<u8>> {
-    let block_width = (width + 3) / 4;
-    let block_height = (height + 3) / 4;
+    let block_width = width.div_ceil(4);
+    let block_height = height.div_ceil(4);
     let expected_size = (block_width as usize)
         .checked_mul(block_height as usize)
         .and_then(|value| value.checked_mul(16))

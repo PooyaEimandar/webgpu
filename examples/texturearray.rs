@@ -377,11 +377,12 @@ fn procedural_layer(index: usize) -> RenderResult<texture::ImageRgba8> {
             let angle = cy.atan2(cx);
             let wave = ((u * 20.0 + (v * 8.0).sin() * 2.0).sin() * 0.5 + 0.5) * 255.0;
             let ring = ((radius * 42.0 - angle * 2.0).sin() * 0.5 + 0.5) * 255.0;
-            let checker = if ((u * 12.0).floor() as u32 + (v * 12.0).floor() as u32) % 2 == 0 {
-                220
-            } else {
-                36
-            };
+            let checker =
+                if ((u * 12.0).floor() as u32 + (v * 12.0).floor() as u32).is_multiple_of(2) {
+                    220
+                } else {
+                    36
+                };
             let gradient = ((1.0 - radius * 1.7).clamp(0.0, 1.0) * 255.0) as u8;
 
             let pixel = match index % 2 {

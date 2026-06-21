@@ -1,5 +1,6 @@
 pub mod asset;
 pub mod gltf_scene;
+pub mod joystick;
 
 pub fn log_error(error: impl std::fmt::Display) {
     log_error_message(&error.to_string());
