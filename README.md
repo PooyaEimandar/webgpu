@@ -26,6 +26,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `gears` | Renders animated procedural toothed gears using indexed mesh buffers, per-gear uniform transforms, depth testing, and fragment shader lighting. | <picture><source srcset="screenshots/gears.webp" type="image/webp"><img src="screenshots/gears.jpg" alt="Animated procedural gears"></picture> |
 | `stencilbuffer` | Renders a toon-shaded Venus mesh, writes stencil during the first draw, then draws a normal-expanded outline where stencil differs. | <picture><source srcset="screenshots/stencilbuffer.webp" type="image/webp"><img src="screenshots/stencilbuffer.jpg" alt="Stencil buffer outline"></picture> |
 | `occlusionquery` | Tests teapot and sphere visibility; native builds resolve occlusion-query samples, while WASM uses a browser-safe fallback and shades hidden meshes dark. | <picture><source srcset="screenshots/occlusionquery.webp" type="image/webp"><img src="screenshots/occlusionquery.jpg" alt="Occlusion query visibility test"></picture> |
+| `radialblur` | Renders a glow sphere to an offscreen target, samples it in a fullscreen radial blur pass, and blends the result over the lit scene. | <picture><source srcset="screenshots/radialblur.webp" type="image/webp"><img src="screenshots/radialblur.jpg" alt="Radial blur glow sphere"></picture> |
 
 ## Running
 
