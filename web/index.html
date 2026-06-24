@@ -59,7 +59,8 @@
           { "@type": "ListItem", "position": 14, "name": "gears", "url": "https://pooyaeimandar.github.io/webgpu/gears/" },
           { "@type": "ListItem", "position": 15, "name": "stencil buffer", "url": "https://pooyaeimandar.github.io/webgpu/stencilbuffer/" },
           { "@type": "ListItem", "position": 16, "name": "occlusion queries", "url": "https://pooyaeimandar.github.io/webgpu/occlusionquery/" },
-          { "@type": "ListItem", "position": 17, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" }
+          { "@type": "ListItem", "position": 17, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
+          { "@type": "ListItem", "position": 18, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" }
         ]
       }
     }
@@ -383,6 +384,16 @@
         <span class="content">
           <strong>radial blur</strong>
           <span>Offscreen glow color pass composited back with an additive fullscreen radial blur.</span>
+        </span>
+      </a>
+      <a href="./bloom/">
+        <picture>
+          <source srcset="./screenshots/bloom.webp" type="image/webp" />
+          <img src="./screenshots/bloom.jpg" alt="Bloom offscreen rendering screenshot" />
+        </picture>
+        <span class="content">
+          <strong>bloom</strong>
+          <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit scene.</span>
         </span>
       </a>
     </div>
