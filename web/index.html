@@ -61,7 +61,9 @@
           { "@type": "ListItem", "position": 16, "name": "occlusion queries", "url": "https://pooyaeimandar.github.io/webgpu/occlusionquery/" },
           { "@type": "ListItem", "position": 17, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
           { "@type": "ListItem", "position": 18, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" },
-          { "@type": "ListItem", "position": 19, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" }
+          { "@type": "ListItem", "position": 19, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
+          { "@type": "ListItem", "position": 20, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
+          { "@type": "ListItem", "position": 21, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
         ]
       }
     }
@@ -405,6 +407,26 @@
         <span class="content">
           <strong>shadow mapping</strong>
           <span>Depth-only light pass sampled as a projected shadow map with PCF filtering.</span>
+        </span>
+      </a>
+      <a href="./shadowmappingcascade/">
+        <picture>
+          <source srcset="./screenshots/shadowmappingcascade.webp" type="image/webp" />
+          <img src="./screenshots/shadowmappingcascade.jpg" alt="Cascade shadow mapping screenshot" />
+        </picture>
+        <span class="content">
+          <strong>shadow mapping cascade</strong>
+          <span>Four frustum splits rendered into a layered depth texture, with the fragment shader sampling the matching cascade.</span>
+        </span>
+      </a>
+      <a href="./shadowmappingomni/">
+        <picture>
+          <source srcset="./screenshots/shadowmappingomni.webp" type="image/webp" />
+          <img src="./screenshots/shadowmappingomni.jpg" alt="Omni-directional shadow mapping screenshot" />
+        </picture>
+        <span class="content">
+          <strong>omni directional shadow mapping</strong>
+          <span>Six cube-map light passes store point-light distance, then the scene shader samples the cube map for omni-directional shadows.</span>
         </span>
       </a>
     </div>

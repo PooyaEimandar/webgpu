@@ -29,6 +29,8 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `radialblur` | Renders a glow sphere to an offscreen target, samples it in a fullscreen radial blur pass, and blends the result over the lit scene. | <picture><source srcset="screenshots/radialblur.webp" type="image/webp"><img src="screenshots/radialblur.jpg" alt="Radial blur glow sphere"></picture> |
 | `bloom` | Renders glowing UFO parts to an offscreen target, runs separable Gaussian blur passes, and additively composites the bloom over the lit scene. | <picture><source srcset="screenshots/bloom.webp" type="image/webp"><img src="screenshots/bloom.jpg" alt="Bloom offscreen rendering"></picture> |
 | `shadowmapping` | Renders a depth-only light pass into a shadow map, then samples that depth texture in the scene pass for projected shadows with PCF filtering. | <picture><source srcset="screenshots/shadowmapping.webp" type="image/webp"><img src="screenshots/shadowmapping.jpg" alt="Projected shadow mapping"></picture> |
+| `shadowmappingcascade` | Splits the camera frustum into four cascades, renders each split into a depth texture array layer, and samples the selected layer for directional shadows. | <picture><source srcset="screenshots/shadowmappingcascade.webp" type="image/webp"><img src="screenshots/shadowmappingcascade.jpg" alt="Cascade shadow mapping"></picture> |
+| `shadowmappingomni` | Renders the scene into the six faces of a floating-point cube map, stores point-light distance, and samples it for omni-directional shadows. | <picture><source srcset="screenshots/shadowmappingomni.webp" type="image/webp"><img src="screenshots/shadowmappingomni.jpg" alt="Omni-directional shadow mapping"></picture> |
 
 ## Running
 
