@@ -28,6 +28,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `occlusionquery` | Tests teapot and sphere visibility; native builds resolve occlusion-query samples, while WASM uses a browser-safe fallback and shades hidden meshes dark. | <picture><source srcset="screenshots/occlusionquery.webp" type="image/webp"><img src="screenshots/occlusionquery.jpg" alt="Occlusion query visibility test"></picture> |
 | `radialblur` | Renders a glow sphere to an offscreen target, samples it in a fullscreen radial blur pass, and blends the result over the lit scene. | <picture><source srcset="screenshots/radialblur.webp" type="image/webp"><img src="screenshots/radialblur.jpg" alt="Radial blur glow sphere"></picture> |
 | `bloom` | Renders glowing UFO parts to an offscreen target, runs separable Gaussian blur passes, and additively composites the bloom over the lit scene. | <picture><source srcset="screenshots/bloom.webp" type="image/webp"><img src="screenshots/bloom.jpg" alt="Bloom offscreen rendering"></picture> |
+| `shadowmapping` | Renders a depth-only light pass into a shadow map, then samples that depth texture in the scene pass for projected shadows with PCF filtering. | <picture><source srcset="screenshots/shadowmapping.webp" type="image/webp"><img src="screenshots/shadowmapping.jpg" alt="Projected shadow mapping"></picture> |
 
 ## Running
 

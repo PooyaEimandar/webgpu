@@ -60,7 +60,8 @@
           { "@type": "ListItem", "position": 15, "name": "stencil buffer", "url": "https://pooyaeimandar.github.io/webgpu/stencilbuffer/" },
           { "@type": "ListItem", "position": 16, "name": "occlusion queries", "url": "https://pooyaeimandar.github.io/webgpu/occlusionquery/" },
           { "@type": "ListItem", "position": 17, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
-          { "@type": "ListItem", "position": 18, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" }
+          { "@type": "ListItem", "position": 18, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" },
+          { "@type": "ListItem", "position": 19, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" }
         ]
       }
     }
@@ -394,6 +395,16 @@
         <span class="content">
           <strong>bloom</strong>
           <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit scene.</span>
+        </span>
+      </a>
+      <a href="./shadowmapping/">
+        <picture>
+          <source srcset="./screenshots/shadowmapping.webp" type="image/webp" />
+          <img src="./screenshots/shadowmapping.jpg" alt="Projected shadow mapping screenshot" />
+        </picture>
+        <span class="content">
+          <strong>shadow mapping</strong>
+          <span>Depth-only light pass sampled as a projected shadow map with PCF filtering.</span>
         </span>
       </a>
     </div>
