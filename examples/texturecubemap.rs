@@ -3,18 +3,8 @@ use sib::render::{
     Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, camera,
     glam, render_pass, shader, texture, wgpu, winit,
 };
-use webgpu::asset::{AssetLoader, AssetRequest};
+use webgpu::skybox;
 
-const SKYBOX_BASE_URL: &str =
-    "https://cdn.apewebapps.com/threejs/160/examples/textures/cube/Bridge2";
-const CUBEMAP_FACES: &[(&str, &str)] = &[
-    ("px", "posx.jpg"),
-    ("nx", "negx.jpg"),
-    ("py", "posy.jpg"),
-    ("ny", "negy.jpg"),
-    ("pz", "posz.jpg"),
-    ("nz", "negz.jpg"),
-];
 const SPHERE_SEGMENTS: u32 = 64;
 const SPHERE_RINGS: u32 = 32;
 
@@ -481,43 +471,14 @@ impl Example for TextureCubemap {
     }
 }
 
-fn face_url(file_name: &str) -> String {
-    format!("{SKYBOX_BASE_URL}/{file_name}")
-}
-
-fn cubemap_urls() -> Vec<(String, String)> {
-    CUBEMAP_FACES
-        .iter()
-        .map(|(face_name, file_name)| (face_name.to_string(), face_url(file_name)))
-        .collect()
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn load_cubemap_images() -> RenderResult<Vec<texture::ImageRgba8>> {
-    let urls = cubemap_urls();
-    let requests = urls
-        .iter()
-        .map(|(label, url)| AssetRequest {
-            label: label.as_str(),
-            url: url.as_str(),
-        })
-        .collect::<Vec<_>>();
-
-    AssetLoader::new().fetch_images_rgba8_batch(&requests)
+    skybox::load_bridge2_rgba8()
 }
 
 #[cfg(target_arch = "wasm32")]
 async fn load_cubemap_images() -> RenderResult<Vec<texture::ImageRgba8>> {
-    let urls = cubemap_urls();
-    let requests = urls
-        .iter()
-        .map(|(label, url)| AssetRequest {
-            label: label.as_str(),
-            url: url.as_str(),
-        })
-        .collect::<Vec<_>>();
-
-    AssetLoader::new().fetch_images_rgba8_batch(&requests).await
+    skybox::load_bridge2_rgba8().await
 }
 
 #[cfg(not(target_arch = "wasm32"))]

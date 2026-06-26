@@ -62,9 +62,12 @@
           { "@type": "ListItem", "position": 17, "name": "occlusion queries", "url": "https://pooyaeimandar.github.io/webgpu/occlusionquery/" },
           { "@type": "ListItem", "position": 18, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
           { "@type": "ListItem", "position": 19, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" },
-          { "@type": "ListItem", "position": 20, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
-          { "@type": "ListItem", "position": 21, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
-          { "@type": "ListItem", "position": 22, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
+          { "@type": "ListItem", "position": 20, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
+          { "@type": "ListItem", "position": 21, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
+          { "@type": "ListItem", "position": 22, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
+          { "@type": "ListItem", "position": 23, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
+          { "@type": "ListItem", "position": 24, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
+          { "@type": "ListItem", "position": 25, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
         ]
       }
     }
@@ -408,6 +411,36 @@
         <span class="content">
           <strong>bloom</strong>
           <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit scene.</span>
+        </span>
+      </a>
+      <a href="./pbr/">
+        <picture>
+          <source srcset="./screenshots/pbr.webp" type="image/webp" />
+          <img src="./screenshots/pbr.jpg" alt="PBR material grid screenshot" />
+        </picture>
+        <span class="content">
+          <strong>PBR basic</strong>
+          <span>GGX/Schlick material grid with metallic and roughness varied per sphere instance.</span>
+        </span>
+      </a>
+      <a href="./pbribl/">
+        <picture>
+          <source srcset="./screenshots/pbribl.webp" type="image/webp" />
+          <img src="./screenshots/pbribl.jpg" alt="PBR image based lighting screenshot" />
+        </picture>
+        <span class="content">
+          <strong>PBR image based lighting</strong>
+          <span>Irradiance, prefiltered environment mips, and BRDF LUT sampling for image-based PBR.</span>
+        </span>
+      </a>
+      <a href="./pbrtexture/">
+        <picture>
+          <source srcset="./screenshots/pbrtexture.webp" type="image/webp" />
+          <img src="./screenshots/pbrtexture.jpg" alt="Textured PBR Cerberus model screenshot" />
+        </picture>
+        <span class="content">
+          <strong>PBR texture</strong>
+          <span>Cerberus glTF rendered with albedo, normal, AO, metallic, and roughness texture maps.</span>
         </span>
       </a>
       <a href="./shadowmapping/">
