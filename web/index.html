@@ -62,12 +62,13 @@
           { "@type": "ListItem", "position": 17, "name": "occlusion queries", "url": "https://pooyaeimandar.github.io/webgpu/occlusionquery/" },
           { "@type": "ListItem", "position": 18, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
           { "@type": "ListItem", "position": 19, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" },
-          { "@type": "ListItem", "position": 20, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
-          { "@type": "ListItem", "position": 21, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
-          { "@type": "ListItem", "position": 22, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
-          { "@type": "ListItem", "position": 23, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
-          { "@type": "ListItem", "position": 24, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
-          { "@type": "ListItem", "position": 25, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
+          { "@type": "ListItem", "position": 20, "name": "parallax mapping", "url": "https://pooyaeimandar.github.io/webgpu/parallaxmapping/" },
+          { "@type": "ListItem", "position": 21, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
+          { "@type": "ListItem", "position": 22, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
+          { "@type": "ListItem", "position": 23, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
+          { "@type": "ListItem", "position": 24, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
+          { "@type": "ListItem", "position": 25, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
+          { "@type": "ListItem", "position": 26, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
         ]
       }
     }
@@ -411,6 +412,16 @@
         <span class="content">
           <strong>bloom</strong>
           <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit scene.</span>
+        </span>
+      </a>
+      <a href="./parallaxmapping/">
+        <picture>
+          <source srcset="./screenshots/parallaxmapping.webp" type="image/webp" />
+          <img src="./screenshots/parallaxmapping.jpg" alt="Parallax occlusion mapping screenshot" />
+        </picture>
+        <span class="content">
+          <strong>parallax mapping</strong>
+          <span>Normal mapping and parallax occlusion mapping using a combined normal-height texture.</span>
         </span>
       </a>
       <a href="./pbr/">
