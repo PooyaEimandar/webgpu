@@ -1,5 +1,6 @@
 pub mod asset;
 pub mod gltf_scene;
+pub mod gltf_skin;
 pub mod joystick;
 pub mod skybox;
 
