@@ -8,7 +8,10 @@ use sib::render::{
 use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
-const CESIUM_MAN_GLTF_URL: &str = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF/CesiumMan.gltf";
+#[cfg(not(target_arch = "wasm32"))]
+const JAX_GLTF_URL: &str = "assets/models/jax.gltf";
+#[cfg(target_arch = "wasm32")]
+const JAX_GLTF_URL: &str = "../assets/models/jax.gltf";
 const MAX_JOINTS: usize = 128;
 
 #[repr(C)]
@@ -55,7 +58,7 @@ impl SceneUniforms {
     fn new(aspect_ratio: f32, bounds: mesh::MeshBounds, material: SkinnedMaterial) -> Self {
         let radius = bounds.radius().max(0.8);
         let center = glam::Vec3::from_array(bounds.center());
-        let model = glam::Mat4::from_rotation_x(-90.0_f32.to_radians())
+        let model = glam::Mat4::from_rotation_y(30.0_f32.to_radians())
             * glam::Mat4::from_translation(-center);
         let eye = glam::Vec3::new(0.0, radius * 0.52, radius * 2.45);
         let target = glam::Vec3::new(0.0, radius * 0.18, 0.0);
@@ -1397,7 +1400,7 @@ fn white_image() -> RenderResult<texture::ImageRgba8> {
 #[cfg(not(target_arch = "wasm32"))]
 fn run_gltf_skinning() -> RenderResult<()> {
     sib::render::run(GltfSkinningExample::new(load_skinned_gltf_scene(
-        CESIUM_MAN_GLTF_URL,
+        JAX_GLTF_URL,
     )?))
 }
 
@@ -1413,7 +1416,7 @@ fn main() {}
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
     wasm_bindgen_futures::spawn_local(async {
-        match load_skinned_gltf_scene(CESIUM_MAN_GLTF_URL).await {
+        match load_skinned_gltf_scene(JAX_GLTF_URL).await {
             Ok(scene) => {
                 if let Err(error) = sib::render::run(GltfSkinningExample::new(scene)) {
                     webgpu::log_error(error);
