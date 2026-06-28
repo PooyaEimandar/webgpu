@@ -33,14 +33,16 @@ done
 
 OUT_DIR="${WEBGPU_WEB_ROOT:-target/web}"
 if [ -z "$EXAMPLES" ]; then
-  EXAMPLES=" triangle vertexattributes particlesystem texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom parallaxmapping pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
+  EXAMPLES=" triangle vertexattributes particlesystem texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom parallaxmapping multisampling multisamplingalphatocoverage pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
 fi
 
 mkdir -p "$OUT_DIR"
 for EXAMPLE in $EXAMPLES; do
   EXAMPLE_OUT_DIR="$OUT_DIR/$EXAMPLE"
+  echo "Building $EXAMPLE for wasm32-unknown-unknown ($PROFILE)"
   cargo build --target wasm32-unknown-unknown $PROFILE_FLAG --example "$EXAMPLE"
   mkdir -p "$EXAMPLE_OUT_DIR"
+  echo "Generating web bindings for $EXAMPLE"
   wasm-bindgen \
     --target web \
     --out-dir "$EXAMPLE_OUT_DIR" \
@@ -56,7 +58,14 @@ if [ -d screenshots ]; then
   cp screenshots/*.jpg "$OUT_DIR/screenshots/" 2>/dev/null || true
 fi
 if [ -d assets ]; then
-  mkdir -p "$OUT_DIR/assets"
-  cp -R assets/. "$OUT_DIR/assets/"
+  echo "Syncing assets"
+  if command -v rsync >/dev/null 2>&1; then
+    mkdir -p "$OUT_DIR/assets"
+    rsync -a --delete assets/ "$OUT_DIR/assets/"
+  else
+    rm -rf "$OUT_DIR/assets"
+    mkdir -p "$OUT_DIR/assets"
+    cp -R assets/. "$OUT_DIR/assets/"
+  fi
 fi
 touch "$OUT_DIR/.nojekyll"

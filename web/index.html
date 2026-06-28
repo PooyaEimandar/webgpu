@@ -63,12 +63,14 @@
           { "@type": "ListItem", "position": 18, "name": "radial blur", "url": "https://pooyaeimandar.github.io/webgpu/radialblur/" },
           { "@type": "ListItem", "position": 19, "name": "bloom", "url": "https://pooyaeimandar.github.io/webgpu/bloom/" },
           { "@type": "ListItem", "position": 20, "name": "parallax mapping", "url": "https://pooyaeimandar.github.io/webgpu/parallaxmapping/" },
-          { "@type": "ListItem", "position": 21, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
-          { "@type": "ListItem", "position": 22, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
-          { "@type": "ListItem", "position": 23, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
-          { "@type": "ListItem", "position": 24, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
-          { "@type": "ListItem", "position": 25, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
-          { "@type": "ListItem", "position": 26, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
+          { "@type": "ListItem", "position": 21, "name": "multisampling", "url": "https://pooyaeimandar.github.io/webgpu/multisampling/" },
+          { "@type": "ListItem", "position": 22, "name": "multisampling alpha to coverage", "url": "https://pooyaeimandar.github.io/webgpu/multisamplingalphatocoverage/" },
+          { "@type": "ListItem", "position": 23, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
+          { "@type": "ListItem", "position": 24, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
+          { "@type": "ListItem", "position": 25, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
+          { "@type": "ListItem", "position": 26, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
+          { "@type": "ListItem", "position": 27, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
+          { "@type": "ListItem", "position": 28, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
         ]
       }
     }
@@ -422,6 +424,26 @@
         <span class="content">
           <strong>parallax mapping</strong>
           <span>Normal mapping and parallax occlusion mapping using a combined normal-height texture.</span>
+        </span>
+      </a>
+      <a href="./multisampling/">
+        <picture>
+          <source srcset="./screenshots/multisampling.webp" type="image/webp" />
+          <img src="./screenshots/multisampling.jpg" alt="Multisampled Voyager glTF model screenshot" />
+        </picture>
+        <span class="content">
+          <strong>multisampling</strong>
+          <span>Voyager glTF rendered into 4x MSAA color and depth targets, then resolved into the swapchain.</span>
+        </span>
+      </a>
+      <a href="./multisamplingalphatocoverage/">
+        <picture>
+          <source srcset="./screenshots/multisamplingalphatocoverage.webp" type="image/webp" />
+          <img src="./screenshots/multisamplingalphatocoverage.jpg" alt="Multisampling alpha-to-coverage oak trees screenshot" />
+        </picture>
+        <span class="content">
+          <strong>multisampling alpha to coverage</strong>
+          <span>Instanced alpha-masked oak trees rendered with 4x MSAA and alpha-to-coverage foliage edges.</span>
         </span>
       </a>
       <a href="./pbr/">
