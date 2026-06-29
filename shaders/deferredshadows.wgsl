@@ -266,12 +266,12 @@ fn sample_shadow_map(light_index: u32, uv: vec2<f32>, reference_depth: f32) -> f
 fn sample_shadow_depth(light_index: u32, uv: vec2<f32>, reference_depth: f32) -> f32 {
     let shadow_uv = clamp(uv, vec2<f32>(0.001), vec2<f32>(0.999));
     if (light_index == 0u) {
-        return textureSampleCompare(shadow_map_0, shadow_sampler, shadow_uv, reference_depth);
+        return textureSampleCompareLevel(shadow_map_0, shadow_sampler, shadow_uv, reference_depth);
     }
     if (light_index == 1u) {
-        return textureSampleCompare(shadow_map_1, shadow_sampler, shadow_uv, reference_depth);
+        return textureSampleCompareLevel(shadow_map_1, shadow_sampler, shadow_uv, reference_depth);
     }
-    return textureSampleCompare(shadow_map_2, shadow_sampler, shadow_uv, reference_depth);
+    return textureSampleCompareLevel(shadow_map_2, shadow_sampler, shadow_uv, reference_depth);
 }
 
 @fragment
