@@ -65,15 +65,16 @@
           { "@type": "ListItem", "position": 20, "name": "deferred shading", "url": "https://pooyaeimandar.github.io/webgpu/deferred/" },
           { "@type": "ListItem", "position": 21, "name": "multi sampled deferred shading", "url": "https://pooyaeimandar.github.io/webgpu/deferredmultisampling/" },
           { "@type": "ListItem", "position": 22, "name": "deferred shadows", "url": "https://pooyaeimandar.github.io/webgpu/deferredshadows/" },
-          { "@type": "ListItem", "position": 23, "name": "parallax mapping", "url": "https://pooyaeimandar.github.io/webgpu/parallaxmapping/" },
-          { "@type": "ListItem", "position": 24, "name": "multisampling", "url": "https://pooyaeimandar.github.io/webgpu/multisampling/" },
-          { "@type": "ListItem", "position": 25, "name": "multisampling alpha to coverage", "url": "https://pooyaeimandar.github.io/webgpu/multisamplingalphatocoverage/" },
-          { "@type": "ListItem", "position": 26, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
-          { "@type": "ListItem", "position": 27, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
-          { "@type": "ListItem", "position": 28, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
-          { "@type": "ListItem", "position": 29, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
-          { "@type": "ListItem", "position": 30, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
-          { "@type": "ListItem", "position": 31, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
+          { "@type": "ListItem", "position": 23, "name": "screen space ambient occlusion", "url": "https://pooyaeimandar.github.io/webgpu/ssao/" },
+          { "@type": "ListItem", "position": 24, "name": "parallax mapping", "url": "https://pooyaeimandar.github.io/webgpu/parallaxmapping/" },
+          { "@type": "ListItem", "position": 25, "name": "multisampling", "url": "https://pooyaeimandar.github.io/webgpu/multisampling/" },
+          { "@type": "ListItem", "position": 26, "name": "multisampling alpha to coverage", "url": "https://pooyaeimandar.github.io/webgpu/multisamplingalphatocoverage/" },
+          { "@type": "ListItem", "position": 27, "name": "PBR basic", "url": "https://pooyaeimandar.github.io/webgpu/pbr/" },
+          { "@type": "ListItem", "position": 28, "name": "PBR image based lighting", "url": "https://pooyaeimandar.github.io/webgpu/pbribl/" },
+          { "@type": "ListItem", "position": 29, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
+          { "@type": "ListItem", "position": 30, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
+          { "@type": "ListItem", "position": 31, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
+          { "@type": "ListItem", "position": 32, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
         ]
       }
     }
@@ -447,6 +448,16 @@
         <span class="content">
           <strong>deferred shadows</strong>
           <span>Three shadow-map layers rendered with vertex-only depth passes and sampled during deferred composition.</span>
+        </span>
+      </a>
+      <a href="./ssao/">
+        <picture>
+          <source srcset="./screenshots/ssao.webp" type="image/webp" />
+          <img src="./screenshots/ssao.jpg" alt="Screen space ambient occlusion screenshot" />
+        </picture>
+        <span class="content">
+          <strong>screen space ambient occlusion</strong>
+          <span>Deferred depth and normals generate a blurred ambient occlusion mask for shadowed composition.</span>
         </span>
       </a>
       <a href="./parallaxmapping/">
