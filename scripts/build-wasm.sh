@@ -33,7 +33,7 @@ done
 
 OUT_DIR="${WEBGPU_WEB_ROOT:-target/web}"
 if [ -z "$EXAMPLES" ]; then
-  EXAMPLES=" triangle vertexattributes particlesystem texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom deferred deferredmultisampling deferredshadows ssao parallaxmapping multisampling multisamplingalphatocoverage pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
+  EXAMPLES=" triangle vertexattributes particlesystem computeparticles texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom deferred deferredmultisampling deferredshadows ssao parallaxmapping multisampling multisamplingalphatocoverage pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
 fi
 
 mkdir -p "$OUT_DIR"

@@ -178,7 +178,6 @@ impl AssetLoader {
         requests: &[AssetRequest<'_>],
     ) -> RenderResult<Vec<AssetBytes>> {
         use wasm_bindgen::JsCast;
-        use wasm_bindgen::closure::Closure;
         use wasm_bindgen_futures::JsFuture;
 
         let worker_script = r#"
@@ -254,39 +253,40 @@ self.onmessage = async (event) => {
         let promise = js_sys::Promise::new(&mut |resolve, reject| {
             let resolve_message = resolve.clone();
             let reject_message = reject.clone();
-            let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
-                let data = event.data();
-                let ok = js_sys::Reflect::get(&data, &wasm_bindgen::JsValue::from_str("ok"))
-                    .ok()
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
+            let onmessage = wasm_bindgen::closure::Closure::once_into_js(
+                move |event: web_sys::MessageEvent| {
+                    let data = event.data();
+                    let ok = js_sys::Reflect::get(&data, &wasm_bindgen::JsValue::from_str("ok"))
+                        .ok()
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
 
-                if ok {
-                    let _ = resolve_message.call1(&wasm_bindgen::JsValue::NULL, &data);
-                } else {
-                    let error =
-                        js_sys::Reflect::get(&data, &wasm_bindgen::JsValue::from_str("error"))
-                            .ok()
-                            .and_then(|value| value.as_string())
-                            .unwrap_or_else(|| "asset worker failed".to_owned());
-                    let _ = reject_message.call1(
-                        &wasm_bindgen::JsValue::NULL,
-                        &wasm_bindgen::JsValue::from_str(&error),
-                    );
-                }
-            }) as Box<dyn FnMut(_)>);
-            worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-            onmessage.forget();
+                    if ok {
+                        let _ = resolve_message.call1(&wasm_bindgen::JsValue::NULL, &data);
+                    } else {
+                        let error =
+                            js_sys::Reflect::get(&data, &wasm_bindgen::JsValue::from_str("error"))
+                                .ok()
+                                .and_then(|value| value.as_string())
+                                .unwrap_or_else(|| "asset worker failed".to_owned());
+                        let _ = reject_message.call1(
+                            &wasm_bindgen::JsValue::NULL,
+                            &wasm_bindgen::JsValue::from_str(&error),
+                        );
+                    }
+                },
+            );
+            worker.set_onmessage(Some(onmessage.unchecked_ref()));
 
             let reject_error = reject.clone();
-            let onerror = Closure::wrap(Box::new(move |event: web_sys::ErrorEvent| {
-                let _ = reject_error.call1(
-                    &wasm_bindgen::JsValue::NULL,
-                    &wasm_bindgen::JsValue::from_str(&event.message()),
-                );
-            }) as Box<dyn FnMut(_)>);
-            worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
-            onerror.forget();
+            let onerror =
+                wasm_bindgen::closure::Closure::once_into_js(move |event: web_sys::ErrorEvent| {
+                    let _ = reject_error.call1(
+                        &wasm_bindgen::JsValue::NULL,
+                        &wasm_bindgen::JsValue::from_str(&event.message()),
+                    );
+                });
+            worker.set_onerror(Some(onerror.unchecked_ref()));
 
             if let Err(error) = worker.post_message(&message) {
                 let _ = reject.call1(&wasm_bindgen::JsValue::NULL, &error);
