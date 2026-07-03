@@ -1,6 +1,8 @@
 const EPSILON: f32 = 0.0001;
 const MAX_LEN: f32 = 10000.0;
 const MAX_RECURSION: u32 = 4u;
+const INV_TWO_PI: f32 = 0.15915494309;
+const INV_PI: f32 = 0.31830988618;
 const SCENE_OBJECT_TYPE_SPHERE: u32 = 0u;
 const SCENE_OBJECT_TYPE_PLANE: u32 = 1u;
 const SCENE_OBJECT_TYPE_BOX: u32 = 2u;
@@ -35,6 +37,12 @@ var<uniform> uniforms: RayReflectionUniforms;
 
 @group(0) @binding(2)
 var<storage, read> scene_objects: array<SceneObject>;
+
+@group(0) @binding(3)
+var grate_texture: texture_2d<f32>;
+
+@group(0) @binding(4)
+var grate_sampler: sampler;
 
 fn object_count() -> u32 {
   return u32(uniforms.params.x);
@@ -149,13 +157,25 @@ fn object_normal(pos: vec3<f32>, object: SceneObject) -> vec3<f32> {
   return object.object_properties.xyz;
 }
 
-fn object_color(pos: vec3<f32>, object: SceneObject) -> vec3<f32> {
-  if (object.ids.z == 1u) {
+fn sphere_uv(normal: vec3<f32>) -> vec2<f32> {
+  let u = atan2(normal.z, normal.x) * INV_TWO_PI + 0.5;
+  let v = asin(clamp(normal.y, -1.0, 1.0)) * INV_PI + 0.5;
+  return vec2<f32>(fract(u * 2.0 + uniforms.params.w * 0.04), fract((1.0 - v) * 1.6));
+}
+
+fn object_color(pos: vec3<f32>, normal: vec3<f32>, object: SceneObject) -> vec3<f32> {
+  let base = object.diffuse_reflectivity.rgb;
+  if (object.ids.y == SCENE_OBJECT_TYPE_SPHERE && object.ids.z == 1u) {
+    let texel = textureSampleLevel(grate_texture, grate_sampler, sphere_uv(normal), 0.0);
+    return base * mix(vec3<f32>(0.18), texel.rgb * 1.35, max(texel.a, 0.08));
+  }
+
+  if (object.ids.z == 2u) {
     let checker = i32(floor(pos.x * 0.9) + floor(pos.z * 0.9));
     let tint = select(0.45, 0.82, (checker & 1) == 0);
-    return object.diffuse_reflectivity.rgb * tint;
+    return base * tint;
   }
-  return object.diffuse_reflectivity.rgb;
+  return base;
 }
 
 fn intersect(ray_o: vec3<f32>, ray_d: vec3<f32>, max_t: f32) -> Hit {
@@ -166,10 +186,11 @@ fn intersect(ray_o: vec3<f32>, ray_d: vec3<f32>, max_t: f32) -> Hit {
     let t = object_intersect(ray_o, ray_d, object);
     if ((t > EPSILON) && (t < hit.t)) {
       let pos = ray_o + ray_d * t;
+      let normal = normalize(object_normal(pos, object));
       hit.object_id = i32(object.ids.x);
       hit.t = t;
-      hit.normal = normalize(object_normal(pos, object));
-      hit.color = object_color(pos, object);
+      hit.normal = normal;
+      hit.color = object_color(pos, normal, object);
       hit.reflectivity = object.diffuse_reflectivity.w;
     }
   }
