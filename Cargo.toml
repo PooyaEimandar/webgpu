@@ -10,8 +10,8 @@ name = "serve"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "0.22.1"
-bytes = "1.12.0"
+base64 = { version = "0.22.1" }
+bytes = { version = "1.12.0" }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 egui = { version = "0.35.0", default-features = false }
 egui-wgpu = { version = "0.35.0", default-features = false }
@@ -21,7 +21,7 @@ gltf = { version = "1.4.1", default-features = false, features = [
     "utils",
 ] }
 http = { version = "1.4.2" }
-image = { version = "0.25.9", default-features = false, features = [
+image = { version = "0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
@@ -33,13 +33,36 @@ sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-h1-server",
     "render",
 ] }
-ureq = "3.3.0"
+ureq = { version = "3.3.0" }
+wry = { version = "0.55.1" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "0.6.2" }
+objc2 = { version = "0.6.4", features = [
+    "disable-encoding-assertions",
+    "exception",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSBitmapImageRep",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "objc2-core-graphics",
+    "std",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "NSData",
+    "NSError",
+    "NSObject",
+    "NSString",
+    "std",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3.102"
-wasm-bindgen = "0.2.125"
-wasm-bindgen-futures = "0.4.75"
-web-sys = { version = "0.3.102", features = [
+js-sys = { version = "0.3.103" }
+wasm-bindgen = { version = "0.2.126" }
+wasm-bindgen-futures = { version = "0.4.76" }
+web-sys = { version = "0.3.103", features = [
     "Blob",
     "BlobPropertyBag",
     "console",

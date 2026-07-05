@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        background: #101723;
+        color: #f4f9ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 72% 26%, rgba(104, 228, 199, 0.2), transparent 24%),
+          linear-gradient(180deg, #0d1421 0%, #172235 100%);
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(720px, calc(100% - 72px));
+        padding: 56px;
+        border: 2px solid #48556a;
+        background: rgba(19, 27, 42, 0.94);
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0 0 28px;
+        font-size: 42px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      button {
+        width: 280px;
+        height: 76px;
+        border: 2px solid #17695e;
+        background: #2ab49e;
+        color: #051014;
+        font-size: 28px;
+        font-weight: 900;
+        letter-spacing: 0;
+        cursor: pointer;
+      }
+
+      button:hover,
+      button:focus {
+        background: #37cdb3;
+        outline: none;
+      }
+
+      button:active {
+        background: #20aa94;
+      }
+
+      p {
+        margin: 28px 0 0;
+        color: #aebed2;
+        font-size: 22px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>HTML Mesh</h1>
+      <button class="button {{button_class}}" type="button">Click</button>
+      <p class="status">Button count {{counter}}</p>
+    </main>
+    <script>
+      (() => {
+        const button = document.querySelector("button");
+        const status = document.querySelector(".status");
+        let count = 0;
+        button?.addEventListener("click", () => {
+          count += 1;
+          if (status) {
+            status.textContent = `Button count ${String(count).padStart(2, "0")}`;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
