@@ -46,11 +46,12 @@ struct Vertex {
     position: [f32; 3],
     uv: [f32; 2],
     normal: [f32; 3],
+    shard: [f32; 2],
 }
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3, 3 => Float32x2];
 
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -67,10 +68,11 @@ struct Uniforms {
     view_projection: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
     view_pos: [f32; 4],
+    effect: [f32; 4],
 }
 
 impl Uniforms {
-    fn new(aspect_ratio: f32) -> Self {
+    fn new(aspect_ratio: f32, animation_time: f32, shatter_enabled: bool) -> Self {
         let view_pos = camera_position();
         let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
         let projection =
@@ -80,34 +82,130 @@ impl Uniforms {
             view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
             model: plane_model().to_cols_array_2d(),
             view_pos: [view_pos.x, view_pos.y, view_pos.z, 0.0],
+            effect: [
+                animation_time,
+                if shatter_enabled { 1.0 } else { 0.0 },
+                SHATTER_COLUMNS as f32,
+                SHATTER_ROWS as f32,
+            ],
         }
     }
 }
 
-const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0],
-        uv: [0.0, 0.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-    Vertex {
-        position: [PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0],
-        uv: [1.0, 0.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-    Vertex {
-        position: [PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0],
-        uv: [1.0, 1.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-    Vertex {
-        position: [-PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0],
-        uv: [0.0, 1.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-];
+const SHATTER_COLUMNS: u32 = 64;
+const SHATTER_ROWS: u32 = 36;
 
-const INDICES: &[u32] = &[0, 1, 2, 2, 3, 0];
+struct PlaneMeshData {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+}
+
+struct GpuPlaneMesh {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+fn plain_plane_mesh() -> PlaneMeshData {
+    PlaneMeshData {
+        vertices: vec![
+            Vertex {
+                position: [-PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0],
+                uv: [0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                shard: [0.5, 0.5],
+            },
+            Vertex {
+                position: [PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0],
+                uv: [1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                shard: [0.5, 0.5],
+            },
+            Vertex {
+                position: [PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0],
+                uv: [1.0, 1.0],
+                normal: [0.0, 0.0, 1.0],
+                shard: [0.5, 0.5],
+            },
+            Vertex {
+                position: [-PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0],
+                uv: [0.0, 1.0],
+                normal: [0.0, 0.0, 1.0],
+                shard: [0.5, 0.5],
+            },
+        ],
+        indices: vec![0, 1, 2, 2, 3, 0],
+    }
+}
+
+fn shatter_plane_mesh() -> PlaneMeshData {
+    let tile_count = (SHATTER_COLUMNS * SHATTER_ROWS) as usize;
+    let mut vertices = Vec::with_capacity(tile_count * 4);
+    let mut indices = Vec::with_capacity(tile_count * 6);
+
+    for row in 0..SHATTER_ROWS {
+        for column in 0..SHATTER_COLUMNS {
+            let u0 = column as f32 / SHATTER_COLUMNS as f32;
+            let u1 = (column + 1) as f32 / SHATTER_COLUMNS as f32;
+            let v0 = row as f32 / SHATTER_ROWS as f32;
+            let v1 = (row + 1) as f32 / SHATTER_ROWS as f32;
+            let x0 = -PLANE_HALF_WIDTH + u0 * PLANE_HALF_WIDTH * 2.0;
+            let x1 = -PLANE_HALF_WIDTH + u1 * PLANE_HALF_WIDTH * 2.0;
+            let y0 = PLANE_HALF_HEIGHT - v0 * PLANE_HALF_HEIGHT * 2.0;
+            let y1 = PLANE_HALF_HEIGHT - v1 * PLANE_HALF_HEIGHT * 2.0;
+            let shard = [(u0 + u1) * 0.5, (v0 + v1) * 0.5];
+            let base = vertices.len() as u32;
+
+            vertices.extend_from_slice(&[
+                Vertex {
+                    position: [x0, y0, 0.0],
+                    uv: [u0, v0],
+                    normal: [0.0, 0.0, 1.0],
+                    shard,
+                },
+                Vertex {
+                    position: [x1, y0, 0.0],
+                    uv: [u1, v0],
+                    normal: [0.0, 0.0, 1.0],
+                    shard,
+                },
+                Vertex {
+                    position: [x1, y1, 0.0],
+                    uv: [u1, v1],
+                    normal: [0.0, 0.0, 1.0],
+                    shard,
+                },
+                Vertex {
+                    position: [x0, y1, 0.0],
+                    uv: [u0, v1],
+                    normal: [0.0, 0.0, 1.0],
+                    shard,
+                },
+            ]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 3, base]);
+        }
+    }
+
+    PlaneMeshData { vertices, indices }
+}
+
+fn gpu_plane_mesh(
+    device: &wgpu::Device,
+    label: &'static str,
+    mesh: &PlaneMeshData,
+) -> RenderResult<GpuPlaneMesh> {
+    let index_count = mesh
+        .indices
+        .len()
+        .try_into()
+        .map_err(|_| RenderError::message("HTML mesh index count fits in u32"))?;
+
+    Ok(GpuPlaneMesh {
+        vertex_buffer: buffer::vertex_buffer(device, Some(label), &mesh.vertices),
+        index_buffer: buffer::index_buffer(device, Some(label), &mesh.indices),
+        index_count,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HtmlElementId {
@@ -120,6 +218,8 @@ enum HtmlElementId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HtmlDocumentKind {
     Memory,
+    #[cfg(target_arch = "wasm32")]
+    BrowserEmbed,
     #[cfg(not(target_arch = "wasm32"))]
     NativeWebView,
 }
@@ -198,6 +298,16 @@ impl HtmlSurface {
         self.document_label = "memory: assets/htmlmesh/page.html".to_owned();
         self.document_kind = HtmlDocumentKind::Memory;
         self.mark_dirty();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn show_browser_embed_loading(&mut self, url: &str) {
+        self.document_label = format!("browser iframe: {url}");
+        self.document_kind = HtmlDocumentKind::BrowserEmbed;
+        self.mark_dirty();
+        self.render_browser_embed_loading(url);
+        self.bitmap_generation = self.state_generation;
+        self.texture_dirty = true;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -592,6 +702,45 @@ impl HtmlSurface {
         self.draw_status();
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn render_browser_embed_loading(&mut self, url: &str) {
+        self.clear([12, 17, 28, 255]);
+        self.draw_background();
+        self.draw_card();
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            146,
+            4,
+            "BROWSER HTML",
+            [244, 249, 255, 255],
+            TextAlign::Center,
+        );
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            238,
+            3,
+            "IFRAME OVERLAY ACTIVE",
+            [104, 228, 199, 255],
+            TextAlign::Center,
+        );
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            312,
+            2,
+            "THE BROWSER EMBEDS THE URL AND HANDLES INPUT",
+            [174, 190, 210, 255],
+            TextAlign::Center,
+        );
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            368,
+            2,
+            &url.to_ascii_uppercase(),
+            [129, 145, 163, 255],
+            TextAlign::Center,
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn render_native_loading(&mut self, url: &str) {
         self.clear([12, 17, 28, 255]);
@@ -963,6 +1112,141 @@ function drawText(context, text, x, y, font, fillStyle) {
   context.textBaseline = 'alphabetic';
   context.fillText(text, x, y);
 }
+
+let htmlMeshBrowserFrameHost = null;
+let htmlMeshBrowserFrame = null;
+let htmlMeshBrowserFrameStatus = null;
+let htmlMeshBrowserFrameResize = null;
+let htmlMeshBrowserFrameLoadTimer = 0;
+
+function normalizeHtmlMeshBrowserUrl(url) {
+  const parsed = new URL(url, window.location.href);
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const path = parsed.pathname.replace(/\/+$/, '');
+  if (host === 'google.com' && (path === '' || path === '/')) {
+    return 'https://www.google.com/webhp?igu=1';
+  }
+  return parsed.href;
+}
+
+export function showHtmlMeshBrowserFrame(url) {
+  const canvas = document.querySelector('canvas');
+  if (!canvas) {
+    throw new Error('WebGPU canvas is not available');
+  }
+
+  if (!htmlMeshBrowserFrameHost) {
+    htmlMeshBrowserFrameHost = document.createElement('div');
+    htmlMeshBrowserFrameHost.id = 'htmlmesh-browser-frame-host';
+    htmlMeshBrowserFrameHost.style.position = 'fixed';
+    htmlMeshBrowserFrameHost.style.border = '1px solid rgba(104, 228, 199, 0.45)';
+    htmlMeshBrowserFrameHost.style.background = '#0d1421';
+    htmlMeshBrowserFrameHost.style.boxShadow = '0 20px 80px rgba(0, 0, 0, 0.42)';
+    htmlMeshBrowserFrameHost.style.zIndex = '5';
+    htmlMeshBrowserFrameHost.style.pointerEvents = 'auto';
+    htmlMeshBrowserFrameHost.style.transformOrigin = '50% 50%';
+    htmlMeshBrowserFrameHost.style.overflow = 'hidden';
+    htmlMeshBrowserFrameHost.style.colorScheme = 'normal';
+
+    htmlMeshBrowserFrame = document.createElement('iframe');
+    htmlMeshBrowserFrame.id = 'htmlmesh-browser-frame';
+    htmlMeshBrowserFrame.title = 'HTML mesh browser content';
+    htmlMeshBrowserFrame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+    htmlMeshBrowserFrame.style.position = 'absolute';
+    htmlMeshBrowserFrame.style.inset = '0';
+    htmlMeshBrowserFrame.style.width = '100%';
+    htmlMeshBrowserFrame.style.height = '100%';
+    htmlMeshBrowserFrame.style.border = '0';
+    htmlMeshBrowserFrame.style.background = '#0d1421';
+    htmlMeshBrowserFrame.style.colorScheme = 'normal';
+
+    htmlMeshBrowserFrameStatus = document.createElement('div');
+    htmlMeshBrowserFrameStatus.id = 'htmlmesh-browser-frame-status';
+    htmlMeshBrowserFrameStatus.style.position = 'absolute';
+    htmlMeshBrowserFrameStatus.style.left = '0';
+    htmlMeshBrowserFrameStatus.style.right = '0';
+    htmlMeshBrowserFrameStatus.style.bottom = '0';
+    htmlMeshBrowserFrameStatus.style.padding = '8px 12px';
+    htmlMeshBrowserFrameStatus.style.background = 'linear-gradient(180deg, rgba(8, 13, 23, 0), rgba(8, 13, 23, 0.88))';
+    htmlMeshBrowserFrameStatus.style.color = '#c5fff2';
+    htmlMeshBrowserFrameStatus.style.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+    htmlMeshBrowserFrameStatus.style.letterSpacing = '0';
+    htmlMeshBrowserFrameStatus.style.pointerEvents = 'none';
+    htmlMeshBrowserFrameStatus.style.textShadow = '0 1px 2px rgba(0, 0, 0, 0.85)';
+
+    htmlMeshBrowserFrameHost.appendChild(htmlMeshBrowserFrame);
+    htmlMeshBrowserFrameHost.appendChild(htmlMeshBrowserFrameStatus);
+    document.body.appendChild(htmlMeshBrowserFrameHost);
+  }
+
+  const frameUrl = normalizeHtmlMeshBrowserUrl(url);
+  const note = frameUrl === url ? frameUrl : `${url} -> ${frameUrl}`;
+  htmlMeshBrowserFrameStatus.textContent = `Loading browser iframe: ${note}`;
+  htmlMeshBrowserFrameStatus.style.opacity = '1';
+  htmlMeshBrowserFrame.style.opacity = '0.01';
+  htmlMeshBrowserFrame.onload = () => {
+    window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
+    htmlMeshBrowserFrame.style.opacity = '1';
+    htmlMeshBrowserFrameStatus.textContent =
+      `Browser iframe: ${note}. If this area is blank, the site blocks iframe embedding.`;
+    htmlMeshBrowserFrameStatus.style.opacity = '0.82';
+  };
+  htmlMeshBrowserFrame.onerror = () => {
+    htmlMeshBrowserFrameStatus.textContent =
+      `Could not embed ${url}. The target site may block iframe embedding with CSP or X-Frame-Options.`;
+    htmlMeshBrowserFrameStatus.style.opacity = '1';
+  };
+  window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
+  htmlMeshBrowserFrameLoadTimer = window.setTimeout(() => {
+    htmlMeshBrowserFrame.style.opacity = '1';
+    htmlMeshBrowserFrameStatus.textContent =
+      `Still waiting for ${url}. If it stays blank, the site blocks iframe embedding.`;
+    htmlMeshBrowserFrameStatus.style.opacity = '1';
+  }, 3500);
+  htmlMeshBrowserFrame.src = frameUrl;
+  htmlMeshBrowserFrameHost.style.display = 'block';
+  htmlMeshBrowserFrameHost.style.visibility = 'visible';
+  updateHtmlMeshBrowserFrame();
+
+  if (!htmlMeshBrowserFrameResize) {
+    htmlMeshBrowserFrameResize = () => updateHtmlMeshBrowserFrame();
+    window.addEventListener('resize', htmlMeshBrowserFrameResize, { passive: true });
+    window.visualViewport?.addEventListener('resize', htmlMeshBrowserFrameResize, { passive: true });
+    window.visualViewport?.addEventListener('scroll', htmlMeshBrowserFrameResize, { passive: true });
+  }
+}
+
+export function hideHtmlMeshBrowserFrame() {
+  window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
+  if (htmlMeshBrowserFrame) {
+    htmlMeshBrowserFrame.removeAttribute('src');
+  }
+  if (htmlMeshBrowserFrameHost) {
+    htmlMeshBrowserFrameHost.style.display = 'none';
+    htmlMeshBrowserFrameHost.style.visibility = 'hidden';
+  }
+}
+
+function updateHtmlMeshBrowserFrame() {
+  if (!htmlMeshBrowserFrameHost || htmlMeshBrowserFrameHost.style.display === 'none') {
+    return;
+  }
+
+  const canvas = document.querySelector('canvas');
+  const rect = canvas
+    ? canvas.getBoundingClientRect()
+    : { left: 0, top: 0, width: window.innerWidth || 1280, height: window.innerHeight || 720 };
+  const width = Math.min(Math.max(rect.width * 0.38, 300), 760);
+  const height = width * 9 / 16;
+  const centerX = rect.left + rect.width * 0.51;
+  const centerY = rect.top + rect.height * 0.45;
+
+  htmlMeshBrowserFrameHost.style.width = `${width}px`;
+  htmlMeshBrowserFrameHost.style.height = `${height}px`;
+  htmlMeshBrowserFrameHost.style.left = `${centerX}px`;
+  htmlMeshBrowserFrameHost.style.top = `${centerY}px`;
+  htmlMeshBrowserFrameHost.style.transform = 'translate(-50%, -50%) perspective(900px) rotateY(-14deg) rotateX(4deg)';
+}
 "#)]
 extern "C" {
     #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = renderHtmlMeshToRgba)]
@@ -971,6 +1255,12 @@ extern "C" {
         width: u32,
         height: u32,
     ) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = showHtmlMeshBrowserFrame)]
+    fn js_show_html_mesh_browser_frame(url: &str) -> Result<(), JsValue>;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = hideHtmlMeshBrowserFrame)]
+    fn js_hide_html_mesh_browser_frame() -> Result<(), JsValue>;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1904,14 +2194,16 @@ struct HtmlMeshExample {
     pipeline: Option<wgpu::RenderPipeline>,
     bind_group: Option<wgpu::BindGroup>,
     uniform_buffer: Option<wgpu::Buffer>,
-    vertex_buffer: Option<wgpu::Buffer>,
-    index_buffer: Option<wgpu::Buffer>,
+    plain_mesh: Option<GpuPlaneMesh>,
+    shatter_mesh: Option<GpuPlaneMesh>,
     html_texture: Option<texture::Texture>,
     depth_texture: Option<texture::Texture>,
     html: Option<HtmlSurface>,
     cursor_position: Option<glam::Vec2>,
     gui: Option<HtmlMeshGui>,
     frame_stats: FrameStats,
+    animation_time: f32,
+    shatter_enabled: bool,
     gpu_device_info: String,
     memory_template: String,
     url_input: String,
@@ -1970,6 +2262,19 @@ impl HtmlMeshExample {
         );
 
         Ok(())
+    }
+
+    fn write_uniforms(&self, context: &RenderContext) {
+        if let Some(uniform_buffer) = &self.uniform_buffer {
+            let uniforms = Uniforms::new(
+                context.aspect_ratio(),
+                self.animation_time,
+                self.shatter_enabled,
+            );
+            context
+                .queue
+                .write_buffer(uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+        }
     }
 
     fn pointer_uv(&self, context: &RenderContext, position: glam::Vec2) -> Option<glam::Vec2> {
@@ -2156,6 +2461,11 @@ impl HtmlMeshExample {
                 }
                 self.source_status = "source: memory HTML".to_owned();
                 self.source_error = None;
+                #[cfg(target_arch = "wasm32")]
+                if let Err(error) = js_hide_html_mesh_browser_frame() {
+                    self.source_error =
+                        Some(js_error_message("failed to hide browser iframe", error));
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 if let (Some(backend), Some(html)) = (&mut self.native_backend, &self.html) {
                     let markup = html.html_markup();
@@ -2192,9 +2502,20 @@ impl HtmlMeshExample {
 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.source_error = Some(format!(
-                        "URL loading from this egui panel is implemented for native wry: {url}"
-                    ));
+                    if let Some(html) = &mut self.html {
+                        html.show_browser_embed_loading(&url);
+                    }
+                    match js_show_html_mesh_browser_frame(&url) {
+                        Ok(()) => {
+                            self.source_status = format!("source: browser iframe {url}");
+                            self.source_error = None;
+                        }
+                        Err(error) => {
+                            self.source_error =
+                                Some(js_error_message("failed to show browser iframe", error));
+                        }
+                    }
+                    context.window.request_redraw();
                 }
             }
         }
@@ -2212,6 +2533,7 @@ impl HtmlMeshExample {
         let source_status = self.source_status.clone();
         let source_error = self.source_error.clone();
         let mut url_input = self.url_input.clone();
+        let mut shatter_enabled = self.shatter_enabled;
         let mut action = None;
         #[cfg(not(target_arch = "wasm32"))]
         let backend_status = match &self.native_backend {
@@ -2245,7 +2567,7 @@ impl HtmlMeshExample {
                         #[cfg(not(target_arch = "wasm32"))]
                         ui.label(backend_status.as_str());
                         #[cfg(target_arch = "wasm32")]
-                        ui.label("backend: browser canvas raster");
+                        ui.label("backend: browser canvas raster + iframe URL embed");
                         if let Some(error) = &source_error {
                             ui.colored_label(egui::Color32::from_rgb(255, 118, 118), error);
                         }
@@ -2253,6 +2575,15 @@ impl HtmlMeshExample {
                         if let Some(error) = &backend_error {
                             ui.colored_label(egui::Color32::from_rgb(255, 176, 96), error);
                         }
+
+                        ui.separator();
+                        ui.heading("Mesh");
+                        ui.checkbox(&mut shatter_enabled, "Shatter effect");
+                        ui.label(if shatter_enabled {
+                            "mesh: tiled shader shards"
+                        } else {
+                            "mesh: single plane"
+                        });
 
                         ui.separator();
                         ui.heading("Source");
@@ -2326,6 +2657,10 @@ impl HtmlMeshExample {
         }
 
         self.url_input = url_input;
+        if self.shatter_enabled != shatter_enabled {
+            self.shatter_enabled = shatter_enabled;
+            context.window.request_redraw();
+        }
         if let Some(action) = action {
             self.apply_ui_action(context, action);
         }
@@ -2349,7 +2684,11 @@ impl Example for HtmlMeshExample {
             Some("HTML mesh shader"),
             include_str!("../shaders/htmlmesh.wgsl"),
         );
-        let uniforms = Uniforms::new(context.aspect_ratio());
+        let uniforms = Uniforms::new(
+            context.aspect_ratio(),
+            self.animation_time,
+            self.shatter_enabled,
+        );
         let uniform_buffer =
             buffer::uniform_buffer(&context.device, Some("HTML mesh uniforms"), &uniforms);
         let Some(html) = &self.html else {
@@ -2369,7 +2708,7 @@ impl Example for HtmlMeshExample {
         let bind_group_layout = bind_group::uniform_texture_sampler_layout(
             &context.device,
             Some("HTML mesh bind group layout"),
-            wgpu::ShaderStages::VERTEX,
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
             wgpu::ShaderStages::FRAGMENT,
             wgpu::TextureViewDimension::D2,
         );
@@ -2403,7 +2742,11 @@ impl Example for HtmlMeshExample {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
-                    targets: &[Some(context.surface_config.format.into())],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: context.surface_config.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 primitive: wgpu::PrimitiveState {
                     cull_mode: None,
@@ -2421,18 +2764,20 @@ impl Example for HtmlMeshExample {
                 cache: None,
             },
         ));
+        let plain_mesh = plain_plane_mesh();
+        let shatter_mesh = shatter_plane_mesh();
         self.bind_group = Some(bind_group);
         self.uniform_buffer = Some(uniform_buffer);
-        self.vertex_buffer = Some(buffer::vertex_buffer(
+        self.plain_mesh = Some(gpu_plane_mesh(
             &context.device,
-            Some("HTML mesh vertices"),
-            VERTICES,
-        ));
-        self.index_buffer = Some(buffer::index_buffer(
+            "HTML mesh plain plane",
+            &plain_mesh,
+        )?);
+        self.shatter_mesh = Some(gpu_plane_mesh(
             &context.device,
-            Some("HTML mesh indices"),
-            INDICES,
-        ));
+            "HTML mesh shatter plane",
+            &shatter_mesh,
+        )?);
         self.html_texture = Some(html_texture);
         self.depth_texture = Some(texture::Texture::depth(
             &context.device,
@@ -2456,12 +2801,7 @@ impl Example for HtmlMeshExample {
     }
 
     fn resize(&mut self, context: &mut RenderContext, _size: winit::dpi::PhysicalSize<u32>) {
-        let uniforms = Uniforms::new(context.aspect_ratio());
-        if let Some(uniform_buffer) = &self.uniform_buffer {
-            context
-                .queue
-                .write_buffer(uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-        }
+        self.write_uniforms(context);
         self.depth_texture = Some(texture::Texture::depth(
             &context.device,
             &context.surface_config,
@@ -2654,8 +2994,14 @@ impl Example for HtmlMeshExample {
 
     fn update(&mut self, context: &mut RenderContext) {
         let _ = self.frame_stats.tick();
-        #[cfg(target_arch = "wasm32")]
-        let _ = context;
+        if self.shatter_enabled {
+            self.animation_time += self.frame_stats.delta_seconds();
+            if self.animation_time > 10_000.0 {
+                self.animation_time = 0.0;
+            }
+            context.window.request_redraw();
+        }
+
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(backend) = &mut self.native_backend {
             for event in backend.poll() {
@@ -2690,6 +3036,7 @@ impl Example for HtmlMeshExample {
         encoder: &mut wgpu::CommandEncoder,
     ) -> RenderResult<()> {
         self.upload_html_if_dirty(context)?;
+        self.write_uniforms(context);
 
         let pipeline = self
             .pipeline
@@ -2699,14 +3046,18 @@ impl Example for HtmlMeshExample {
             .bind_group
             .as_ref()
             .ok_or_else(|| RenderError::message("HTML mesh bind group initialized"))?;
-        let vertex_buffer = self
-            .vertex_buffer
-            .as_ref()
-            .ok_or_else(|| RenderError::message("HTML mesh vertex buffer initialized"))?;
-        let index_buffer = self
-            .index_buffer
-            .as_ref()
-            .ok_or_else(|| RenderError::message("HTML mesh index buffer initialized"))?;
+        let mesh = if self.shatter_enabled {
+            self.shatter_mesh
+                .as_ref()
+                .ok_or_else(|| RenderError::message("HTML mesh shatter mesh initialized"))?
+        } else {
+            self.plain_mesh
+                .as_ref()
+                .ok_or_else(|| RenderError::message("HTML mesh plain mesh initialized"))?
+        };
+        let index_buffer = &mesh.index_buffer;
+        let vertex_buffer = &mesh.vertex_buffer;
+        let index_count = mesh.index_count;
         let depth_texture = self
             .depth_texture
             .as_ref()
@@ -2729,7 +3080,7 @@ impl Example for HtmlMeshExample {
         pass.set_bind_group(0, bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+        pass.draw_indexed(0..index_count, 0, 0..1);
         drop(pass);
 
         self.render_gui(context, view, encoder)?;
