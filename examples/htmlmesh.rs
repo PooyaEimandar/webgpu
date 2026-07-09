@@ -1,3 +1,5 @@
+#![cfg_attr(target_arch = "wasm32", no_main)]
+
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
@@ -219,7 +221,7 @@ enum HtmlElementId {
 enum HtmlDocumentKind {
     Memory,
     #[cfg(target_arch = "wasm32")]
-    BrowserEmbed,
+    WasmSnapshot,
     #[cfg(not(target_arch = "wasm32"))]
     NativeWebView,
 }
@@ -261,11 +263,20 @@ struct HtmlSurface {
     pressed: Option<HtmlElementId>,
     focus: Option<HtmlElementId>,
     pointer_down: bool,
+    last_error: Option<String>,
     state_generation: u64,
     bitmap_generation: u64,
     texture_dirty: bool,
     #[cfg(target_arch = "wasm32")]
+    wasm_loading_url: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    wasm_snapshot_url: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    wasm_loading_step: u8,
+    #[cfg(target_arch = "wasm32")]
     pending_raster: Option<PendingHtmlRaster>,
+    #[cfg(target_arch = "wasm32")]
+    queued_wasm_inputs: Vec<WasmSnapshotInput>,
 }
 
 impl HtmlSurface {
@@ -283,11 +294,20 @@ impl HtmlSurface {
             pressed: None,
             focus: Some(HtmlElementId::Button),
             pointer_down: false,
+            last_error: None,
             state_generation: 1,
             bitmap_generation: 0,
             texture_dirty: true,
             #[cfg(target_arch = "wasm32")]
+            wasm_loading_url: None,
+            #[cfg(target_arch = "wasm32")]
+            wasm_snapshot_url: None,
+            #[cfg(target_arch = "wasm32")]
+            wasm_loading_step: 0,
+            #[cfg(target_arch = "wasm32")]
             pending_raster: None,
+            #[cfg(target_arch = "wasm32")]
+            queued_wasm_inputs: Vec::new(),
         };
         surface.render_fallback();
         surface
@@ -297,23 +317,38 @@ impl HtmlSurface {
         self.template = template;
         self.document_label = "memory: assets/htmlmesh/page.html".to_owned();
         self.document_kind = HtmlDocumentKind::Memory;
+        self.last_error = None;
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.wasm_loading_url = None;
+            self.wasm_snapshot_url = None;
+            self.wasm_loading_step = 0;
+            self.queued_wasm_inputs.clear();
+        }
         self.mark_dirty();
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn show_browser_embed_loading(&mut self, url: &str) {
-        self.document_label = format!("browser iframe: {url}");
-        self.document_kind = HtmlDocumentKind::BrowserEmbed;
+    fn load_wasm_snapshot_document(&mut self, url: String) {
+        self.document_label = format!("wasm server snapshot: {url}");
+        self.document_kind = HtmlDocumentKind::WasmSnapshot;
+        self.last_error = None;
         self.mark_dirty();
-        self.render_browser_embed_loading(url);
+        self.wasm_loading_url = Some(url.clone());
+        self.wasm_snapshot_url = Some(url.clone());
+        self.wasm_loading_step = 0;
+        self.queued_wasm_inputs.clear();
+        self.render_wasm_snapshot_loading();
         self.bitmap_generation = self.state_generation;
         self.texture_dirty = true;
+        self.start_wasm_snapshot_raster(url);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn show_native_loading(&mut self, url: &str) {
         self.document_label = format!("native webview: {url}");
         self.document_kind = HtmlDocumentKind::NativeWebView;
+        self.last_error = None;
         self.mark_dirty();
         self.render_native_loading(url);
         self.bitmap_generation = self.state_generation;
@@ -333,10 +368,16 @@ impl HtmlSurface {
         self.rgba = rgba;
         self.document_label = format!("native webview: {url}");
         self.document_kind = HtmlDocumentKind::NativeWebView;
+        self.last_error = None;
         self.mark_dirty();
         self.bitmap_generation = self.state_generation;
         self.texture_dirty = true;
         Ok(())
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn take_last_error(&mut self) -> Option<String> {
+        self.last_error.take()
     }
 
     fn image(&self) -> RenderResult<texture::ImageRgba8> {
@@ -549,7 +590,14 @@ impl HtmlSurface {
         {
             self.poll_wasm_raster();
             if self.bitmap_generation != self.state_generation && self.pending_raster.is_none() {
-                self.start_wasm_raster();
+                match self.document_kind {
+                    HtmlDocumentKind::Memory => self.start_wasm_raster(),
+                    HtmlDocumentKind::WasmSnapshot => {}
+                }
+            }
+            if self.pending_raster.is_none() && !self.queued_wasm_inputs.is_empty() {
+                let input = self.queued_wasm_inputs.remove(0);
+                self.start_wasm_snapshot_input(input);
             }
         }
 
@@ -570,6 +618,32 @@ impl HtmlSurface {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn is_wasm_snapshot_loading(&self) -> bool {
+        self.wasm_loading_url.is_some() && self.pending_raster.is_some()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn has_pending_wasm_raster(&self) -> bool {
+        self.pending_raster.is_some()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_snapshot_url(&self) -> Option<&str> {
+        self.wasm_snapshot_url.as_deref()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn advance_wasm_snapshot_loading(&mut self) {
+        if !self.is_wasm_snapshot_loading() {
+            return;
+        }
+        self.wasm_loading_step = (self.wasm_loading_step + 1) % 3;
+        self.render_wasm_snapshot_loading();
+        self.bitmap_generation = self.state_generation;
+        self.texture_dirty = true;
+    }
+
+    #[cfg(target_arch = "wasm32")]
     fn poll_wasm_raster(&mut self) {
         let Some(pending) = &self.pending_raster else {
             return;
@@ -581,28 +655,41 @@ impl HtmlSurface {
         let generation = pending.generation;
         self.pending_raster = None;
 
+        let accepts_result = generation == self.state_generation
+            || matches!(self.document_kind, HtmlDocumentKind::WasmSnapshot);
+
         match result {
-            Ok(rgba) if generation == self.state_generation => {
+            Ok(rgba) if accepts_result => {
                 if rgba.len() == self.rgba.len() {
                     self.rgba = rgba;
-                    self.bitmap_generation = generation;
+                    self.bitmap_generation = self.state_generation;
                     self.texture_dirty = true;
+                    self.last_error = None;
+                    self.wasm_loading_url = None;
                 } else {
-                    webgpu::log_error(format!(
+                    let error = format!(
                         "HTML raster returned {} bytes, expected {}",
                         rgba.len(),
                         self.rgba.len()
-                    ));
+                    );
+                    webgpu::log_error(error.clone());
+                    self.render_error_texture(&error);
+                    self.bitmap_generation = self.state_generation;
+                    self.texture_dirty = true;
+                    self.last_error = Some(error);
+                    self.wasm_loading_url = None;
                 }
             }
             Ok(_) => {}
             Err(error) => {
-                webgpu::log_error(error);
-                if self.bitmap_generation != self.state_generation {
-                    self.render_fallback();
+                webgpu::log_error(error.clone());
+                if accepts_result {
+                    self.render_error_texture(&error);
                     self.bitmap_generation = self.state_generation;
                     self.texture_dirty = true;
                 }
+                self.last_error = Some(error);
+                self.wasm_loading_url = None;
             }
         }
     }
@@ -620,6 +707,84 @@ impl HtmlSurface {
         });
 
         self.pending_raster = Some(PendingHtmlRaster { generation, result });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_wasm_snapshot_raster(&mut self, url: String) {
+        let generation = self.state_generation;
+        let result = Rc::new(RefCell::new(None));
+        let result_slot = result.clone();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let raster = wasm_fetch_snapshot_to_rgba(&url).await;
+            *result_slot.borrow_mut() = Some(raster);
+        });
+
+        self.pending_raster = Some(PendingHtmlRaster { generation, result });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_wasm_snapshot_refresh(&mut self) -> bool {
+        if self.pending_raster.is_some() || !self.queued_wasm_inputs.is_empty() {
+            return false;
+        }
+        let Some(url) = self.wasm_snapshot_url.clone() else {
+            return false;
+        };
+        let generation = self.state_generation;
+        let result = Rc::new(RefCell::new(None));
+        let result_slot = result.clone();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let raster = wasm_refresh_snapshot_to_rgba(&url).await;
+            *result_slot.borrow_mut() = Some(raster);
+        });
+
+        self.pending_raster = Some(PendingHtmlRaster { generation, result });
+        true
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_wasm_snapshot_input(&mut self, input: WasmSnapshotInput) -> bool {
+        let Some(url) = self.wasm_snapshot_url.clone() else {
+            return false;
+        };
+        if self.pending_raster.is_some() {
+            self.queue_wasm_snapshot_input(input);
+            return true;
+        }
+        let generation = self.state_generation;
+        let result = Rc::new(RefCell::new(None));
+        let result_slot = result.clone();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let raster = wasm_send_snapshot_input_to_rgba(&url, input).await;
+            *result_slot.borrow_mut() = Some(raster);
+        });
+
+        self.pending_raster = Some(PendingHtmlRaster { generation, result });
+        true
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn queue_wasm_snapshot_input(&mut self, input: WasmSnapshotInput) {
+        if let Some(last) = self.queued_wasm_inputs.last_mut() {
+            if last.kind == "text" && input.kind == "text" {
+                last.text.push_str(&input.text);
+                return;
+            }
+            if last.kind == "mouse_move" && input.kind == "mouse_move" {
+                *last = input;
+                return;
+            }
+        }
+
+        const MAX_QUEUED_INPUTS: usize = 16;
+        if self.queued_wasm_inputs.len() >= MAX_QUEUED_INPUTS {
+            let remove_count = self.queued_wasm_inputs.len() + 1 - MAX_QUEUED_INPUTS;
+            self.queued_wasm_inputs.drain(0..remove_count);
+        }
+        self.queued_wasm_inputs.push(input);
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -703,40 +868,62 @@ impl HtmlSurface {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn render_browser_embed_loading(&mut self, url: &str) {
+    fn render_wasm_snapshot_loading(&mut self) {
         self.clear([12, 17, 28, 255]);
+        self.draw_background();
+        self.draw_card();
+        let dots = match self.wasm_loading_step % 3 {
+            0 => ".",
+            1 => "..",
+            _ => "...",
+        };
+        let label = format!("loading{dots}");
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            262,
+            5,
+            &label,
+            [244, 249, 255, 255],
+            TextAlign::Center,
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn render_error_texture(&mut self, error: &str) {
+        self.clear([28, 12, 17, 255]);
         self.draw_background();
         self.draw_card();
         self.draw_text(
             SURFACE_WIDTH as i32 / 2,
             146,
             4,
-            "BROWSER HTML",
-            [244, 249, 255, 255],
+            "HTML TEXTURE ERROR",
+            [255, 220, 220, 255],
             TextAlign::Center,
         );
         self.draw_text(
             SURFACE_WIDTH as i32 / 2,
-            238,
-            3,
-            "IFRAME OVERLAY ACTIVE",
-            [104, 228, 199, 255],
-            TextAlign::Center,
-        );
-        self.draw_text(
-            SURFACE_WIDTH as i32 / 2,
-            312,
+            228,
             2,
-            "THE BROWSER EMBEDS THE URL AND HANDLES INPUT",
-            [174, 190, 210, 255],
+            "THE SERVER-SIDE BROWSER COULD NOT CAPTURE THIS PAGE",
+            [255, 150, 150, 255],
             TextAlign::Center,
         );
         self.draw_text(
             SURFACE_WIDTH as i32 / 2,
-            368,
+            292,
             2,
-            &url.to_ascii_uppercase(),
-            [129, 145, 163, 255],
+            "CHECK THE SNAPSHOT ENDPOINT OR HEADLESS BROWSER",
+            [210, 190, 198, 255],
+            TextAlign::Center,
+        );
+        let summary: String = error.chars().take(70).collect();
+        self.draw_text(
+            SURFACE_WIDTH as i32 / 2,
+            366,
+            2,
+            &summary.to_ascii_uppercase(),
+            [176, 132, 144, 255],
             TextAlign::Center,
         );
     }
@@ -1016,6 +1203,71 @@ impl HtmlSurface {
 type WasmRasterResult = Rc<RefCell<Option<Result<Vec<u8>, String>>>>;
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug)]
+struct WasmSnapshotInput {
+    kind: &'static str,
+    x: f32,
+    y: f32,
+    text: String,
+    key: String,
+    delta_x: f32,
+    delta_y: f32,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmSnapshotInput {
+    fn pointer(kind: &'static str, uv: glam::Vec2) -> Self {
+        let (x, y) = uv_to_pixel(uv);
+        Self {
+            kind,
+            x,
+            y,
+            text: String::new(),
+            key: String::new(),
+            delta_x: 0.0,
+            delta_y: 0.0,
+        }
+    }
+
+    fn wheel(uv: glam::Vec2, delta: glam::Vec2) -> Self {
+        let (x, y) = uv_to_pixel(uv);
+        Self {
+            kind: "wheel",
+            x,
+            y,
+            text: String::new(),
+            key: String::new(),
+            delta_x: delta.x,
+            delta_y: delta.y,
+        }
+    }
+
+    fn text(text: String) -> Self {
+        Self {
+            kind: "text",
+            x: 0.0,
+            y: 0.0,
+            text,
+            key: String::new(),
+            delta_x: 0.0,
+            delta_y: 0.0,
+        }
+    }
+
+    fn key(key: &'static str) -> Self {
+        Self {
+            kind: "key",
+            x: 0.0,
+            y: 0.0,
+            text: String::new(),
+            key: key.to_owned(),
+            delta_x: 0.0,
+            delta_y: 0.0,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 struct PendingHtmlRaster {
     generation: u64,
     result: WasmRasterResult,
@@ -1033,6 +1285,7 @@ export function renderHtmlMeshToRgba(html, width, height) {
         const value = node ? (node.textContent || '').trim() : '';
         return value.length > 0 ? value : fallback;
       };
+      const bodySummary = summarizeDocumentText(documentHtml);
       const classList = (selector) => {
         const node = documentHtml.querySelector(selector);
         return node ? node.classList : { contains: () => false };
@@ -1052,12 +1305,13 @@ export function renderHtmlMeshToRgba(html, width, height) {
       context.save();
       context.scale(scaleX, scaleY);
       paintHtmlMeshPage(context, {
-        title: text('h1', 'HTML Mesh'),
-        buttonText: text('.button', 'Click'),
-        status: text('.status', 'Button count 00'),
-        buttonFocused: hasClass('.button', 'is-focused'),
-        buttonHovered: hasClass('.button', 'is-hovered'),
-        buttonPressed: hasClass('.button', 'is-pressed'),
+        title: text('h1', text('title', 'HTML Mesh')),
+        buttonText: text('button, .button', 'Snapshot'),
+        status: text('.status', bodySummary),
+        summary: bodySummary,
+        buttonFocused: hasClass('button, .button', 'is-focused'),
+        buttonHovered: hasClass('button, .button', 'is-hovered'),
+        buttonPressed: hasClass('button, .button', 'is-pressed'),
       });
       context.restore();
 
@@ -1067,6 +1321,27 @@ export function renderHtmlMeshToRgba(html, width, height) {
       reject(error);
     }
   });
+}
+
+function summarizeDocumentText(documentHtml) {
+  const body = documentHtml.body;
+  if (!body) {
+    return 'Fetched HTML rasterized to texture';
+  }
+
+  const parts = [];
+  for (const node of body.querySelectorAll('h2, h3, p, li, a, button, input')) {
+    const value = (node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.textContent || '').trim();
+    if (value.length > 0) {
+      parts.push(value.replace(/\s+/g, ' '));
+    }
+    if (parts.join(' ').length > 140) {
+      break;
+    }
+  }
+
+  const summary = parts.join(' ').slice(0, 140).trim();
+  return summary.length > 0 ? summary : 'Fetched HTML rasterized to texture';
 }
 
 function paintHtmlMeshPage(context, state) {
@@ -1092,6 +1367,7 @@ function paintHtmlMeshPage(context, state) {
   drawText(context, state.title, 512, 176, '800 42px Inter, system-ui, sans-serif', '#f4f9ff');
   drawButton(context, state);
   drawText(context, state.status.toUpperCase(), 512, 386, '700 22px Inter, system-ui, sans-serif', '#aebed2');
+  drawText(context, state.summary.toUpperCase(), 512, 432, '600 16px Inter, system-ui, sans-serif', '#8191a3');
   context.textAlign = 'left';
 }
 
@@ -1113,139 +1389,223 @@ function drawText(context, text, x, y, font, fillStyle) {
   context.fillText(text, x, y);
 }
 
-let htmlMeshBrowserFrameHost = null;
-let htmlMeshBrowserFrame = null;
-let htmlMeshBrowserFrameStatus = null;
-let htmlMeshBrowserFrameResize = null;
-let htmlMeshBrowserFrameLoadTimer = 0;
+let htmlMeshCloseHookInstalled = false;
 
-function normalizeHtmlMeshBrowserUrl(url) {
-  const parsed = new URL(url, window.location.href);
-  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
-  const path = parsed.pathname.replace(/\/+$/, '');
-  if (host === 'google.com' && (path === '' || path === '/')) {
-    return 'https://www.google.com/webhp?igu=1';
+function closeHtmlMeshBrowserSession() {
+  try {
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon('/api/htmlmesh/close', new Blob(['close'], { type: 'text/plain' }));
+      if (sent) {
+        return;
+      }
+    }
+  } catch (_error) {
   }
-  return parsed.href;
-}
-
-export function showHtmlMeshBrowserFrame(url) {
-  const canvas = document.querySelector('canvas');
-  if (!canvas) {
-    throw new Error('WebGPU canvas is not available');
-  }
-
-  if (!htmlMeshBrowserFrameHost) {
-    htmlMeshBrowserFrameHost = document.createElement('div');
-    htmlMeshBrowserFrameHost.id = 'htmlmesh-browser-frame-host';
-    htmlMeshBrowserFrameHost.style.position = 'fixed';
-    htmlMeshBrowserFrameHost.style.border = '1px solid rgba(104, 228, 199, 0.45)';
-    htmlMeshBrowserFrameHost.style.background = '#0d1421';
-    htmlMeshBrowserFrameHost.style.boxShadow = '0 20px 80px rgba(0, 0, 0, 0.42)';
-    htmlMeshBrowserFrameHost.style.zIndex = '5';
-    htmlMeshBrowserFrameHost.style.pointerEvents = 'auto';
-    htmlMeshBrowserFrameHost.style.transformOrigin = '50% 50%';
-    htmlMeshBrowserFrameHost.style.overflow = 'hidden';
-    htmlMeshBrowserFrameHost.style.colorScheme = 'normal';
-
-    htmlMeshBrowserFrame = document.createElement('iframe');
-    htmlMeshBrowserFrame.id = 'htmlmesh-browser-frame';
-    htmlMeshBrowserFrame.title = 'HTML mesh browser content';
-    htmlMeshBrowserFrame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
-    htmlMeshBrowserFrame.style.position = 'absolute';
-    htmlMeshBrowserFrame.style.inset = '0';
-    htmlMeshBrowserFrame.style.width = '100%';
-    htmlMeshBrowserFrame.style.height = '100%';
-    htmlMeshBrowserFrame.style.border = '0';
-    htmlMeshBrowserFrame.style.background = '#0d1421';
-    htmlMeshBrowserFrame.style.colorScheme = 'normal';
-
-    htmlMeshBrowserFrameStatus = document.createElement('div');
-    htmlMeshBrowserFrameStatus.id = 'htmlmesh-browser-frame-status';
-    htmlMeshBrowserFrameStatus.style.position = 'absolute';
-    htmlMeshBrowserFrameStatus.style.left = '0';
-    htmlMeshBrowserFrameStatus.style.right = '0';
-    htmlMeshBrowserFrameStatus.style.bottom = '0';
-    htmlMeshBrowserFrameStatus.style.padding = '8px 12px';
-    htmlMeshBrowserFrameStatus.style.background = 'linear-gradient(180deg, rgba(8, 13, 23, 0), rgba(8, 13, 23, 0.88))';
-    htmlMeshBrowserFrameStatus.style.color = '#c5fff2';
-    htmlMeshBrowserFrameStatus.style.font = '600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-    htmlMeshBrowserFrameStatus.style.letterSpacing = '0';
-    htmlMeshBrowserFrameStatus.style.pointerEvents = 'none';
-    htmlMeshBrowserFrameStatus.style.textShadow = '0 1px 2px rgba(0, 0, 0, 0.85)';
-
-    htmlMeshBrowserFrameHost.appendChild(htmlMeshBrowserFrame);
-    htmlMeshBrowserFrameHost.appendChild(htmlMeshBrowserFrameStatus);
-    document.body.appendChild(htmlMeshBrowserFrameHost);
-  }
-
-  const frameUrl = normalizeHtmlMeshBrowserUrl(url);
-  const note = frameUrl === url ? frameUrl : `${url} -> ${frameUrl}`;
-  htmlMeshBrowserFrameStatus.textContent = `Loading browser iframe: ${note}`;
-  htmlMeshBrowserFrameStatus.style.opacity = '1';
-  htmlMeshBrowserFrame.style.opacity = '0.01';
-  htmlMeshBrowserFrame.onload = () => {
-    window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
-    htmlMeshBrowserFrame.style.opacity = '1';
-    htmlMeshBrowserFrameStatus.textContent =
-      `Browser iframe: ${note}. If this area is blank, the site blocks iframe embedding.`;
-    htmlMeshBrowserFrameStatus.style.opacity = '0.82';
-  };
-  htmlMeshBrowserFrame.onerror = () => {
-    htmlMeshBrowserFrameStatus.textContent =
-      `Could not embed ${url}. The target site may block iframe embedding with CSP or X-Frame-Options.`;
-    htmlMeshBrowserFrameStatus.style.opacity = '1';
-  };
-  window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
-  htmlMeshBrowserFrameLoadTimer = window.setTimeout(() => {
-    htmlMeshBrowserFrame.style.opacity = '1';
-    htmlMeshBrowserFrameStatus.textContent =
-      `Still waiting for ${url}. If it stays blank, the site blocks iframe embedding.`;
-    htmlMeshBrowserFrameStatus.style.opacity = '1';
-  }, 3500);
-  htmlMeshBrowserFrame.src = frameUrl;
-  htmlMeshBrowserFrameHost.style.display = 'block';
-  htmlMeshBrowserFrameHost.style.visibility = 'visible';
-  updateHtmlMeshBrowserFrame();
-
-  if (!htmlMeshBrowserFrameResize) {
-    htmlMeshBrowserFrameResize = () => updateHtmlMeshBrowserFrame();
-    window.addEventListener('resize', htmlMeshBrowserFrameResize, { passive: true });
-    window.visualViewport?.addEventListener('resize', htmlMeshBrowserFrameResize, { passive: true });
-    window.visualViewport?.addEventListener('scroll', htmlMeshBrowserFrameResize, { passive: true });
+  try {
+    fetch('/api/htmlmesh/close', {
+      method: 'POST',
+      cache: 'no-store',
+      keepalive: true,
+      body: 'close'
+    }).catch(() => {});
+  } catch (_error) {
   }
 }
 
-export function hideHtmlMeshBrowserFrame() {
-  window.clearTimeout(htmlMeshBrowserFrameLoadTimer);
-  if (htmlMeshBrowserFrame) {
-    htmlMeshBrowserFrame.removeAttribute('src');
+function installHtmlMeshCloseHook() {
+  if (htmlMeshCloseHookInstalled || typeof window === 'undefined') {
+    return;
   }
-  if (htmlMeshBrowserFrameHost) {
-    htmlMeshBrowserFrameHost.style.display = 'none';
-    htmlMeshBrowserFrameHost.style.visibility = 'hidden';
+  htmlMeshCloseHookInstalled = true;
+  window.addEventListener('pagehide', closeHtmlMeshBrowserSession, { capture: true });
+  window.addEventListener('beforeunload', closeHtmlMeshBrowserSession, { capture: true });
+}
+
+installHtmlMeshCloseHook();
+
+export async function fetchHtmlMeshSnapshotToRgba(url, width, height) {
+  installHtmlMeshCloseHook();
+  const endpoint = `/api/htmlmesh/snapshot?width=${width}&height=${height}&url=${encodeURIComponent(url)}&t=${Date.now()}`;
+  return fetchHtmlMeshPngToRgba(endpoint, width, height, 'snapshot');
+}
+
+export async function refreshHtmlMeshSnapshotToRgba(url, width, height) {
+  installHtmlMeshCloseHook();
+  const endpoint = `/api/htmlmesh/snapshot?format=jpeg&width=${width}&height=${height}&url=${encodeURIComponent(url)}&t=${Date.now()}`;
+  return fetchHtmlMeshPngToRgba(endpoint, width, height, 'refresh');
+}
+
+export async function sendHtmlMeshInputToRgba(url, width, height, kind, x, y, text, key, deltaX, deltaY) {
+  installHtmlMeshCloseHook();
+  const params = new URLSearchParams();
+  params.set('width', String(width));
+  params.set('height', String(height));
+  params.set('url', url);
+  params.set('kind', kind);
+  params.set('x', String(x));
+  params.set('y', String(y));
+  params.set('delta_x', String(deltaX || 0));
+  params.set('delta_y', String(deltaY || 0));
+  if (text) {
+    params.set('text', text);
+  }
+  if (key) {
+    params.set('key', key);
+  }
+  params.set('t', String(Date.now()));
+  return fetchHtmlMeshPngToRgba(`/api/htmlmesh/input?${params}`, width, height, 'input');
+}
+
+export function closeHtmlMeshBrowser() {
+  closeHtmlMeshBrowserSession();
+}
+
+async function fetchHtmlMeshPngToRgba(endpoint, width, height, label) {
+  const response = await fetch(endpoint, { cache: 'no-store' });
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(`${label} HTTP ${response.status}: ${message.slice(0, 180)}`);
+  }
+
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (!context) {
+      throw new Error('2D canvas context is not available');
+    }
+    context.clearRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    return new Uint8Array(pixels.buffer.slice(0));
+  } finally {
+    if (typeof bitmap.close === 'function') {
+      bitmap.close();
+    }
   }
 }
 
-function updateHtmlMeshBrowserFrame() {
-  if (!htmlMeshBrowserFrameHost || htmlMeshBrowserFrameHost.style.display === 'none') {
+export function setHtmlMeshIoOverlay(
+  url,
+  enabled,
+  x0,
+  y0,
+  x1,
+  y1,
+  x2,
+  y2,
+  x3,
+  y3
+) {
+  const id = '__webgpu_htmlmesh_io_overlay';
+  let frame = document.getElementById(id);
+  if (!enabled || !url) {
+    if (frame) {
+      frame.style.display = 'none';
+      frame.style.pointerEvents = 'none';
+    }
     return;
   }
 
-  const canvas = document.querySelector('canvas');
-  const rect = canvas
-    ? canvas.getBoundingClientRect()
-    : { left: 0, top: 0, width: window.innerWidth || 1280, height: window.innerHeight || 720 };
-  const width = Math.min(Math.max(rect.width * 0.38, 300), 760);
-  const height = width * 9 / 16;
-  const centerX = rect.left + rect.width * 0.51;
-  const centerY = rect.top + rect.height * 0.45;
+  if (!frame) {
+    frame = document.createElement('iframe');
+    frame.id = id;
+    frame.setAttribute('title', 'HTML mesh interactive surface');
+    frame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+    frame.style.position = 'fixed';
+    frame.style.left = '0';
+    frame.style.top = '0';
+    frame.style.width = '1024px';
+    frame.style.height = '576px';
+    frame.style.border = '0';
+    frame.style.margin = '0';
+    frame.style.padding = '0';
+    frame.style.background = 'transparent';
+    frame.style.opacity = '0.001';
+    frame.style.transformOrigin = '0 0';
+    frame.style.pointerEvents = 'auto';
+    frame.style.zIndex = '20';
+    frame.style.willChange = 'transform';
+    frame.style.overflow = 'hidden';
+    document.body.appendChild(frame);
+  }
 
-  htmlMeshBrowserFrameHost.style.width = `${width}px`;
-  htmlMeshBrowserFrameHost.style.height = `${height}px`;
-  htmlMeshBrowserFrameHost.style.left = `${centerX}px`;
-  htmlMeshBrowserFrameHost.style.top = `${centerY}px`;
-  htmlMeshBrowserFrameHost.style.transform = 'translate(-50%, -50%) perspective(900px) rotateY(-14deg) rotateX(4deg)';
+  if (frame.dataset.htmlMeshUrl !== url) {
+    frame.dataset.htmlMeshUrl = url;
+    frame.src = url;
+  }
+
+  frame.style.display = 'block';
+  frame.style.opacity = '0.001';
+  frame.style.pointerEvents = 'auto';
+  const quad = mapFramebufferQuadToCssQuad([
+    [x0, y0],
+    [x1, y1],
+    [x2, y2],
+    [x3, y3]
+  ]);
+  frame.style.transform = cssMatrixForQuad(
+    1024,
+    576,
+    quad[0][0],
+    quad[0][1],
+    quad[1][0],
+    quad[1][1],
+    quad[2][0],
+    quad[2][1],
+    quad[3][0],
+    quad[3][1]
+  );
+}
+
+function mapFramebufferQuadToCssQuad(quad) {
+  const canvas = document.querySelector('canvas');
+  if (!canvas) {
+    const scale = 1 / (window.devicePixelRatio || 1);
+    return quad.map(([x, y]) => [x * scale, y * scale]);
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const framebufferWidth = canvas.width || Math.max(1, Math.round(rect.width * (window.devicePixelRatio || 1)));
+  const framebufferHeight = canvas.height || Math.max(1, Math.round(rect.height * (window.devicePixelRatio || 1)));
+  const scaleX = rect.width / framebufferWidth;
+  const scaleY = rect.height / framebufferHeight;
+  return quad.map(([x, y]) => [
+    rect.left + x * scaleX,
+    rect.top + y * scaleY
+  ]);
+}
+
+function cssMatrixForQuad(width, height, x0, y0, x1, y1, x2, y2, x3, y3) {
+  const dx1 = x1 - x2;
+  const dy1 = y1 - y2;
+  const dx2 = x3 - x2;
+  const dy2 = y3 - y2;
+  const sx = x0 - x1 + x2 - x3;
+  const sy = y0 - y1 + y2 - y3;
+  let g = 0;
+  let h = 0;
+  const denominator = dx1 * dy2 - dx2 * dy1;
+  if (Math.abs(sx) > 0.001 || Math.abs(sy) > 0.001) {
+    if (Math.abs(denominator) > 0.001) {
+      g = (sx * dy2 - dx2 * sy) / denominator;
+      h = (dx1 * sy - sx * dy1) / denominator;
+    }
+  }
+
+  const a = x1 - x0 + g * x1;
+  const b = x3 - x0 + h * x3;
+  const c = x0;
+  const d = y1 - y0 + g * y1;
+  const e = y3 - y0 + h * y3;
+  const f = y0;
+
+  return `matrix3d(${a / width},${d / width},0,${g / width},` +
+    `${b / height},${e / height},0,${h / height},` +
+    `0,0,1,0,${c},${f},0,1)`;
 }
 "#)]
 extern "C" {
@@ -1256,11 +1616,50 @@ extern "C" {
         height: u32,
     ) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = showHtmlMeshBrowserFrame)]
-    fn js_show_html_mesh_browser_frame(url: &str) -> Result<(), JsValue>;
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = fetchHtmlMeshSnapshotToRgba)]
+    fn js_fetch_html_mesh_snapshot_to_rgba(
+        url: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = hideHtmlMeshBrowserFrame)]
-    fn js_hide_html_mesh_browser_frame() -> Result<(), JsValue>;
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = refreshHtmlMeshSnapshotToRgba)]
+    fn js_refresh_html_mesh_snapshot_to_rgba(
+        url: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = sendHtmlMeshInputToRgba)]
+    fn js_send_html_mesh_input_to_rgba(
+        url: &str,
+        width: u32,
+        height: u32,
+        kind: &str,
+        x: f32,
+        y: f32,
+        text: &str,
+        key: &str,
+        delta_x: f32,
+        delta_y: f32,
+    ) -> Result<js_sys::Promise, JsValue>;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = setHtmlMeshIoOverlay)]
+    fn js_set_html_mesh_io_overlay(
+        url: &str,
+        enabled: bool,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        x3: f32,
+        y3: f32,
+    ) -> Result<(), JsValue>;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(catch, js_name = closeHtmlMeshBrowser)]
+    fn js_close_html_mesh_browser() -> Result<(), JsValue>;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1272,6 +1671,63 @@ async fn wasm_raster_html_to_rgba(html: &str) -> Result<Vec<u8>, String> {
         .map_err(|error| js_error_message("failed to raster HTML", error))?;
 
     Ok(js_sys::Uint8Array::new(&value).to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn wasm_fetch_snapshot_to_rgba(url: &str) -> Result<Vec<u8>, String> {
+    let promise = js_fetch_html_mesh_snapshot_to_rgba(url, SURFACE_WIDTH, SURFACE_HEIGHT).map_err(
+        |error| js_error_message("failed to start server-side HTML snapshot fetch", error),
+    )?;
+    let value = JsFuture::from(promise)
+        .await
+        .map_err(|error| js_error_message("failed to fetch server-side HTML snapshot", error))?;
+
+    Ok(js_sys::Uint8Array::new(&value).to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn wasm_refresh_snapshot_to_rgba(url: &str) -> Result<Vec<u8>, String> {
+    let promise = js_refresh_html_mesh_snapshot_to_rgba(url, SURFACE_WIDTH, SURFACE_HEIGHT)
+        .map_err(|error| {
+            js_error_message("failed to start server-side HTML snapshot refresh", error)
+        })?;
+    let value = JsFuture::from(promise)
+        .await
+        .map_err(|error| js_error_message("failed to refresh server-side HTML snapshot", error))?;
+
+    Ok(js_sys::Uint8Array::new(&value).to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn wasm_send_snapshot_input_to_rgba(
+    url: &str,
+    input: WasmSnapshotInput,
+) -> Result<Vec<u8>, String> {
+    let promise = js_send_html_mesh_input_to_rgba(
+        url,
+        SURFACE_WIDTH,
+        SURFACE_HEIGHT,
+        input.kind,
+        input.x,
+        input.y,
+        &input.text,
+        &input.key,
+        input.delta_x,
+        input.delta_y,
+    )
+    .map_err(|error| js_error_message("failed to start server-side HTML input", error))?;
+    let value = JsFuture::from(promise)
+        .await
+        .map_err(|error| js_error_message("failed to send server-side HTML input", error))?;
+
+    Ok(js_sys::Uint8Array::new(&value).to_vec())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_close_html_mesh_browser() -> Option<String> {
+    js_close_html_mesh_browser()
+        .err()
+        .map(|error| js_error_message("failed to close HTML mesh browser", error))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1352,6 +1808,43 @@ fn install_egui_font(context: &egui::Context) {
 enum HtmlUiAction {
     LoadMemory,
     LoadUrl(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HtmlRefreshRate {
+    Fps15,
+    Fps30,
+    Fps60,
+}
+
+impl HtmlRefreshRate {
+    const OPTIONS: [Self; 3] = [Self::Fps15, Self::Fps30, Self::Fps60];
+
+    fn fps(self) -> u32 {
+        match self {
+            Self::Fps15 => 15,
+            Self::Fps30 => 30,
+            Self::Fps60 => 60,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Fps15 => "15 fps",
+            Self::Fps30 => "30 fps",
+            Self::Fps60 => "60 fps",
+        }
+    }
+
+    fn interval_seconds(self) -> f32 {
+        1.0 / self.fps() as f32
+    }
+}
+
+impl Default for HtmlRefreshRate {
+    fn default() -> Self {
+        Self::Fps30
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1652,6 +2145,19 @@ impl NativeHtmlBackend {
         }
     }
 
+    fn schedule_continuous_snapshot(&mut self) -> bool {
+        let Some(url) = self.current_url.clone() else {
+            return false;
+        };
+        self.pending_capture_url = Some(url);
+        if self.capture_in_flight {
+            self.capture_pending_after_in_flight = true;
+            return false;
+        }
+        self.schedule_snapshot(Duration::ZERO);
+        true
+    }
+
     #[cfg(target_os = "macos")]
     fn request_snapshot(&mut self, url: String) {
         let Some(webview) = &self.webview else {
@@ -1701,6 +2207,33 @@ impl NativeHtmlBackend {
 
     fn error(&self) -> Option<&str> {
         self.last_error.as_deref()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for NativeHtmlBackend {
+    fn drop(&mut self) {
+        if let Some(webview) = self.webview.take() {
+            let _ = webview.evaluate_script(
+                r#"
+(() => {
+  for (const media of document.querySelectorAll('audio, video')) {
+    try {
+      media.pause();
+      media.removeAttribute('src');
+      media.load();
+    } catch (_error) {
+    }
+  }
+  try {
+    window.stop();
+  } catch (_error) {
+  }
+})();
+"#,
+            );
+            let _ = webview.load_url("about:blank");
+        }
     }
 }
 
@@ -2209,6 +2742,15 @@ struct HtmlMeshExample {
     url_input: String,
     source_status: String,
     source_error: Option<String>,
+    io_enabled: bool,
+    refresh_rate: HtmlRefreshRate,
+    refresh_timer: f32,
+    #[cfg(target_arch = "wasm32")]
+    wasm_loading_timer: f32,
+    #[cfg(target_arch = "wasm32")]
+    wasm_pointer_down: bool,
+    #[cfg(target_arch = "wasm32")]
+    wasm_touch_id: Option<u64>,
     #[cfg(not(target_arch = "wasm32"))]
     native_pointer_down: bool,
     #[cfg(not(target_arch = "wasm32"))]
@@ -2227,6 +2769,8 @@ impl HtmlMeshExample {
             memory_template,
             url_input: "https://example.com".to_owned(),
             source_status: "source: memory HTML".to_owned(),
+            io_enabled: true,
+            refresh_rate: HtmlRefreshRate::Fps30,
             ..Default::default()
         }
     }
@@ -2262,6 +2806,23 @@ impl HtmlMeshExample {
         );
 
         Ok(())
+    }
+
+    fn cancel_mesh_io(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.wasm_pointer_down = false;
+            self.wasm_touch_id = None;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.native_pointer_down = false;
+            self.native_drag_last_uv = None;
+            self.native_touch_id = None;
+        }
+        if let Some(html) = &mut self.html {
+            html.cancel_pointer();
+        }
     }
 
     fn write_uniforms(&self, context: &RenderContext) {
@@ -2328,6 +2889,106 @@ impl HtmlMeshExample {
             (hit.x / PLANE_HALF_WIDTH + 1.0) * 0.5,
             1.0 - (hit.y / PLANE_HALF_HEIGHT + 1.0) * 0.5,
         ))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_snapshot_active(&self) -> bool {
+        self.html
+            .as_ref()
+            .and_then(HtmlSurface::wasm_snapshot_url)
+            .is_some()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn handle_wasm_snapshot_input(
+        &mut self,
+        context: &RenderContext,
+        input: WasmSnapshotInput,
+    ) -> bool {
+        let Some(html) = &mut self.html else {
+            return false;
+        };
+        if html.start_wasm_snapshot_input(input) {
+            self.source_error = None;
+            context.window.request_redraw();
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn handle_wasm_snapshot_keyboard(
+        &mut self,
+        context: &RenderContext,
+        key_event: &winit::event::KeyEvent,
+    ) -> bool {
+        let Some(input) = wasm_snapshot_keyboard_input(key_event) else {
+            return false;
+        };
+        self.handle_wasm_snapshot_input(context, input)
+    }
+
+    fn live_texture_refresh_active(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.wasm_snapshot_active()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.native_webview_active()
+        }
+    }
+
+    fn update_live_texture_refresh(&mut self, context: &RenderContext, delta_seconds: f32) {
+        if !self.live_texture_refresh_active() {
+            self.refresh_timer = 0.0;
+            return;
+        }
+
+        self.refresh_timer += delta_seconds;
+        let interval = self.refresh_rate.interval_seconds();
+        let mut requested_refresh = false;
+        if self.refresh_timer >= interval {
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(html) = &mut self.html {
+                    requested_refresh = html.start_wasm_snapshot_refresh();
+                }
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if let Some(backend) = &mut self.native_backend {
+                    requested_refresh = backend.schedule_continuous_snapshot();
+                }
+            }
+
+            if requested_refresh {
+                self.refresh_timer = (self.refresh_timer - interval).min(interval);
+            } else {
+                self.refresh_timer = interval;
+            }
+        }
+
+        context.window.request_redraw();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn sync_wasm_io_overlay(&mut self, _context: &RenderContext) {
+        self.hide_wasm_io_overlay();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn hide_wasm_io_overlay(&mut self) {
+        if let Err(error) =
+            js_set_html_mesh_io_overlay("", false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        {
+            self.source_error = Some(js_error_message(
+                "failed to hide HTML mesh IO overlay",
+                error,
+            ));
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2456,15 +3117,25 @@ impl HtmlMeshExample {
                     self.native_drag_last_uv = None;
                     self.native_touch_id = None;
                 }
+                #[cfg(target_arch = "wasm32")]
+                let close_error = wasm_close_html_mesh_browser();
                 if let Some(html) = &mut self.html {
                     html.load_memory_document(self.memory_template.clone());
                 }
+                self.refresh_timer = 0.0;
                 self.source_status = "source: memory HTML".to_owned();
-                self.source_error = None;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.source_error = None;
+                }
                 #[cfg(target_arch = "wasm32")]
-                if let Err(error) = js_hide_html_mesh_browser_frame() {
-                    self.source_error =
-                        Some(js_error_message("failed to hide browser iframe", error));
+                {
+                    if let Some(error) = close_error {
+                        webgpu::log_error(error.clone());
+                        self.source_error = Some(error);
+                    } else {
+                        self.source_error = None;
+                    }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if let (Some(backend), Some(html)) = (&mut self.native_backend, &self.html) {
@@ -2481,6 +3152,7 @@ impl HtmlMeshExample {
                         return;
                     }
                 };
+                self.refresh_timer = 0.0;
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.native_pointer_down = false;
@@ -2503,18 +3175,10 @@ impl HtmlMeshExample {
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Some(html) = &mut self.html {
-                        html.show_browser_embed_loading(&url);
+                        html.load_wasm_snapshot_document(url.clone());
                     }
-                    match js_show_html_mesh_browser_frame(&url) {
-                        Ok(()) => {
-                            self.source_status = format!("source: browser iframe {url}");
-                            self.source_error = None;
-                        }
-                        Err(error) => {
-                            self.source_error =
-                                Some(js_error_message("failed to show browser iframe", error));
-                        }
-                    }
+                    self.source_status = format!("source: wasm server snapshot {url}");
+                    self.source_error = None;
                     context.window.request_redraw();
                 }
             }
@@ -2534,6 +3198,8 @@ impl HtmlMeshExample {
         let source_error = self.source_error.clone();
         let mut url_input = self.url_input.clone();
         let mut shatter_enabled = self.shatter_enabled;
+        let mut io_enabled = self.io_enabled;
+        let mut refresh_rate = self.refresh_rate;
         let mut action = None;
         #[cfg(not(target_arch = "wasm32"))]
         let backend_status = match &self.native_backend {
@@ -2545,6 +3211,8 @@ impl HtmlMeshExample {
             .native_backend
             .as_ref()
             .and_then(|backend| backend.error().map(ToOwned::to_owned));
+        #[cfg(target_arch = "wasm32")]
+        let wasm_snapshot_active = self.wasm_snapshot_active();
 
         {
             let Some(gui) = &mut self.gui else {
@@ -2559,7 +3227,7 @@ impl HtmlMeshExample {
                     .resizable(false)
                     .collapsible(false)
                     .show(&egui_context, |ui| {
-                        ui.label("HTML rendered to a WebGPU texture");
+                        ui.label("HTML rendered on a 3D WebGPU plane");
                         ui.label(format!("{frame_ms:.2} ms/frame ({fps:.0} fps)"));
                         ui.label(gpu_device_info.as_str());
                         ui.label(format!("texture: {SURFACE_WIDTH} x {SURFACE_HEIGHT} RGBA8"));
@@ -2567,7 +3235,13 @@ impl HtmlMeshExample {
                         #[cfg(not(target_arch = "wasm32"))]
                         ui.label(backend_status.as_str());
                         #[cfg(target_arch = "wasm32")]
-                        ui.label("backend: browser canvas raster + iframe URL embed");
+                        ui.label(if wasm_snapshot_active && io_enabled {
+                            "backend: server browser snapshot + ray-mapped IO"
+                        } else if wasm_snapshot_active {
+                            "backend: server browser snapshot + WebGPU texture"
+                        } else {
+                            "backend: browser canvas raster + WebGPU texture"
+                        });
                         if let Some(error) = &source_error {
                             ui.colored_label(egui::Color32::from_rgb(255, 118, 118), error);
                         }
@@ -2579,10 +3253,31 @@ impl HtmlMeshExample {
                         ui.separator();
                         ui.heading("Mesh");
                         ui.checkbox(&mut shatter_enabled, "Shatter effect");
+                        ui.checkbox(&mut io_enabled, "Enable IO");
+                        ui.label(format!("texture refresh: {}", refresh_rate.label()));
+                        ui.horizontal(|ui| {
+                            for rate in HtmlRefreshRate::OPTIONS {
+                                ui.radio_value(&mut refresh_rate, rate, rate.label());
+                            }
+                        });
                         ui.label(if shatter_enabled {
                             "mesh: tiled shader shards"
                         } else {
                             "mesh: single plane"
+                        });
+                        #[cfg(target_arch = "wasm32")]
+                        ui.label(if !io_enabled {
+                            "io: disabled"
+                        } else if wasm_snapshot_active {
+                            "io: ray-mapped input updates the WebGPU texture"
+                        } else {
+                            "io: ray-mapped pointer and keyboard"
+                        });
+                        #[cfg(not(target_arch = "wasm32"))]
+                        ui.label(if io_enabled {
+                            "io: ray-mapped pointer and keyboard"
+                        } else {
+                            "io: disabled"
                         });
 
                         ui.separator();
@@ -2659,6 +3354,18 @@ impl HtmlMeshExample {
         self.url_input = url_input;
         if self.shatter_enabled != shatter_enabled {
             self.shatter_enabled = shatter_enabled;
+            context.window.request_redraw();
+        }
+        if self.io_enabled != io_enabled {
+            self.io_enabled = io_enabled;
+            if !self.io_enabled {
+                self.cancel_mesh_io();
+            }
+            context.window.request_redraw();
+        }
+        if self.refresh_rate != refresh_rate {
+            self.refresh_rate = refresh_rate;
+            self.refresh_timer = 0.0;
             context.window.request_redraw();
         }
         if let Some(action) = action {
@@ -2819,10 +3526,30 @@ impl Example for HtmlMeshExample {
             }
         }
 
+        if !self.io_enabled {
+            if matches!(event, winit::event::WindowEvent::Focused(false)) {
+                self.cancel_mesh_io();
+            }
+            return false;
+        }
+
         match event {
             winit::event::WindowEvent::CursorMoved { position, .. } => {
                 let position = glam::Vec2::new(position.x as f32, position.y as f32);
                 self.cursor_position = Some(position);
+                #[cfg(target_arch = "wasm32")]
+                if self.wasm_snapshot_active() {
+                    if !self.wasm_pointer_down {
+                        return false;
+                    }
+                    let Some(uv) = self.pointer_uv(context, position) else {
+                        return false;
+                    };
+                    return self.handle_wasm_snapshot_input(
+                        context,
+                        WasmSnapshotInput::pointer("mouse_move", uv),
+                    );
+                }
                 let uv = self.pointer_uv(context, position);
                 #[cfg(not(target_arch = "wasm32"))]
                 if self.native_webview_active() {
@@ -2851,6 +3578,23 @@ impl Example for HtmlMeshExample {
             winit::event::WindowEvent::MouseInput { state, button, .. }
                 if *button == winit::event::MouseButton::Left =>
             {
+                #[cfg(target_arch = "wasm32")]
+                if self.wasm_snapshot_active() {
+                    let Some(position) = self.cursor_position else {
+                        return false;
+                    };
+                    let Some(uv) = self.pointer_uv(context, position) else {
+                        self.wasm_pointer_down = false;
+                        return false;
+                    };
+                    let (kind, pointer_down) = match state {
+                        winit::event::ElementState::Pressed => ("mouse_down", true),
+                        winit::event::ElementState::Released => ("mouse_up", false),
+                    };
+                    self.wasm_pointer_down = pointer_down;
+                    return self
+                        .handle_wasm_snapshot_input(context, WasmSnapshotInput::pointer(kind, uv));
+                }
                 let Some(position) = self.cursor_position else {
                     return false;
                 };
@@ -2896,13 +3640,72 @@ impl Example for HtmlMeshExample {
                     let Some(uv) = self.pointer_uv(context, position) else {
                         return false;
                     };
-                    return self.handle_native_scroll(context, uv, native_wheel_delta(delta));
+                    return self.handle_native_scroll(context, uv, htmlmesh_wheel_delta(delta));
                 }
                 false
             }
             #[cfg(target_arch = "wasm32")]
-            winit::event::WindowEvent::MouseWheel { .. } => false,
+            winit::event::WindowEvent::MouseWheel { delta, .. } => {
+                if self.wasm_snapshot_active() {
+                    let Some(position) = self.cursor_position else {
+                        return false;
+                    };
+                    let Some(uv) = self.pointer_uv(context, position) else {
+                        return false;
+                    };
+                    return self.handle_wasm_snapshot_input(
+                        context,
+                        WasmSnapshotInput::wheel(uv, htmlmesh_wheel_delta(delta)),
+                    );
+                }
+                false
+            }
             winit::event::WindowEvent::Touch(touch) => {
+                #[cfg(target_arch = "wasm32")]
+                if self.wasm_snapshot_active() {
+                    match touch.phase {
+                        winit::event::TouchPhase::Started => {
+                            self.wasm_touch_id = Some(touch.id);
+                        }
+                        winit::event::TouchPhase::Moved
+                            if self.wasm_touch_id.is_some_and(|id| id != touch.id) =>
+                        {
+                            return false;
+                        }
+                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled
+                            if self.wasm_touch_id.is_some_and(|id| id != touch.id) =>
+                        {
+                            return false;
+                        }
+                        _ => {}
+                    }
+                    let position =
+                        glam::Vec2::new(touch.location.x as f32, touch.location.y as f32);
+                    let Some(uv) = self.pointer_uv(context, position) else {
+                        self.wasm_pointer_down = false;
+                        self.wasm_touch_id = None;
+                        return false;
+                    };
+                    let kind = match touch.phase {
+                        winit::event::TouchPhase::Started => {
+                            self.wasm_pointer_down = true;
+                            "mouse_down"
+                        }
+                        winit::event::TouchPhase::Moved => "mouse_move",
+                        winit::event::TouchPhase::Ended => {
+                            self.wasm_pointer_down = false;
+                            self.wasm_touch_id = None;
+                            "mouse_up"
+                        }
+                        winit::event::TouchPhase::Cancelled => {
+                            self.wasm_pointer_down = false;
+                            self.wasm_touch_id = None;
+                            "mouse_up"
+                        }
+                    };
+                    return self
+                        .handle_wasm_snapshot_input(context, WasmSnapshotInput::pointer(kind, uv));
+                }
                 let position = glam::Vec2::new(touch.location.x as f32, touch.location.y as f32);
                 let Some(uv) = self.pointer_uv(context, position) else {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -2966,6 +3769,10 @@ impl Example for HtmlMeshExample {
                 }
             }
             winit::event::WindowEvent::KeyboardInput { event, .. } => {
+                #[cfg(target_arch = "wasm32")]
+                if self.wasm_snapshot_active() {
+                    return self.handle_wasm_snapshot_keyboard(context, event);
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 if self.native_webview_active() {
                     return self.handle_native_keyboard(context, event);
@@ -2994,11 +3801,30 @@ impl Example for HtmlMeshExample {
 
     fn update(&mut self, context: &mut RenderContext) {
         let _ = self.frame_stats.tick();
+        let delta_seconds = self.frame_stats.delta_seconds();
+        #[cfg(target_arch = "wasm32")]
+        if let Some(html) = &mut self.html
+            && html.is_wasm_snapshot_loading()
+        {
+            self.wasm_loading_timer += delta_seconds;
+            if self.wasm_loading_timer >= 0.32 {
+                self.wasm_loading_timer = 0.0;
+                html.advance_wasm_snapshot_loading();
+            }
+            context.window.request_redraw();
+        }
         if self.shatter_enabled {
-            self.animation_time += self.frame_stats.delta_seconds();
+            self.animation_time += delta_seconds;
             if self.animation_time > 10_000.0 {
                 self.animation_time = 0.0;
             }
+            context.window.request_redraw();
+        }
+        self.update_live_texture_refresh(context, delta_seconds);
+        #[cfg(target_arch = "wasm32")]
+        if let Some(html) = &self.html
+            && html.has_pending_wasm_raster()
+        {
             context.window.request_redraw();
         }
 
@@ -3036,6 +3862,10 @@ impl Example for HtmlMeshExample {
         encoder: &mut wgpu::CommandEncoder,
     ) -> RenderResult<()> {
         self.upload_html_if_dirty(context)?;
+        #[cfg(target_arch = "wasm32")]
+        if let Some(error) = self.html.as_mut().and_then(HtmlSurface::take_last_error) {
+            self.source_error = Some(error);
+        }
         self.write_uniforms(context);
 
         let pipeline = self
@@ -3083,6 +3913,9 @@ impl Example for HtmlMeshExample {
         pass.draw_indexed(0..index_count, 0, 0..1);
         drop(pass);
 
+        #[cfg(target_arch = "wasm32")]
+        self.sync_wasm_io_overlay(context);
+
         self.render_gui(context, view, encoder)?;
 
         Ok(())
@@ -3098,6 +3931,38 @@ fn plane_model() -> glam::Mat4 {
         * glam::Mat4::from_rotation_x(4.0_f32.to_radians())
 }
 
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+fn plane_screen_corners(context: &RenderContext) -> Option<[glam::Vec2; 4]> {
+    let width = context.surface_config.width.max(1) as f32;
+    let height = context.surface_config.height.max(1) as f32;
+    let aspect_ratio = context.aspect_ratio();
+    let view_pos = camera_position();
+    let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
+    let projection = glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+    let transform = camera::wgpu_clip_matrix() * projection * view * plane_model();
+    let corners = [
+        glam::Vec3::new(-PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0),
+        glam::Vec3::new(PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0),
+        glam::Vec3::new(PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0),
+        glam::Vec3::new(-PLANE_HALF_WIDTH, -PLANE_HALF_HEIGHT, 0.0),
+    ];
+
+    let mut screen = [glam::Vec2::ZERO; 4];
+    for (index, corner) in corners.into_iter().enumerate() {
+        let clip = transform * corner.extend(1.0);
+        if clip.w.abs() <= f32::EPSILON {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        screen[index] = glam::Vec2::new(
+            (ndc.x * 0.5 + 0.5) * width,
+            (1.0 - (ndc.y * 0.5 + 0.5)) * height,
+        );
+    }
+    Some(screen)
+}
+
 fn uv_to_pixel(uv: glam::Vec2) -> (f32, f32) {
     (
         (uv.x.clamp(0.0, 1.0) * SURFACE_WIDTH as f32).clamp(0.0, SURFACE_WIDTH as f32 - 1.0),
@@ -3111,13 +3976,49 @@ fn uv_to_pixel_vec2(uv: glam::Vec2) -> glam::Vec2 {
     glam::Vec2::new(x, y)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn native_wheel_delta(delta: &winit::event::MouseScrollDelta) -> glam::Vec2 {
+fn htmlmesh_wheel_delta(delta: &winit::event::MouseScrollDelta) -> glam::Vec2 {
     match delta {
         winit::event::MouseScrollDelta::LineDelta(x, y) => glam::Vec2::new(*x, *y) * -48.0,
         winit::event::MouseScrollDelta::PixelDelta(position) => {
             glam::Vec2::new(position.x as f32, position.y as f32) * -1.0
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_snapshot_keyboard_input(key_event: &winit::event::KeyEvent) -> Option<WasmSnapshotInput> {
+    if !key_event.state.is_pressed() {
+        return None;
+    }
+
+    use winit::keyboard::{Key, NamedKey};
+
+    if let Some(text) = &key_event.text {
+        let text = text.to_string();
+        if text.chars().any(|ch| !ch.is_control()) {
+            return Some(WasmSnapshotInput::text(text));
+        }
+    }
+
+    match key_event.logical_key.as_ref() {
+        Key::Named(NamedKey::Backspace) => Some(WasmSnapshotInput::key("Backspace")),
+        Key::Named(NamedKey::Tab) => Some(WasmSnapshotInput::key("Tab")),
+        Key::Named(NamedKey::Enter) => Some(WasmSnapshotInput::key("Enter")),
+        Key::Named(NamedKey::Escape) => Some(WasmSnapshotInput::key("Escape")),
+        Key::Named(NamedKey::Space) => Some(WasmSnapshotInput::text(" ".to_owned())),
+        Key::Named(NamedKey::ArrowLeft) => Some(WasmSnapshotInput::key("ArrowLeft")),
+        Key::Named(NamedKey::ArrowUp) => Some(WasmSnapshotInput::key("ArrowUp")),
+        Key::Named(NamedKey::ArrowRight) => Some(WasmSnapshotInput::key("ArrowRight")),
+        Key::Named(NamedKey::ArrowDown) => Some(WasmSnapshotInput::key("ArrowDown")),
+        Key::Character(value) => {
+            let text = value.to_string();
+            if text.chars().any(|ch| !ch.is_control()) {
+                Some(WasmSnapshotInput::text(text))
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
@@ -3322,11 +4223,8 @@ fn main() -> RenderResult<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {}
-
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
-pub fn start() -> Result<(), wasm_bindgen::JsValue> {
+pub fn main() -> Result<(), wasm_bindgen::JsValue> {
     wasm_bindgen_futures::spawn_local(async {
         match load_html_template().await {
             Ok(template) => {

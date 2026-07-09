@@ -1,3 +1,5 @@
+#![cfg_attr(target_arch = "wasm32", no_main)]
+
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
@@ -919,11 +921,8 @@ fn main() -> RenderResult<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {}
-
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
-pub fn start() -> Result<(), wasm_bindgen::JsValue> {
+pub fn main() -> Result<(), wasm_bindgen::JsValue> {
     wasm_bindgen_futures::spawn_local(async {
         match load_multisampling_assets().await {
             Ok(assets) => {

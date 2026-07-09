@@ -1,3 +1,5 @@
+#![cfg_attr(target_arch = "wasm32", no_main)]
+
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
@@ -816,10 +818,7 @@ fn main() -> RenderResult<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {}
-
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
-pub fn start() -> Result<(), wasm_bindgen::JsValue> {
+pub fn main() -> Result<(), wasm_bindgen::JsValue> {
     sib::render::run(GearsExample::default()).map_err(|error| error.to_string().into())
 }

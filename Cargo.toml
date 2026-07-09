@@ -28,6 +28,7 @@ image = { version = "0.25.10", default-features = false, features = [
 sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde_json = { version = "1.0.150" }
 sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-file-server",
     "net-h1-server",
