@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
-    render_pass, shader, texture, wgpu, winit,
+    buffer, glam, render_pass, shader, texture, wgpu, winit, Example, ExampleSettings, FrameStats,
+    RenderContext, RenderError, RenderResult,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -162,7 +162,7 @@ impl Default for ClothControls {
             spring_stiffness: 2000.0,
             damping: 0.25,
             sphere_radius: 1.0,
-            time_step: 0.0025,
+            time_step: 0.00077,
             iterations: DEFAULT_ITERATIONS,
         }
     }
