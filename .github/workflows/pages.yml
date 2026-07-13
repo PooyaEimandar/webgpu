@@ -29,7 +29,10 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-bindgen
-        run: cargo install wasm-bindgen-cli --version 0.2.122 --locked
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          echo "wasm-bindgen version from Cargo.lock: $version"
+          cargo install wasm-bindgen-cli --version "$version" --locked
 
       - name: Build release WASM
         run: scripts/build-wasm.sh --release

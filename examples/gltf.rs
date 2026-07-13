@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
+    buffer, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{BOX_TEXTURED_GLTF_URL, GltfMaterial, GltfScene, load_gltf_scene};
 
@@ -37,7 +37,7 @@ impl Uniforms {
             glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, radius * 24.0);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             camera_position: [eye.x, eye.y, eye.z, 0.0],
             base_color_factor: material.base_color_factor,

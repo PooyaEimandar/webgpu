@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, render_pass, shader, text, texture, wgpu, winit,
+    buffer, glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -91,8 +91,8 @@ impl SceneCamera {
             glam::Vec3::new(5.0, 23.0, 40.0)
         };
         let target = glam::Vec3::new(0.0, 0.0, 0.0);
-        let projection = camera::wgpu_clip_matrix()
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let projection =
+            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
         let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
 
         Self { projection, view }

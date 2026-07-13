@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
@@ -746,8 +746,8 @@ fn create_render_pipeline(
 }
 
 fn scene_matrices(aspect_ratio: f32) -> SceneMatrices {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 512.0);
+    let projection =
+        glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 512.0);
     let yaw = 75.0_f32.to_radians();
     let pitch = 26.0_f32.to_radians();
     let distance = 14.0;

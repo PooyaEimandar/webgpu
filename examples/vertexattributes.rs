@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -50,7 +50,7 @@ impl Uniforms {
         let light_position = glam::Vec3::new(1.6, 2.8, 2.4);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             light_position: [light_position.x, light_position.y, light_position.z, 0.0],
             view_position: [view_position.x, view_position.y, view_position.z, 0.0],

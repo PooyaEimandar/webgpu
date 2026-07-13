@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, texture, wgpu, winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetLoader, AssetRequest};
 
@@ -95,7 +95,7 @@ impl Uniforms {
         }
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             instances,
         }
     }

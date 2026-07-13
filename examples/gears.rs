@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, render_pass, shader, text, texture, wgpu, winit,
+    buffer, glam, render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -47,8 +47,8 @@ impl Uniforms {
             glam::Vec3::new(0.0, 2.5, 0.0),
             -glam::Vec3::Y,
         );
-        let projection = camera::wgpu_clip_matrix()
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
+        let projection =
+            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
         let normal = (view * model).inverse().transpose();
 
         Self {

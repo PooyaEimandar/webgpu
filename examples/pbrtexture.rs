@@ -3,8 +3,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetLoader, AssetRequest};
 use webgpu::skybox;
@@ -107,12 +107,11 @@ impl SceneUniforms {
         let projection =
             glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
         let skybox_view = glam::Mat4::from_mat3(glam::Mat3::from_mat4(view));
-        let clip = camera::wgpu_clip_matrix();
         let p = 15.0;
 
         Self {
-            view_projection: (clip * projection * view).to_cols_array_2d(),
-            skybox_view_projection: (clip * projection * skybox_view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
+            skybox_view_projection: (projection * skybox_view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             cam_pos: [eye.x, eye.y, eye.z, 0.0],
             lights: [

@@ -95,12 +95,21 @@ mod native {
                 .map_or(request_path.as_str(), |(path, _)| path);
             match route {
                 "/api/htmlmesh/snapshot" => {
+                    if !authorize_htmlmesh_api(session)? {
+                        return Ok(());
+                    }
                     return serve_htmlmesh_snapshot(session, &request_path);
                 }
                 "/api/htmlmesh/input" => {
+                    if !authorize_htmlmesh_api(session)? {
+                        return Ok(());
+                    }
                     return serve_htmlmesh_input(session, &request_path);
                 }
                 "/api/htmlmesh/close" => {
+                    if !authorize_htmlmesh_api(session)? {
+                        return Ok(());
+                    }
                     return serve_htmlmesh_close(session);
                 }
                 _ => {}
@@ -108,7 +117,7 @@ mod native {
 
             if let Some(location) = self.directory_redirect(&request_path) {
                 return session
-                    .status_code(StatusCode::PERMANENT_REDIRECT)
+                    .status_code(StatusCode::TEMPORARY_REDIRECT)
                     .header_str("Location", &location)?
                     .header_str("Connection", "close")?
                     .body(Bytes::new())
@@ -139,6 +148,61 @@ mod native {
 
     static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+    /// The HTML mesh API drives a headless browser (screenshot arbitrary URLs,
+    /// inject input), so it must never be reachable by other machines or by
+    /// cross-origin pages running in the developer's browser. Requests are
+    /// only accepted when the Host header is loopback (defeats DNS rebinding)
+    /// and, when a browser attaches an Origin header, that origin is loopback
+    /// too (defeats cross-origin fetch; same-origin GETs work either way).
+    fn authorize_htmlmesh_api<S: Session>(session: &mut S) -> std::io::Result<bool> {
+        let host_is_loopback = session
+            .req_host()
+            .is_some_and(|(host, _)| is_loopback_host(&host));
+        let origin_is_loopback = match session.req_header(&http::header::ORIGIN) {
+            None => true,
+            Some(value) => value
+                .to_str()
+                .ok()
+                .and_then(origin_host)
+                .is_some_and(|host| is_loopback_host(&host)),
+        };
+        if host_is_loopback && origin_is_loopback {
+            return Ok(true);
+        }
+
+        const BODY: &[u8] = b"HTML mesh API is only available to loopback requests";
+        let content_length = BODY.len().to_string();
+        session
+            .status_code(StatusCode::FORBIDDEN)
+            .header_str("Connection", "close")?
+            .header_str("Content-Type", "text/plain; charset=utf-8")?
+            .header_str("Content-Length", &content_length)?
+            .body(Bytes::from_static(BODY))
+            .eom()?;
+        Ok(false)
+    }
+
+    fn is_loopback_host(host: &str) -> bool {
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        if host.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        host.parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+    }
+
+    fn origin_host(origin: &str) -> Option<String> {
+        let rest = origin
+            .strip_prefix("http://")
+            .or_else(|| origin.strip_prefix("https://"))?;
+        let authority = rest.split('/').next()?;
+        let host = match authority.strip_prefix('[') {
+            Some(bracketed) => bracketed.split(']').next()?,
+            None => authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+        };
+        Some(host.to_owned())
+    }
+
     fn serve_htmlmesh_snapshot<S: Session>(
         session: &mut S,
         request_path: &str,
@@ -157,7 +221,6 @@ mod native {
         let result = close_htmlmesh_browser();
         session
             .header_str("Connection", "close")?
-            .header_str("Access-Control-Allow-Origin", "*")?
             .header_str("Cache-Control", "no-store")?;
 
         match result {
@@ -185,7 +248,6 @@ mod native {
     ) -> std::io::Result<()> {
         session
             .header_str("Connection", "close")?
-            .header_str("Access-Control-Allow-Origin", "*")?
             .header_str("Cache-Control", "no-store")?;
 
         match result {
@@ -277,7 +339,7 @@ mod native {
             .lock()
             .map_err(|_| "HTML mesh browser session lock is poisoned".to_owned())?;
 
-        let recreate = session_guard.as_ref().map_or(true, |session| {
+        let recreate = session_guard.as_ref().is_none_or(|session| {
             !session.matches(&request.url, request.width, request.height)
         });
         if recreate {
@@ -481,36 +543,40 @@ mod native {
             let mut child = command
                 .spawn()
                 .map_err(|error| format!("failed to start headless browser: {error}"))?;
-            let devtools_ws = match wait_for_devtools_endpoint(&mut child, Duration::from_secs(12))
-            {
-                Ok(endpoint) => endpoint,
+            let setup = (|| {
+                let devtools_ws = wait_for_devtools_endpoint(&mut child, Duration::from_secs(12))?;
+                let (host, port, _) = parse_ws_url(&devtools_ws)?;
+                let page_ws = wait_for_page_websocket(&host, port, Duration::from_secs(12))?;
+                let mut cdp = CdpWebSocket::connect(&page_ws)?;
+                cdp.call("Page.enable", json!({}))?;
+                cdp.call("Runtime.enable", json!({}))?;
+                cdp.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    json!({
+                        "width": width,
+                        "height": height,
+                        "deviceScaleFactor": 1,
+                        "mobile": false,
+                    }),
+                )?;
+                cdp.call(
+                    "Emulation.setVisibleSize",
+                    json!({
+                        "width": width,
+                        "height": height,
+                    }),
+                )?;
+                Ok(cdp)
+            })();
+            let cdp = match setup {
+                Ok(cdp) => cdp,
                 Err(error) => {
                     let _ = child.kill();
+                    let _ = child.wait();
                     let _ = fs::remove_dir_all(&user_data_dir);
                     return Err(error);
                 }
             };
-            let (host, port, _) = parse_ws_url(&devtools_ws)?;
-            let page_ws = wait_for_page_websocket(&host, port, Duration::from_secs(12))?;
-            let mut cdp = CdpWebSocket::connect(&page_ws)?;
-            cdp.call("Page.enable", json!({}))?;
-            cdp.call("Runtime.enable", json!({}))?;
-            cdp.call(
-                "Emulation.setDeviceMetricsOverride",
-                json!({
-                    "width": width,
-                    "height": height,
-                    "deviceScaleFactor": 1,
-                    "mobile": false,
-                }),
-            )?;
-            cdp.call(
-                "Emulation.setVisibleSize",
-                json!({
-                    "width": width,
-                    "height": height,
-                }),
-            )?;
             thread::sleep(Duration::from_millis(900));
 
             Ok(Self {
@@ -894,11 +960,13 @@ mod native {
     }
 
     fn read_ws_text(stream: &mut TcpStream) -> Result<String, String> {
+        let mut message: Option<Vec<u8>> = None;
         loop {
             let mut header = [0u8; 2];
             stream
                 .read_exact(&mut header)
                 .map_err(|error| format!("failed to read websocket frame header: {error}"))?;
+            let fin = (header[0] & 0x80) != 0;
             let opcode = header[0] & 0x0f;
             let masked = (header[1] & 0x80) != 0;
             let mut len = u64::from(header[1] & 0x7f);
@@ -937,8 +1005,27 @@ mod native {
 
             match opcode {
                 0x1 => {
-                    return String::from_utf8(payload)
-                        .map_err(|error| format!("websocket text frame is not UTF-8: {error}"));
+                    if fin {
+                        return String::from_utf8(payload).map_err(|error| {
+                            format!("websocket text frame is not UTF-8: {error}")
+                        });
+                    }
+                    message = Some(payload);
+                }
+                0x0 => {
+                    let Some(buffer) = message.as_mut() else {
+                        return Err("websocket continuation frame without a start".to_owned());
+                    };
+                    if buffer.len() + payload.len() > 32 * 1024 * 1024 {
+                        return Err("websocket message is too large".to_owned());
+                    }
+                    buffer.extend_from_slice(&payload);
+                    if fin {
+                        let complete = message.take().unwrap_or_default();
+                        return String::from_utf8(complete).map_err(|error| {
+                            format!("websocket text frame is not UTF-8: {error}")
+                        });
+                    }
                 }
                 0x8 => return Err("CDP websocket closed".to_owned()),
                 0x9 => send_ws_pong(stream, &payload)?,
@@ -975,11 +1062,8 @@ mod native {
         let mut child = command.spawn()?;
         let deadline = Instant::now() + timeout;
         loop {
-            if fs::metadata(screenshot_path).is_ok_and(|metadata| metadata.len() > 0) {
-                let _ = child.kill();
-                return Ok(());
-            }
-
+            // Wait for the browser to exit on its own: killing it as soon as
+            // the screenshot file appears can truncate a write in progress.
             if let Some(status) = child.try_wait()? {
                 if fs::metadata(screenshot_path).is_ok_and(|metadata| metadata.len() > 0) {
                     return Ok(());
@@ -991,6 +1075,7 @@ mod native {
 
             if Instant::now() >= deadline {
                 let _ = child.kill();
+                let _ = child.wait();
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     "headless browser timed out",

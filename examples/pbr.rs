@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -82,7 +82,7 @@ impl SceneUniforms {
         ];
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             cam_pos: [eye.x, eye.y, eye.z, 0.0],
             lights,

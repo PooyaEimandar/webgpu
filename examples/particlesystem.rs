@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
@@ -179,7 +179,6 @@ struct SceneCamera {
 impl SceneCamera {
     fn new(aspect_ratio: f32) -> Self {
         let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
-            * camera::wgpu_clip_matrix()
             * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
         let view = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, CAMERA_ZOOM))
             * glam::Mat4::from_translation(glam::Vec3::new(0.0, 15.0, 0.0))

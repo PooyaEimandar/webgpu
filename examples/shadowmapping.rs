@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, load_colored_gltf_scene,
@@ -32,8 +32,7 @@ impl ShadowUniforms {
         let (projection, view) = camera_matrices(aspect_ratio);
         let light_position = light_position(animation_time);
         let light_target = glam::Vec3::new(0.0, -0.45, 0.0);
-        let light_projection = camera::wgpu_clip_matrix()
-            * glam::Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 40.0);
+        let light_projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 40.0);
         let light_view = glam::Mat4::look_at_rh(light_position, light_target, glam::Vec3::Y);
 
         Self {
@@ -432,8 +431,7 @@ impl Example for ShadowMappingExample {
 }
 
 fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4) {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
+    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
     let yaw = -30.0_f32.to_radians();
     let pitch = 25.0_f32.to_radians();
     let orbit = glam::Quat::from_rotation_y(yaw) * glam::Quat::from_rotation_x(pitch);

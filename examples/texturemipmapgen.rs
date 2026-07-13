@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
@@ -55,7 +55,7 @@ impl Uniforms {
         let model = glam::Mat4::from_rotation_z(animation_time * 0.16 * std::f32::consts::TAU);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             view_pos: [view_pos.x, view_pos.y, view_pos.z, 0.0],
             lod_bias: [0.0, 0.0, 0.0, 0.0],

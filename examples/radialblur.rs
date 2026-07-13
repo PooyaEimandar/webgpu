@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, shader, text, texture, wgpu, winit,
+    buffer, glam, shader, text, texture, wgpu, winit,
 };
 use webgpu::{
     asset::AssetLoader,
@@ -33,8 +33,8 @@ struct SceneUniforms {
 
 impl SceneUniforms {
     fn new(aspect_ratio: f32, rotation_y: f32, gradient_pos: f32) -> Self {
-        let projection = camera::wgpu_clip_matrix()
-            * glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
+        let projection =
+            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
         let yaw = (-28.75_f32 + rotation_y).to_radians();
         let pitch = -16.25_f32.to_radians();
         let orbit = glam::Quat::from_rotation_y(yaw) * glam::Quat::from_rotation_x(pitch);

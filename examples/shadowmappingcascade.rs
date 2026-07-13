@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, load_colored_gltf_scene,
@@ -501,8 +501,8 @@ impl Example for ShadowMappingCascadeExample {
 }
 
 fn camera_state(aspect_ratio: f32) -> CameraState {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, CAMERA_NEAR, CAMERA_FAR);
+    let projection =
+        glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, CAMERA_NEAR, CAMERA_FAR);
     let eye = glam::Vec3::new(-0.4, 3.2, -12.0);
     let target = glam::Vec3::new(0.0, -0.65, 12.0);
     let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
@@ -615,15 +615,14 @@ fn cascade_light_space(corners: &[glam::Vec3; 8], light_direction: glam::Vec3) -
         center,
         glam::Vec3::Y,
     );
-    let light_projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::orthographic_rh(
-            min_extents.x,
-            max_extents.x,
-            min_extents.y,
-            max_extents.y,
-            0.0,
-            max_extents.z - min_extents.z,
-        );
+    let light_projection = glam::Mat4::orthographic_rh(
+        min_extents.x,
+        max_extents.x,
+        min_extents.y,
+        max_extents.y,
+        0.0,
+        max_extents.z - min_extents.z,
+    );
 
     light_projection * light_view
 }

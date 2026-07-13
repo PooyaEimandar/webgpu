@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, texture, wgpu, winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetLoader, AssetRequest};
 
@@ -48,7 +48,7 @@ impl Uniforms {
             glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             view_pos: [view_pos.x, view_pos.y, view_pos.z, 0.0],
             lod_bias: [0.0, 0.0, 0.0, 0.0],

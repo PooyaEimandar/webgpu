@@ -3,8 +3,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::{
     asset::AssetLoader,
@@ -72,7 +72,7 @@ impl Uniforms {
             glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 256.0);
 
         Self {
-            projection: (camera::wgpu_clip_matrix() * projection).to_cols_array_2d(),
+            projection: (projection).to_cols_array_2d(),
             model: view.to_cols_array_2d(),
             light_pos: [5.0, -5.0, 5.0, 1.0],
         }

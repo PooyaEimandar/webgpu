@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, camera,
-    glam, render_pass, shader, texture, wgpu, winit,
+    Example, ExampleSettings, RenderContext, RenderError, RenderResult, bind_group, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::skybox;
 
@@ -70,7 +70,7 @@ impl Uniforms {
         let projection =
             glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
         let model = glam::Mat4::from_scale(glam::Vec3::splat(1.12));
-        let clip_projection = camera::wgpu_clip_matrix() * projection;
+        let clip_projection = projection;
 
         Self {
             skybox_view_projection: (clip_projection * skybox_view).to_cols_array_2d(),

@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, render_pass, shader, texture, wgpu, winit,
+    buffer, glam, render_pass, shader, texture, wgpu, winit,
 };
 use webgpu::asset::AssetLoader;
 
@@ -81,7 +81,7 @@ impl Uniforms {
             glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: plane_model().to_cols_array_2d(),
             view_pos: [view_pos.x, view_pos.y, view_pos.z, 0.0],
             effect: [
@@ -2850,7 +2850,7 @@ impl HtmlMeshExample {
         let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
         let projection =
             glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
-        let view_projection = camera::wgpu_clip_matrix() * projection * view;
+        let view_projection = projection * view;
         let inverse = view_projection.inverse();
         let near = inverse * glam::Vec4::new(ndc.x, ndc.y, 0.0, 1.0);
         let far = inverse * glam::Vec4::new(ndc.x, ndc.y, 1.0, 1.0);
@@ -3940,7 +3940,7 @@ fn plane_screen_corners(context: &RenderContext) -> Option<[glam::Vec2; 4]> {
     let view_pos = camera_position();
     let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
     let projection = glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
-    let transform = camera::wgpu_clip_matrix() * projection * view * plane_model();
+    let transform = projection * view * plane_model();
     let corners = [
         glam::Vec3::new(-PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0),
         glam::Vec3::new(PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0),

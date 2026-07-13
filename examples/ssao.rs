@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, mesh, shader, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    mesh, shader, texture, wgpu, winit,
 };
 use webgpu::{
     gltf_scene::{GltfColoredMesh, GltfColoredScene, GltfColoredVertex},
@@ -1181,8 +1181,7 @@ impl Example for SsaoExample {
 }
 
 fn camera_matrices(aspect_ratio: f32, camera_state: FpsCamera) -> (glam::Mat4, glam::Vec3) {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
     let view = camera_state.view_matrix();
 
     (projection * view, camera_state.eye)
@@ -1298,8 +1297,7 @@ fn fill_light_specs(animation_time: f32) -> [LightSpec; LIGHT_COUNT - SHADOW_LIG
 }
 
 fn shadow_view_projection(position: glam::Vec3, target: glam::Vec3) -> glam::Mat4 {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
+    let projection = glam::Mat4::perspective_rh(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
     let view = glam::Mat4::look_at_rh(position, target, glam::Vec3::Y);
     projection * view
 }

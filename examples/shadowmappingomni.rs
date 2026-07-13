@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, load_colored_gltf_scene,
@@ -556,8 +556,7 @@ impl Example for ShadowMappingOmniExample {
 }
 
 fn camera_state(aspect_ratio: f32) -> CameraState {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 64.0);
+    let projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 64.0);
     let eye = glam::Vec3::new(0.0, 4.6, -10.8);
     let target = glam::Vec3::new(0.0, -0.55, 0.75);
     let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
@@ -598,8 +597,7 @@ fn scene_uniforms(
 }
 
 fn cube_face_matrices(light_position: glam::Vec3) -> [glam::Mat4; FACE_COUNT] {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR);
+    let projection = glam::Mat4::perspective_rh(90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR);
     let faces = [
         (glam::Vec3::X, -glam::Vec3::Y),
         (-glam::Vec3::X, -glam::Vec3::Y),

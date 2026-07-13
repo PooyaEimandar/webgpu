@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, mesh, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    mesh, shader, text, texture, wgpu, winit,
 };
 use webgpu::{
     gltf_scene::{GltfColoredMesh, GltfColoredScene, GltfColoredVertex},
@@ -732,8 +732,7 @@ impl Example for DeferredExample {
 }
 
 fn camera_matrices(aspect_ratio: f32, camera_state: FpsCamera) -> (glam::Mat4, glam::Vec3) {
-    let projection = camera::wgpu_clip_matrix()
-        * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
     let view = camera_state.view_matrix();
 
     (projection * view, camera_state.eye)

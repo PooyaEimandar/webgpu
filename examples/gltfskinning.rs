@@ -4,8 +4,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytemuck::{Pod, Zeroable};
 use gltf::animation::util::ReadOutputs;
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, mesh, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    mesh, render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
@@ -74,7 +74,7 @@ impl SceneUniforms {
         let light_position = glam::Vec3::new(1.4, 2.6, 1.8);
 
         Self {
-            projection: (camera::wgpu_clip_matrix() * projection).to_cols_array_2d(),
+            projection: (projection).to_cols_array_2d(),
             view: view.to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             light_position: [light_position.x, light_position.y, light_position.z, 0.0],

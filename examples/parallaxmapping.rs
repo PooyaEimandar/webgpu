@@ -3,8 +3,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, camera,
-    glam, render_pass, shader, text, texture, wgpu, winit,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::asset::{AssetBytes, AssetLoader, AssetRequest};
 
@@ -68,7 +68,7 @@ impl VertexUniforms {
         let light_pos = glam::Vec3::new(light_angle.sin() * 1.5, 2.0, light_angle.cos() * 1.5);
 
         Self {
-            view_projection: (camera::wgpu_clip_matrix() * projection * view).to_cols_array_2d(),
+            view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             light_pos: [light_pos.x, light_pos.y, light_pos.z, 1.0],
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 1.0],

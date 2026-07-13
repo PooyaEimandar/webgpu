@@ -3,7 +3,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, bind_group,
-    buffer, camera, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
+    buffer, glam, mesh, render_pass, shader, text, texture, wgpu, winit,
 };
 use webgpu::gltf_scene::{
     GltfColoredMesh, GltfColoredScene, GltfColoredVertex, TREASURE_SMOOTH_GLTF_URL,
@@ -37,7 +37,7 @@ impl Uniforms {
         );
 
         Self {
-            projection: (camera::wgpu_clip_matrix() * projection).to_cols_array_2d(),
+            projection: (projection).to_cols_array_2d(),
             model: (view * centered_model).to_cols_array_2d(),
             light_position: [0.0, 2.0, 1.0, 0.0],
         }
