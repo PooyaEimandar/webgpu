@@ -339,9 +339,9 @@ mod native {
             .lock()
             .map_err(|_| "HTML mesh browser session lock is poisoned".to_owned())?;
 
-        let recreate = session_guard.as_ref().is_none_or(|session| {
-            !session.matches(&request.url, request.width, request.height)
-        });
+        let recreate = session_guard
+            .as_ref()
+            .is_none_or(|session| !session.matches(&request.url, request.width, request.height));
         if recreate {
             *session_guard = None;
             *session_guard = Some(HtmlMeshBrowserSession::new(

@@ -2,8 +2,8 @@
 
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
-    buffer, glam, render_pass, shader, texture, wgpu, winit, Example, ExampleSettings, FrameStats,
-    RenderContext, RenderError, RenderResult,
+    Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
+    render_pass, shader, texture, wgpu, winit,
 };
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Vazirmatn-Regular.ttf");
