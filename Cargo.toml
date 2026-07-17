@@ -72,6 +72,7 @@ web-sys = { version = "0.3.103", features = [
     "ErrorEvent",
     "HtmlElement",
     "MessageEvent",
+    "Navigator",
     "Node",
     "Response",
     "Url",

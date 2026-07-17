@@ -33,6 +33,12 @@ const SKINNED_INSTANCE_COLUMNS: u32 = 48;
 const SKINNED_INSTANCE_ROWS: u32 = 12;
 const MAX_STATIC_INSTANCES: u32 = STATIC_INSTANCE_SIDE * STATIC_INSTANCE_SIDE;
 const MAX_SKINNED_INSTANCES: u32 = SKINNED_INSTANCE_COLUMNS * SKINNED_INSTANCE_ROWS;
+const BALANCED_STATIC_INSTANCES: u32 = 64 * 64;
+const BALANCED_SKINNED_INSTANCES: u32 = 192;
+const CONSERVATIVE_STATIC_INSTANCES: u32 = 32 * 32;
+const CONSERVATIVE_SKINNED_INSTANCES: u32 = 48;
+const MOBILE_STATIC_INSTANCES: u32 = 16 * 16;
+const MOBILE_SKINNED_INSTANCES: u32 = 16;
 const MODEL_SCALE_MULTIPLIER: f32 = 3.0;
 const STATIC_INSTANCE_SCALE: f32 = MODEL_SCALE_MULTIPLIER;
 const SKINNED_INSTANCE_SCALE: f32 = 1.08 * MODEL_SCALE_MULTIPLIER;
@@ -200,6 +206,152 @@ struct NaniteControls {
     show_lod_colors: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct StartupPopulation {
+    tier: &'static str,
+    static_instances: u32,
+    skinned_instances: u32,
+}
+
+impl StartupPopulation {
+    const fn maximum() -> Self {
+        Self {
+            tier: "maximum",
+            static_instances: MAX_STATIC_INSTANCES,
+            skinned_instances: MAX_SKINNED_INSTANCES,
+        }
+    }
+
+    const fn balanced() -> Self {
+        Self {
+            tier: "balanced",
+            static_instances: BALANCED_STATIC_INSTANCES,
+            skinned_instances: BALANCED_SKINNED_INSTANCES,
+        }
+    }
+
+    const fn conservative() -> Self {
+        Self {
+            tier: "conservative",
+            static_instances: CONSERVATIVE_STATIC_INSTANCES,
+            skinned_instances: CONSERVATIVE_SKINNED_INSTANCES,
+        }
+    }
+
+    const fn mobile() -> Self {
+        Self {
+            tier: "mobile",
+            static_instances: MOBILE_STATIC_INSTANCES,
+            skinned_instances: MOBILE_SKINNED_INSTANCES,
+        }
+    }
+
+    fn reduce_for_mobile_resolution(mut self, width: u32, height: u32) -> Self {
+        let pixels = u64::from(width) * u64::from(height);
+        if pixels <= 2_000_000 {
+            return self;
+        }
+
+        let scale = (2_000_000.0 / pixels as f32).sqrt().clamp(0.5, 1.0);
+        let side = ((self.static_instances as f32).sqrt() * scale.sqrt())
+            .round()
+            .max(8.0) as u32;
+        self.static_instances = side * side;
+        self.skinned_instances = ((self.skinned_instances as f32 * scale).round() as u32).max(8);
+        self
+    }
+}
+
+fn startup_population(context: &RenderContext) -> StartupPopulation {
+    let info = context.adapter.get_info();
+    let name = info.name.to_ascii_lowercase();
+    let mobile_gpu = [
+        "adreno",
+        "mali",
+        "powervr",
+        "xclipse",
+        "qualcomm",
+        "snapdragon",
+    ]
+    .iter()
+    .any(|marker| name.contains(marker));
+    let mobile = mobile_gpu || browser_is_mobile();
+    let limits = context.device.limits();
+    let constrained_limits = limits.max_storage_buffer_binding_size < 128 * 1024 * 1024
+        || limits.max_compute_workgroups_per_dimension < 8_192
+        || limits.max_texture_dimension_2d < 8_192;
+    let high_end_name = browser_is_desktop_apple()
+        || ["apple", "nvidia", "geforce", "radeon", "arc a"]
+            .iter()
+            .any(|marker| name.contains(marker));
+
+    let population = if mobile {
+        StartupPopulation::mobile()
+    } else if constrained_limits {
+        StartupPopulation::conservative()
+    } else {
+        match info.device_type {
+            wgpu::DeviceType::DiscreteGpu => StartupPopulation::maximum(),
+            wgpu::DeviceType::IntegratedGpu if high_end_name => StartupPopulation::maximum(),
+            wgpu::DeviceType::IntegratedGpu => StartupPopulation::balanced(),
+            wgpu::DeviceType::Cpu | wgpu::DeviceType::VirtualGpu => {
+                StartupPopulation::conservative()
+            }
+            wgpu::DeviceType::Other if high_end_name => StartupPopulation::maximum(),
+            wgpu::DeviceType::Other if info.backend == wgpu::Backend::BrowserWebGpu => {
+                StartupPopulation::balanced()
+            }
+            wgpu::DeviceType::Other => StartupPopulation::conservative(),
+        }
+    };
+
+    if mobile {
+        population.reduce_for_mobile_resolution(
+            context.surface_config.width,
+            context.surface_config.height,
+        )
+    } else {
+        population
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_is_mobile() -> bool {
+    let Some(user_agent) = browser_user_agent() else {
+        return false;
+    };
+    ["android", "iphone", "ipad", "ipod", "mobile"]
+        .iter()
+        .any(|marker| user_agent.contains(marker))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn browser_is_mobile() -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_is_desktop_apple() -> bool {
+    let Some(user_agent) = browser_user_agent() else {
+        return false;
+    };
+    user_agent.contains("macintosh") && !user_agent.contains("mobile")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn browser_is_desktop_apple() -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_user_agent() -> Option<String> {
+    web_sys::window()?
+        .navigator()
+        .user_agent()
+        .ok()
+        .map(|user_agent| user_agent.to_ascii_lowercase())
+}
+
 impl Default for NaniteControls {
     fn default() -> Self {
         Self {
@@ -221,6 +373,15 @@ struct CpuStats {
     visible_skinned_instances: u32,
     selected_meshlet_upper_bound: u32,
     lod_instances: [u32; LOD_LEVEL_COUNT],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CpuCullingState {
+    static_instance_capacity: u32,
+    model_bounds: [f32; 4],
+    camera: glam::Vec3,
+    planes: [[f32; 4]; 6],
+    surface_height: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -292,10 +453,15 @@ impl ScratchLayout {
         }
     }
 
-    fn new(static_visible_capacity: u32, page_count: u32) -> RenderResult<Self> {
-        let candidate_states = MAX_STATIC_INSTANCES;
+    fn new(
+        static_instance_capacity: u32,
+        static_visible_capacity: u32,
+        skinned_instance_capacity: u32,
+        page_count: u32,
+    ) -> RenderResult<Self> {
+        let candidate_states = static_instance_capacity;
         let candidate_words = static_visible_capacity
-            .checked_add(MAX_SKINNED_INSTANCES)
+            .checked_add(skinned_instance_capacity)
             .ok_or_else(|| RenderError::message("Nanite candidate scratch capacity overflow"))?;
         let page_table = candidate_states
             .checked_add(candidate_words)
@@ -628,6 +794,9 @@ struct NaniteExample {
     gui: Option<NaniteGui>,
     joystick_overlay: Option<JoystickOverlay>,
     controls: NaniteControls,
+    startup_population: StartupPopulation,
+    static_instance_capacity: u32,
+    skinned_instance_capacity: u32,
     cpu_stats: CpuStats,
     lod_stats: [LodStats; LOD_LEVEL_COUNT],
     frame_stats: FrameStats,
@@ -692,6 +861,9 @@ impl NaniteExample {
             gui: None,
             joystick_overlay: None,
             controls: NaniteControls::default(),
+            startup_population: StartupPopulation::maximum(),
+            static_instance_capacity: MAX_STATIC_INSTANCES,
+            skinned_instance_capacity: MAX_SKINNED_INSTANCES,
             cpu_stats: CpuStats::default(),
             lod_stats,
             frame_stats: FrameStats::default(),
@@ -741,11 +913,14 @@ impl NaniteExample {
         self.cpu_stats = cpu_stats(
             &self.instances,
             self.controls,
-            self.model_bounds,
-            self.cull_camera.eye,
-            self.cull_planes,
+            CpuCullingState {
+                static_instance_capacity: self.static_instance_capacity,
+                model_bounds: self.model_bounds,
+                camera: self.cull_camera.eye,
+                planes: self.cull_planes,
+                surface_height: context.surface_config.height as f32,
+            },
             &self.lod_stats,
-            context.surface_config.height as f32,
         );
 
         let cot_half_fov = 1.0 / (56.0_f32.to_radians() * 0.5).tan();
@@ -779,13 +954,13 @@ impl NaniteExample {
                 self.controls.static_instances,
                 self.controls.skinned_instances,
                 self.max_meshlets_per_lod,
-                MAX_STATIC_INSTANCES,
+                self.static_instance_capacity,
             ],
             params2: [
                 self.static_visible_capacity,
-                MAX_SKINNED_INSTANCES,
+                self.skinned_instance_capacity,
                 u32::from(self.controls.animated_mode),
-                self.static_visible_capacity + MAX_SKINNED_INSTANCES,
+                self.static_visible_capacity + self.skinned_instance_capacity,
             ],
             lod_meshlet_counts: std::array::from_fn(|level| self.lod_stats[level].meshlets),
             lod_page_starts: self.lod_page_starts,
@@ -1061,6 +1236,9 @@ impl NaniteExample {
             )
         });
         let hzb_mip_count = self.hzb.as_ref().map_or(0, |hzb| hzb.mip_count);
+        let startup_population = self.startup_population;
+        let static_instance_capacity = self.static_instance_capacity;
+        let skinned_instance_capacity = self.skinned_instance_capacity;
         let mut controls = self.controls;
         let refresh_due = self.gui_refresh_elapsed >= GUI_REFRESH_INTERVAL_SECONDS;
         let mut refreshed = false;
@@ -1091,17 +1269,23 @@ impl NaniteExample {
                             ui.label(gpu_device_info.as_str());
                             ui.separator();
                             ui.heading("Population");
+                            ui.label(format!(
+                                "startup tier: {} ({} LOD + {} full-detail)",
+                                startup_population.tier,
+                                startup_population.static_instances,
+                                startup_population.skinned_instances
+                            ));
                             ui.add(
                                 egui::Slider::new(
                                     &mut controls.static_instances,
-                                    0..=MAX_STATIC_INSTANCES,
+                                    0..=static_instance_capacity,
                                 )
                                 .text("LOD Jax"),
                             );
                             ui.add(
                                 egui::Slider::new(
                                     &mut controls.skinned_instances,
-                                    0..=MAX_SKINNED_INSTANCES,
+                                    0..=skinned_instance_capacity,
                                 )
                                 .text("Full-detail Jax"),
                             );
@@ -1279,6 +1463,11 @@ impl Example for NaniteExample {
 
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
         self.gpu_device_info = context.gpu_device_info();
+        self.startup_population = startup_population(context);
+        self.static_instance_capacity = self.startup_population.static_instances;
+        self.skinned_instance_capacity = self.startup_population.skinned_instances;
+        self.controls.static_instances = self.static_instance_capacity;
+        self.controls.skinned_instances = self.skinned_instance_capacity;
         let scene = self.gltf_scene.take().ok_or_else(|| {
             RenderError::message("Nanite Jax scene loaded before renderer initialization")
         })?;
@@ -1289,7 +1478,10 @@ impl Example for NaniteExample {
             scene.mesh.bounds.radius(),
         ];
         self.material = scene.material.base_color_factor;
-        self.instances = create_instances();
+        self.instances = create_instances(
+            self.static_instance_capacity,
+            self.skinned_instance_capacity,
+        );
 
         let nanite_mesh = build_nanite_mesh(&scene.mesh.vertices, &scene.mesh.indices)?;
         self.lod_stats = nanite_mesh.lod_stats;
@@ -1306,22 +1498,27 @@ impl Example for NaniteExample {
                 device_limits.max_compute_workgroups_per_dimension
             )));
         }
-        if MAX_STATIC_INSTANCES > device_limits.max_compute_workgroups_per_dimension {
+        if self.static_instance_capacity > device_limits.max_compute_workgroups_per_dimension {
             return Err(RenderError::message(format!(
-                "Nanite needs {MAX_STATIC_INSTANCES} instance rows, exceeding this GPU's per-dimension workgroup limit of {}",
-                device_limits.max_compute_workgroups_per_dimension
+                "Nanite needs {} instance rows, exceeding this GPU's per-dimension workgroup limit of {}",
+                self.static_instance_capacity, device_limits.max_compute_workgroups_per_dimension
             )));
         }
-        self.static_visible_capacity = MAX_STATIC_INSTANCES
+        self.static_visible_capacity = self
+            .static_instance_capacity
             .checked_mul(self.max_meshlets_per_lod)
             .ok_or_else(|| RenderError::message("Nanite visible meshlet capacity overflow"))?;
-        self.scratch_layout =
-            ScratchLayout::new(self.static_visible_capacity, nanite_mesh.pages.len() as u32)?;
+        self.scratch_layout = ScratchLayout::new(
+            self.static_instance_capacity,
+            self.static_visible_capacity,
+            self.skinned_instance_capacity,
+            nanite_mesh.pages.len() as u32,
+        )?;
         let page_cache = GeometryPageCache::new(nanite_mesh.pages, DEFAULT_PAGE_CACHE_SLOTS)?;
         self.page_cache_slots = page_cache.slots.len() as u32;
         let main_visible_capacity = self
             .static_visible_capacity
-            .checked_add(MAX_SKINNED_INSTANCES)
+            .checked_add(self.skinned_instance_capacity)
             .ok_or_else(|| RenderError::message("Nanite visible draw capacity overflow"))?;
         let visible_capacity = main_visible_capacity.checked_mul(2).ok_or_else(|| {
             RenderError::message("Nanite two-pass visible draw capacity overflow")
@@ -2561,39 +2758,43 @@ fn bounding_sphere(vertices: &[SkinnedVertex], indices: &[u32]) -> RenderResult<
     Ok([center.x, center.y, center.z, radius.max(0.0001)])
 }
 
-fn create_instances() -> Vec<InstanceData> {
-    let mut instances = Vec::with_capacity((MAX_STATIC_INSTANCES + MAX_SKINNED_INSTANCES) as usize);
-    let static_side = STATIC_INSTANCE_SIDE;
-    let static_center = (static_side as f32 - 1.0) * 0.5;
-    for row in 0..static_side {
-        for column in 0..static_side {
-            let hash = (row * 73 + column * 151) % 101;
-            let rotation = (hash as f32 / 100.0 - 0.5) * 0.28;
-            instances.push(InstanceData {
-                position_scale: [
-                    (column as f32 - static_center) * STATIC_COLUMN_SPACING,
-                    INSTANCE_BASE_Y,
-                    STATIC_START_Z - row as f32 * STATIC_ROW_SPACING,
-                    STATIC_INSTANCE_SCALE,
-                ],
-                rotation_kind: [rotation, 0.0, hash as f32 / 100.0, 0.0],
-            });
-        }
+fn create_instances(static_count: u32, skinned_count: u32) -> Vec<InstanceData> {
+    let mut instances = Vec::with_capacity((static_count + skinned_count) as usize);
+    let static_columns = (static_count as f32).sqrt().ceil().max(1.0) as u32;
+    let static_center = (static_columns as f32 - 1.0) * 0.5;
+    for index in 0..static_count {
+        let row = index / static_columns;
+        let column = index % static_columns;
+        let hash = (row * 73 + column * 151) % 101;
+        let rotation = (hash as f32 / 100.0 - 0.5) * 0.28;
+        instances.push(InstanceData {
+            position_scale: [
+                (column as f32 - static_center) * STATIC_COLUMN_SPACING,
+                INSTANCE_BASE_Y,
+                STATIC_START_Z - row as f32 * STATIC_ROW_SPACING,
+                STATIC_INSTANCE_SCALE,
+            ],
+            rotation_kind: [rotation, 0.0, hash as f32 / 100.0, 0.0],
+        });
     }
 
-    let skinned_center = (SKINNED_INSTANCE_COLUMNS as f32 - 1.0) * 0.5;
-    for row in 0..SKINNED_INSTANCE_ROWS {
-        for column in 0..SKINNED_INSTANCE_COLUMNS {
-            instances.push(InstanceData {
-                position_scale: [
-                    (column as f32 - skinned_center) * SKINNED_COLUMN_SPACING,
-                    INSTANCE_BASE_Y,
-                    SKINNED_START_Z - row as f32 * SKINNED_ROW_SPACING,
-                    SKINNED_INSTANCE_SCALE,
-                ],
-                rotation_kind: [0.0, 1.0, row as f32 / SKINNED_INSTANCE_ROWS as f32, 0.0],
-            });
-        }
+    let skinned_columns = (((skinned_count as f32).sqrt().ceil() as u32) * 2)
+        .clamp(1, SKINNED_INSTANCE_COLUMNS)
+        .min(skinned_count.max(1));
+    let skinned_rows = skinned_count.div_ceil(skinned_columns).max(1);
+    let skinned_center = (skinned_columns as f32 - 1.0) * 0.5;
+    for index in 0..skinned_count {
+        let row = index / skinned_columns;
+        let column = index % skinned_columns;
+        instances.push(InstanceData {
+            position_scale: [
+                (column as f32 - skinned_center) * SKINNED_COLUMN_SPACING,
+                INSTANCE_BASE_Y,
+                SKINNED_START_Z - row as f32 * SKINNED_ROW_SPACING,
+                SKINNED_INSTANCE_SCALE,
+            ],
+            rotation_kind: [0.0, 1.0, row as f32 / skinned_rows as f32, 0.0],
+        });
     }
     instances
 }
@@ -2601,11 +2802,8 @@ fn create_instances() -> Vec<InstanceData> {
 fn cpu_stats(
     instances: &[InstanceData],
     controls: NaniteControls,
-    model_bounds: [f32; 4],
-    camera: glam::Vec3,
-    planes: [[f32; 4]; 6],
+    culling: CpuCullingState,
     lod_stats: &[LodStats; LOD_LEVEL_COUNT],
-    surface_height: f32,
 ) -> CpuStats {
     let mut stats = CpuStats::default();
     let animated_bounds_scale = if controls.animated_mode {
@@ -2614,33 +2812,33 @@ fn cpu_stats(
         1.0
     };
     for instance in instances.iter().take(controls.static_instances as usize) {
-        let center = transform_instance_point(model_bounds, instance);
-        let radius = model_bounds[3] * instance.position_scale[3];
-        if !sphere_in_frustum_cpu(center, radius * animated_bounds_scale, &planes) {
+        let center = transform_instance_point(culling.model_bounds, instance);
+        let radius = culling.model_bounds[3] * instance.position_scale[3];
+        if !sphere_in_frustum_cpu(center, radius * animated_bounds_scale, &culling.planes) {
             continue;
         }
         let level = lod_for_instance(
             center,
             radius,
             instance.position_scale[3],
-            camera,
+            culling.camera,
             controls.pixel_error,
             lod_stats,
-            surface_height,
+            culling.surface_height,
         );
         stats.visible_static_instances += 1;
         stats.lod_instances[level] += 1;
         stats.selected_meshlet_upper_bound += lod_stats[level].meshlets;
     }
 
-    let skinned_start = MAX_STATIC_INSTANCES as usize;
+    let skinned_start = culling.static_instance_capacity as usize;
     let skinned_end = skinned_start
         .saturating_add(controls.skinned_instances as usize)
         .min(instances.len());
     for instance in &instances[skinned_start..skinned_end] {
-        let center = transform_instance_point(model_bounds, instance);
-        let radius = model_bounds[3] * instance.position_scale[3] * animated_bounds_scale;
-        if sphere_in_frustum_cpu(center, radius, &planes) {
+        let center = transform_instance_point(culling.model_bounds, instance);
+        let radius = culling.model_bounds[3] * instance.position_scale[3] * animated_bounds_scale;
+        if sphere_in_frustum_cpu(center, radius, &culling.planes) {
             stats.visible_skinned_instances += 1;
         }
     }
