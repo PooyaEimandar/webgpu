@@ -99,7 +99,9 @@ fn shadow_factor(
     let texel = 1.2 / vec2<f32>(textureDimensions(shadow_map));
     let shadow_uv = clamp(raw_shadow_uv, vec2<f32>(0.001), vec2<f32>(0.999));
     let slope_bias = max(0.0004 * (1.0 - dot(normal, -light_direction_to_scene)), 0.00025);
-    let reference_depth = clamp(projected.z + slope_bias, 0.0, 1.0);
+    // Anti-acne bias is subtracted: with a LessEqual compare, lit means
+    // reference <= stored, so the reference must move toward the light.
+    let reference_depth = clamp(projected.z - slope_bias, 0.0, 1.0);
     let layer = i32(index);
 
     var sum = 0.0;

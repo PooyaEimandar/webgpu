@@ -70,7 +70,9 @@ fn shadow_factor(shadow_position: vec4<f32>, normal: vec3<f32>, light_direction:
 
     let texel = 1.75 / vec2<f32>(textureDimensions(shadow_map));
     let shadow_uv = clamp(raw_shadow_uv, vec2<f32>(0.001), vec2<f32>(0.999));
-    let reference_depth = clamp(projected.z + 0.00035, 0.0, 1.0);
+    // Anti-acne bias is subtracted: with a LessEqual compare, lit means
+    // reference <= stored, so the reference must move toward the light.
+    let reference_depth = clamp(projected.z - 0.00035, 0.0, 1.0);
     let c = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv, reference_depth);
     let n = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv + vec2<f32>(0.0, texel.y), reference_depth);
     let s = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv - vec2<f32>(0.0, texel.y), reference_depth);
