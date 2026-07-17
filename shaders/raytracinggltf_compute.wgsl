@@ -345,7 +345,14 @@ fn make_camera_ray(uv: vec2<f32>) -> vec3<f32> {
   let camera_pos = uniforms.camera_pos_time.xyz;
   let camera_target = uniforms.camera_target_fov.xyz;
   let forward = normalize(camera_target - camera_pos);
-  let right = normalize(cross(forward, vec3<f32>(0.0, 1.0, 0.0)));
+  // Fall back to a Z-up reference when looking straight up or down, where
+  // cross(forward, Y) degenerates to zero and would NaN the whole frame.
+  let world_up = select(
+    vec3<f32>(0.0, 1.0, 0.0),
+    vec3<f32>(0.0, 0.0, 1.0),
+    abs(forward.y) > 0.999,
+  );
+  let right = normalize(cross(forward, world_up));
   let up = normalize(cross(right, forward));
   let fov_scale = tan(uniforms.camera_target_fov.w * 0.008726646);
   let screen = (-1.0 + 2.0 * uv) * vec2<f32>(uniforms.light_pos_aspect.w, 1.0) * fov_scale;
