@@ -83,7 +83,8 @@
           { "@type": "ListItem", "position": 38, "name": "PBR texture", "url": "https://pooyaeimandar.github.io/webgpu/pbrtexture/" },
           { "@type": "ListItem", "position": 39, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
           { "@type": "ListItem", "position": 40, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
-          { "@type": "ListItem", "position": 41, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" }
+          { "@type": "ListItem", "position": 41, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" },
+          { "@type": "ListItem", "position": 42, "name": "Nanite-style meshlets", "url": "https://pooyaeimandar.github.io/webgpu/nanite/" }
         ]
       }
     }
@@ -297,6 +298,16 @@
         <span class="content">
           <strong>compute cull and LOD</strong>
           <span>Compute shader frustum culling, LOD bucketing, compacted instance buffers, and indirect draws.</span>
+        </span>
+      </a>
+      <a href="./nanite/">
+        <picture>
+          <source srcset="./screenshots/nanite.webp" type="image/webp" />
+          <img src="./screenshots/nanite.jpg" alt="Nanite-style Jax meshlet rendering screenshot" />
+        </picture>
+        <span class="content">
+          <strong>Nanite-style meshlets</strong>
+          <span>Virtual geometry pages, projected-error meshlet LODs, two-pass HZB occlusion, indirect rasterization, and GPU skinning.</span>
         </span>
       </a>
       <a href="./computenbody/">
