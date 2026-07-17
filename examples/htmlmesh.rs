@@ -1810,9 +1810,10 @@ enum HtmlUiAction {
     LoadUrl(String),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum HtmlRefreshRate {
     Fps15,
+    #[default]
     Fps30,
     Fps60,
 }
@@ -1838,12 +1839,6 @@ impl HtmlRefreshRate {
 
     fn interval_seconds(self) -> f32 {
         1.0 / self.fps() as f32
-    }
-}
-
-impl Default for HtmlRefreshRate {
-    fn default() -> Self {
-        Self::Fps30
     }
 }
 
@@ -3569,7 +3564,9 @@ impl Example for HtmlMeshExample {
                 if let (Some(html), Some(uv)) = (&mut self.html, uv) {
                     return html.pointer_move(uv);
                 }
-                if let Some(html) = &mut self.html {
+                if let Some(html) = &mut self.html
+                    && html.hover.is_some()
+                {
                     html.hover = None;
                     html.mark_dirty();
                 }

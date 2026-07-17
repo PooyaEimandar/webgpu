@@ -306,7 +306,7 @@ fn intersect_gltf(ray_o: vec3<f32>, ray_d: vec3<f32>, max_t: f32) -> Hit {
           hit = triangle_hit_to_scene_hit(tri, candidate);
         }
       }
-    } else if (stack_size + 2u < BVH_STACK_SIZE) {
+    } else if (stack_size + 2u <= BVH_STACK_SIZE) {
       stack[stack_size] = node.data.x;
       stack[stack_size + 1u] = node.data.y;
       stack_size = stack_size + 2u;

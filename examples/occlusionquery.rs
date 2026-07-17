@@ -143,6 +143,7 @@ struct GpuObject {
 }
 
 impl GpuObject {
+    #[allow(clippy::too_many_arguments)]
     fn from_scene(
         context: &RenderContext,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -534,7 +535,7 @@ impl Example for OcclusionQueryExample {
         }
         self.update_uniforms(context);
 
-        if stats_changed || self.query_map_status.load(Ordering::Acquire) == QUERY_STATUS_IDLE {
+        if stats_changed {
             self.update_stats_text(context);
         }
     }

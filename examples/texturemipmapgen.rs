@@ -367,7 +367,8 @@ impl Example for TextureMipmapGenerationExample {
         if self.frame_stats.tick() {
             self.update_stats_text(context);
         }
-        self.animation_time += self.frame_stats.delta_seconds();
+        self.animation_time = (self.animation_time + self.frame_stats.delta_seconds())
+            % (std::f32::consts::TAU * 100.0);
         self.update_uniforms(context);
     }
 

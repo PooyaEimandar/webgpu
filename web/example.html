@@ -84,6 +84,17 @@
           transform: rotate(360deg);
         }
       }
+
+      #loading-screen.error .loading-spinner {
+        display: none;
+      }
+
+      #loading-screen.error .loading-label {
+        color: #ffb3ad;
+        max-width: 32rem;
+        padding: 0 24px;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -94,14 +105,17 @@
       </div>
     </div>
     <script type="module">
-      import init from "./__EXAMPLE__.js?example=__EXAMPLE__";
-
       const root = document.documentElement;
       const loadingScreen = document.getElementById("loading-screen");
       const loadingLabel = document.getElementById("loading-label");
 
       const setLoadingLabel = (value) => {
         loadingLabel.textContent = value;
+      };
+
+      const showError = (value) => {
+        loadingScreen.classList.add("error");
+        setLoadingLabel(value);
       };
 
       const hideLoadingScreen = () => {
@@ -168,16 +182,39 @@
         childList: true,
       });
 
-      init()
-        .then(() => {
-          setLoadingLabel("Loading scene data...");
-          resizeCanvasToViewport();
-          hideLoadingWhenCanvasExists();
-        })
-        .catch((error) => {
-          console.error(error);
-          setLoadingLabel("Failed to load WebGPU example.");
-        });
+      const start = async () => {
+        if (!navigator.gpu) {
+          showError(
+            "This browser does not support WebGPU. Try a recent Chrome, Edge, or Safari — or enable WebGPU in your browser settings.",
+          );
+          return;
+        }
+
+        // Dynamic import so unsupported browsers never download the module.
+        const { default: init } = await import(
+          "./__EXAMPLE__.js?example=__EXAMPLE__"
+        );
+        await init();
+        setLoadingLabel("Loading scene data...");
+        resizeCanvasToViewport();
+        hideLoadingWhenCanvasExists();
+
+        // The example boots asynchronously after init() resolves; if it
+        // panics before creating its canvas, nothing rejects — surface a
+        // message instead of spinning forever.
+        setTimeout(() => {
+          if (!hideLoadingWhenCanvasExists()) {
+            showError(
+              "The example failed to start. Check the browser console for details.",
+            );
+          }
+        }, 20000);
+      };
+
+      start().catch((error) => {
+        console.error(error);
+        showError("Failed to load WebGPU example. Check the browser console for details.");
+      });
     </script>
   </body>
 </html>

@@ -584,13 +584,11 @@ fn load_multisampling_assets_from_bytes(
         .materials()
         .map(|material| material_info_from_gltf(material, white_image_index))
         .collect::<Vec<_>>();
-    if materials.is_empty() {
-        materials.push(MaterialInfo {
-            image_index: white_image_index,
-            color: [1.0, 1.0, 1.0],
-            sampler_options: texture::TextureSamplerOptions::default(),
-        });
-    }
+    materials.push(MaterialInfo {
+        image_index: white_image_index,
+        color: [1.0, 1.0, 1.0],
+        sampler_options: texture::TextureSamplerOptions::default(),
+    });
 
     let mesh = load_multisampling_mesh(&gltf, &buffers, &materials)?;
 
@@ -745,7 +743,7 @@ fn append_gltf_primitive(
 
     let material_index = match primitive.material().index() {
         Some(index) if index < materials.len() => index,
-        _ => 0,
+        _ => materials.len() - 1,
     };
     let material = materials
         .get(material_index)

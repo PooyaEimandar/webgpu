@@ -35,8 +35,7 @@ struct Uniforms {
 }
 
 impl Uniforms {
-    fn new(aspect_ratio: f32, frame: u64) -> Self {
-        let rotation = frame as f32 * 0.012;
+    fn new(aspect_ratio: f32, rotation: f32) -> Self {
         let model = glam::Mat4::from_rotation_y(rotation)
             * glam::Mat4::from_rotation_x(28.0_f32.to_radians())
             * glam::Mat4::from_scale(glam::Vec3::splat(1.32));
@@ -106,7 +105,7 @@ struct TextOverlayExample {
     stats_text: Option<text::TextItemId>,
     frame_stats: FrameStats,
     gpu_device_info: String,
-    frame: u64,
+    rotation: f32,
 }
 
 impl TextOverlayExample {
@@ -127,7 +126,7 @@ impl TextOverlayExample {
         text::TextPlacement {
             left: 26.0,
             top: 24.0,
-            width: width.min(900.0) - 52.0,
+            width: (width.min(900.0) - 52.0).max(1.0),
             height: 72.0,
             ..Default::default()
         }
@@ -206,7 +205,7 @@ impl Example for TextOverlayExample {
             Some("text overlay scene shader"),
             include_str!("../shaders/textoverlay.wgsl"),
         );
-        let uniforms = Uniforms::new(context.aspect_ratio(), self.frame);
+        let uniforms = Uniforms::new(context.aspect_ratio(), self.rotation);
         let uniform_buffer =
             buffer::uniform_buffer(&context.device, Some("text overlay uniforms"), &uniforms);
         let bind_group_layout = bind_group::uniform_layout(
@@ -299,8 +298,9 @@ impl Example for TextOverlayExample {
             self.update_stats_text(context);
         }
 
-        self.frame = self.frame.wrapping_add(1);
-        let uniforms = Uniforms::new(context.aspect_ratio(), self.frame);
+        self.rotation =
+            (self.rotation + self.frame_stats.delta_seconds() * 0.72) % std::f32::consts::TAU;
+        let uniforms = Uniforms::new(context.aspect_ratio(), self.rotation);
         if let Some(uniform_buffer) = &self.uniform_buffer {
             context
                 .queue

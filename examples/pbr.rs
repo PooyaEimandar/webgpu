@@ -321,7 +321,8 @@ impl Example for PbrExample {
         if self.frame_stats.tick() {
             self.update_stats_text(context);
         }
-        self.animation_time += self.frame_stats.delta_seconds() * 0.25;
+        self.animation_time =
+            (self.animation_time + self.frame_stats.delta_seconds() * 0.25).fract();
         self.update_scene_uniforms(context);
     }
 

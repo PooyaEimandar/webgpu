@@ -818,7 +818,7 @@ fn initial_particles() -> Vec<Particle> {
             }
 
             let mut position = attractor + rng.unit_vector() * 0.75;
-            let length = (position - attractor).normalize_or_zero().length();
+            let length = (position - attractor).length();
             position.y *= 2.0 - length * length;
             let velocity = (position - attractor).cross(angular_velocity)
                 + glam::Vec3::new(rng.signed(), rng.signed(), rng.signed() * 0.025);

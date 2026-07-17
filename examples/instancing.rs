@@ -360,9 +360,9 @@ impl Example for InstancingExample {
         let stats_changed = self.frame_stats.tick();
         let delta_seconds = self.frame_stats.delta_seconds().clamp(0.0, 1.0 / 15.0);
 
-        self.loc_speed += delta_seconds * 0.35;
-        self.glob_speed += delta_seconds * 0.08;
-        self.time += delta_seconds;
+        self.loc_speed = (self.loc_speed + delta_seconds * 0.35) % std::f32::consts::TAU;
+        self.glob_speed = (self.glob_speed + delta_seconds * 0.08) % std::f32::consts::TAU;
+        self.time = (self.time + delta_seconds) % (std::f32::consts::TAU * 100.0);
         self.update_uniforms(context);
 
         if stats_changed {

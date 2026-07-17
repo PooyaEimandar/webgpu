@@ -534,10 +534,10 @@ impl Example for AlphaToCoverageExample {
 fn tree_instances() -> Vec<InstanceData> {
     let mut instances = Vec::new();
     for x in -2..3 {
-        for z in -2..3 {
+        for z in -2i32..3 {
             instances.push(InstanceData {
                 position: [
-                    x as f32 * 1.25 + (z % 2) as f32 * 0.25,
+                    x as f32 * 1.25 + z.rem_euclid(2) as f32 * 0.25,
                     0.0,
                     z as f32 * 1.25,
                 ],
@@ -646,13 +646,11 @@ fn load_alpha_to_coverage_assets_from_bytes(
         .materials()
         .map(|material| material_info_from_gltf(material, white_image_index))
         .collect::<Vec<_>>();
-    if materials.is_empty() {
-        materials.push(MaterialInfo {
-            image_index: white_image_index,
-            color: [1.0, 1.0, 1.0],
-            sampler_options: texture::TextureSamplerOptions::default(),
-        });
-    }
+    materials.push(MaterialInfo {
+        image_index: white_image_index,
+        color: [1.0, 1.0, 1.0],
+        sampler_options: texture::TextureSamplerOptions::default(),
+    });
 
     let mesh = load_tree_mesh(&gltf, &buffers, &materials)?;
 
@@ -806,7 +804,7 @@ fn append_gltf_primitive(
 
     let material_index = match primitive.material().index() {
         Some(index) if index < materials.len() => index,
-        _ => 0,
+        _ => materials.len() - 1,
     };
     let material = materials
         .get(material_index)

@@ -51,7 +51,9 @@ fn calculate(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local
     for (var i = 0u; i < 256u; i = i + 1u) {
       let other = shared_positions[i];
       let delta = other.xyz - position.xyz;
-      let dist_sq = dot(delta, delta) + soften;
+      // Floor keeps the self-interaction term finite even at soften = 0
+      // (0 / pow(0, p) is NaN and permanently corrupts the particle).
+      let dist_sq = max(dot(delta, delta) + soften, 1.0e-6);
       acceleration = acceleration + gravity * delta * other.w / pow(dist_sq, power);
     }
 

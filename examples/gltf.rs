@@ -22,13 +22,13 @@ struct Uniforms {
 impl Uniforms {
     fn new(
         aspect_ratio: f32,
-        frame: u64,
+        rotation: f32,
         bounds: mesh::MeshBounds,
         material: GltfMaterial,
     ) -> Self {
         let radius = bounds.radius().max(0.8);
         let center = glam::Vec3::from_array(bounds.center());
-        let model = glam::Mat4::from_rotation_y(frame as f32 * 0.012)
+        let model = glam::Mat4::from_rotation_y(rotation)
             * glam::Mat4::from_rotation_x(12.0_f32.to_radians())
             * glam::Mat4::from_translation(-center);
         let eye = glam::Vec3::new(0.0, radius * 0.56, radius * 3.35);
@@ -66,7 +66,7 @@ struct GltfExample {
     scene: Option<GltfScene>,
     material: GltfMaterial,
     bounds: mesh::MeshBounds,
-    frame: u64,
+    rotation: f32,
 }
 
 impl GltfExample {
@@ -138,7 +138,7 @@ impl GltfExample {
         if let Some(uniform_buffer) = &self.uniform_buffer {
             let uniforms = Uniforms::new(
                 context.aspect_ratio(),
-                self.frame,
+                self.rotation,
                 self.bounds,
                 self.material,
             );
@@ -173,7 +173,7 @@ impl Example for GltfExample {
         );
         let uniforms = Uniforms::new(
             context.aspect_ratio(),
-            self.frame,
+            self.rotation,
             self.bounds,
             self.material,
         );
@@ -276,7 +276,8 @@ impl Example for GltfExample {
             self.update_stats_text(context);
         }
 
-        self.frame = self.frame.wrapping_add(1);
+        self.rotation =
+            (self.rotation + self.frame_stats.delta_seconds() * 0.72) % std::f32::consts::TAU;
         self.update_uniforms(context);
     }
 

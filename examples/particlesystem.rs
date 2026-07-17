@@ -624,7 +624,7 @@ impl Example for ParticleSystemExample {
     fn update(&mut self, context: &mut RenderContext) {
         let stats_changed = self.frame_stats.tick();
         let delta_seconds = self.frame_stats.delta_seconds();
-        self.scene_timer = (self.scene_timer + delta_seconds * 8.0).fract();
+        self.scene_timer = (self.scene_timer + delta_seconds * 0.125).fract();
         self.update_particles(context, delta_seconds);
         self.update_uniforms(context);
 
