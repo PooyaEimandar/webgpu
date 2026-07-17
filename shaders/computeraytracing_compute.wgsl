@@ -171,7 +171,10 @@ fn render_scene(ray_o_in: vec3<f32>, ray_d_in: vec3<f32>, incoming_id: i32) -> R
 
   let light_distance = length(uniforms.light_pos_aspect.xyz - pos);
   color = color * calc_shadow(pos, light_vec, object_id, light_distance);
-  color = fog(light_distance, color);
+  // Fog thickens with distance along the camera ray, not distance to the
+  // light; using light_distance kept surfaces near the light fog-free at
+  // any depth and made fog pop as the light animated past them.
+  color = fog(hit.t, color);
 
   ray_d = reflect_ray(ray_d, normal);
   ray_o = pos + normal * EPSILON;
