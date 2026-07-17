@@ -5,7 +5,7 @@ struct Uniforms {
   color: vec4<f32>,
   light_pos: vec4<f32>,
   visible: vec4<f32>,
-  _uniform_padding: vec4<f32>,
+  camera_pos: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -39,7 +39,7 @@ fn vs_mesh(input: VertexInput) -> MeshVertexOutput {
   output.normal = (uniforms.model * vec4<f32>(input.normal, 0.0)).xyz;
   output.color = input.color.rgb * uniforms.color.rgb;
   output.visible = uniforms.visible.x;
-  output.view_vec = -world_position.xyz;
+  output.view_vec = uniforms.camera_pos.xyz - world_position.xyz;
   output.light_vec = uniforms.light_pos.xyz - world_position.xyz;
   return output;
 }

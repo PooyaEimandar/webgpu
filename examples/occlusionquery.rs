@@ -69,13 +69,14 @@ struct Uniforms {
     color: [f32; 4],
     light_position: [f32; 4],
     visible: [f32; 4],
-    _uniform_padding: [f32; 4],
+    camera_position: [f32; 4],
 }
 
 impl Uniforms {
     fn new(
         aspect_ratio: f32,
         view: glam::Mat4,
+        eye: glam::Vec3,
         model: glam::Mat4,
         color: [f32; 4],
         visible: bool,
@@ -90,7 +91,7 @@ impl Uniforms {
             color,
             light_position: [10.0, -10.0, 10.0, 1.0],
             visible: [if visible { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
-            _uniform_padding: [0.0; 4],
+            camera_position: [eye.x, eye.y, eye.z, 1.0],
         }
     }
 }
@@ -148,11 +149,12 @@ impl GpuObject {
         label: impl Into<Option<&'static str>>,
         scene: GltfColoredScene,
         view: glam::Mat4,
+        eye: glam::Vec3,
         model: glam::Mat4,
         color: [f32; 4],
     ) -> Self {
         let label = label.into();
-        let uniforms = Uniforms::new(context.aspect_ratio(), view, model, color, true);
+        let uniforms = Uniforms::new(context.aspect_ratio(), view, eye, model, color, true);
         let uniform_buffer = buffer::uniform_buffer(&context.device, label, &uniforms);
         let bind_group = bind_group::uniform_bind_group(
             &context.device,
@@ -171,10 +173,11 @@ impl GpuObject {
         }
     }
 
-    fn update_uniform(&self, context: &RenderContext, view: glam::Mat4) {
+    fn update_uniform(&self, context: &RenderContext, view: glam::Mat4, eye: glam::Vec3) {
         let uniforms = Uniforms::new(
             context.aspect_ratio(),
             view,
+            eye,
             self.model,
             self.color,
             self.visible,
@@ -305,15 +308,16 @@ impl OcclusionQueryExample {
 
     fn update_uniforms(&self, context: &RenderContext) {
         let view = self.camera.view_matrix();
+        let eye = self.camera.eye;
 
         if let Some(plane) = &self.plane {
-            plane.update_uniform(context, view);
+            plane.update_uniform(context, view, eye);
         }
         if let Some(teapot) = &self.teapot {
-            teapot.update_uniform(context, view);
+            teapot.update_uniform(context, view, eye);
         }
         if let Some(sphere) = &self.sphere {
-            sphere.update_uniform(context, view);
+            sphere.update_uniform(context, view, eye);
         }
     }
 
@@ -429,6 +433,7 @@ impl Example for OcclusionQueryExample {
         let solid_pipeline = create_solid_pipeline(context, &pipeline_layout, &shader);
         let occluder_pipeline = create_occluder_pipeline(context, &pipeline_layout, &shader);
         let view = self.camera.view_matrix();
+        let eye = self.camera.eye;
 
         let plane = GpuObject::from_scene(
             context,
@@ -436,6 +441,7 @@ impl Example for OcclusionQueryExample {
             Some("occlusion query plane"),
             assets.plane,
             view,
+            eye,
             glam::Mat4::from_scale(glam::Vec3::splat(6.0)),
             [0.0, 0.0, 1.0, 0.5],
         );
@@ -445,6 +451,7 @@ impl Example for OcclusionQueryExample {
             Some("occlusion query teapot"),
             assets.teapot,
             view,
+            eye,
             glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, -3.0)),
             [1.0, 0.0, 0.0, 1.0],
         );
@@ -454,6 +461,7 @@ impl Example for OcclusionQueryExample {
             Some("occlusion query sphere"),
             assets.sphere,
             view,
+            eye,
             glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 3.0)),
             [0.0, 1.0, 0.0, 1.0],
         );
