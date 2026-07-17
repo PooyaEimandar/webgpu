@@ -48,7 +48,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     );
     let normal = normalize(model3 * input.normal);
     let tangent = normalize(model3 * input.tangent.xyz);
-    let bitangent = normalize(cross(normal, tangent));
+    // tangent.w is the glTF handedness sign; dropping it breaks meshes with
+    // mirrored UV islands.
+    let bitangent = normalize(cross(normal, tangent)) * input.tangent.w;
     let tbn = transpose(mat3x3<f32>(tangent, bitangent, normal));
 
     var output: VertexOutput;
@@ -119,9 +121,12 @@ fn parallax_occlusion_mapping(uv: vec2<f32>, view_dir: vec3<f32>) -> vec2<f32> {
     }
 
     let prev_uv = curr_uv + delta_uv;
+    // next_depth <= 0 (below the surface) and prev_depth >= 0 (above it), so
+    // the denominator is negative; clamping it toward -0 keeps the division
+    // stable while leaving the weight in (0, 1) for the intersection lerp.
     let next_depth = height - curr_layer_depth;
     let prev_depth = height_at(prev_uv) - curr_layer_depth + layer_depth;
-    let weight = next_depth / max(next_depth - prev_depth, 0.0001);
+    let weight = next_depth / min(next_depth - prev_depth, -0.0001);
 
     return mix(curr_uv, prev_uv, clamp(weight, 0.0, 1.0));
 }
