@@ -6,6 +6,10 @@ use sib::render::{RenderError, RenderResult, glam, mesh, texture, wgpu};
 
 pub const MAX_JOINTS: usize = 128;
 
+/// Deep enough for any real asset; a malformed file whose node graph forms a
+/// cycle would otherwise recurse until the stack overflows.
+const MAX_NODE_DEPTH: u32 = 256;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct SkinnedVertex {
@@ -348,7 +352,7 @@ fn skinned_scene_from_gltf(
     let mut mesh_skin = None;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let mut material = SkinnedMaterial::default();
+    let mut material = None;
     let mut sampler_options = texture::TextureSamplerOptions::default();
     let mut base_color_image = None;
 
@@ -376,6 +380,7 @@ fn skinned_scene_from_gltf(
             &mut base_color_image,
             &mut mesh_node,
             &mut mesh_skin,
+            0,
         )?;
     }
 
@@ -396,7 +401,7 @@ fn skinned_scene_from_gltf(
 
     Ok(SkinnedGltfScene {
         mesh,
-        material,
+        material: material.unwrap_or_default(),
         base_color_image,
         sampler_options,
         nodes,
@@ -416,15 +421,26 @@ fn collect_skinned_node(
     images: &[texture::ImageRgba8],
     vertices: &mut Vec<SkinnedVertex>,
     indices: &mut Vec<u32>,
-    material: &mut SkinnedMaterial,
+    material: &mut Option<SkinnedMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
     mesh_node: &mut Option<usize>,
     mesh_skin: &mut Option<usize>,
+    depth: u32,
 ) -> RenderResult<()> {
+    if depth > MAX_NODE_DEPTH {
+        return Err(RenderError::message(
+            "skinned glTF node hierarchy is too deep or cyclic",
+        ));
+    }
     if let Some(node_mesh) = node.mesh() {
-        *mesh_node = Some(node.index());
-        *mesh_skin = node.skin().map(|skin| skin.index()).or(*mesh_skin);
+        // All vertices merge into one mesh skinned against a single node and
+        // skin, so the first mesh-bearing node wins and keeps mesh_node and
+        // mesh_skin a consistent pair (multi-mesh scenes are unsupported).
+        if mesh_node.is_none() {
+            *mesh_node = Some(node.index());
+            *mesh_skin = node.skin().map(|skin| skin.index());
+        }
 
         for primitive in node_mesh.primitives() {
             if primitive.mode() != gltf::mesh::Mode::Triangles {
@@ -458,6 +474,7 @@ fn collect_skinned_node(
             base_color_image,
             mesh_node,
             mesh_skin,
+            depth + 1,
         )?;
     }
 
@@ -471,7 +488,7 @@ fn append_skinned_primitive(
     images: &[texture::ImageRgba8],
     vertices: &mut Vec<SkinnedVertex>,
     indices: &mut Vec<u32>,
-    material: &mut SkinnedMaterial,
+    material: &mut Option<SkinnedMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
 ) -> RenderResult<()> {
@@ -545,14 +562,21 @@ fn append_skinned_primitive(
         indices.extend((0..positions.len() as u32).map(|index| base_index + index));
     }
 
+    // The merged mesh carries a single material, so the first primitive's
+    // material wins (and the first base-color texture found); overwriting
+    // per primitive would leave the whole mesh with the last one instead.
     let primitive_material = primitive.material();
     let pbr = primitive_material.pbr_metallic_roughness();
-    *material = SkinnedMaterial {
-        base_color_factor: pbr.base_color_factor(),
-        double_sided: primitive_material.double_sided(),
-    };
+    if material.is_none() {
+        *material = Some(SkinnedMaterial {
+            base_color_factor: pbr.base_color_factor(),
+            double_sided: primitive_material.double_sided(),
+        });
+    }
 
-    if let Some(texture_info) = pbr.base_color_texture() {
+    if base_color_image.is_none()
+        && let Some(texture_info) = pbr.base_color_texture()
+    {
         let base_color_texture = texture_info.texture();
         let source_index = base_color_texture.source().index();
         *sampler_options = sampler_options_from_gltf(base_color_texture.sampler());
