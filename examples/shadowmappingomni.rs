@@ -597,7 +597,8 @@ fn scene_uniforms(
 }
 
 fn cube_face_matrices(light_position: glam::Vec3) -> [glam::Mat4; FACE_COUNT] {
-    let projection = glam::Mat4::perspective_rh(90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR);
+    let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
+        * glam::Mat4::perspective_rh(90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR);
     let faces = [
         (glam::Vec3::X, -glam::Vec3::Y),
         (-glam::Vec3::X, -glam::Vec3::Y),
