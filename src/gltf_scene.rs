@@ -336,7 +336,7 @@ fn scene_from_gltf(
         .ok_or_else(|| RenderError::message("glTF file has no scene"))?;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let mut material = GltfMaterial::default();
+    let mut material = None;
     let mut sampler_options = texture::TextureSamplerOptions::default();
     let mut base_color_image = None;
 
@@ -351,6 +351,7 @@ fn scene_from_gltf(
             &mut material,
             &mut sampler_options,
             &mut base_color_image,
+            0,
         )?;
     }
 
@@ -362,11 +363,15 @@ fn scene_from_gltf(
 
     Ok(GltfScene {
         mesh,
-        material,
+        material: material.unwrap_or_default(),
         base_color_image,
         sampler_options,
     })
 }
+
+/// Deep enough for any real asset; a malformed file whose node graph forms a
+/// cycle would otherwise recurse until the stack overflows.
+const MAX_NODE_DEPTH: u32 = 256;
 
 #[allow(clippy::too_many_arguments)]
 fn collect_node(
@@ -376,10 +381,16 @@ fn collect_node(
     images: &[texture::ImageRgba8],
     vertices: &mut Vec<mesh::MeshVertex>,
     indices: &mut Vec<u32>,
-    material: &mut GltfMaterial,
+    material: &mut Option<GltfMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
+    depth: u32,
 ) -> RenderResult<()> {
+    if depth > MAX_NODE_DEPTH {
+        return Err(RenderError::message(
+            "glTF node hierarchy is too deep or cyclic",
+        ));
+    }
     let transform = parent_transform * glam::Mat4::from_cols_array_2d(&node.transform().matrix());
 
     if let Some(node_mesh) = node.mesh() {
@@ -415,6 +426,7 @@ fn collect_node(
             material,
             sampler_options,
             base_color_image,
+            depth + 1,
         )?;
     }
 
@@ -429,7 +441,7 @@ fn append_primitive(
     images: &[texture::ImageRgba8],
     vertices: &mut Vec<mesh::MeshVertex>,
     indices: &mut Vec<u32>,
-    material: &mut GltfMaterial,
+    material: &mut Option<GltfMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
 ) -> RenderResult<()> {
@@ -476,20 +488,29 @@ fn append_primitive(
         indices.extend((0..positions.len() as u32).map(|index| base_index + index));
     }
 
+    // The merged mesh carries a single material, so the first primitive's
+    // material wins (and the first base-color texture found); overwriting
+    // per primitive would leave the whole mesh with the last one instead.
     let primitive_material = primitive.material();
     let pbr = primitive_material.pbr_metallic_roughness();
-    *material = GltfMaterial {
-        base_color_factor: pbr.base_color_factor(),
-        metallic_factor: pbr.metallic_factor(),
-        roughness_factor: pbr.roughness_factor(),
-        double_sided: primitive_material.double_sided(),
-        ..Default::default()
-    };
+    if material.is_none() {
+        *material = Some(GltfMaterial {
+            base_color_factor: pbr.base_color_factor(),
+            metallic_factor: pbr.metallic_factor(),
+            roughness_factor: pbr.roughness_factor(),
+            double_sided: primitive_material.double_sided(),
+            ..Default::default()
+        });
+    }
 
-    if let Some(texture_info) = pbr.base_color_texture() {
+    if base_color_image.is_none()
+        && let Some(texture_info) = pbr.base_color_texture()
+    {
         let base_color_texture = texture_info.texture();
         let source_index = base_color_texture.source().index();
-        material.base_color_texture = Some(source_index);
+        if let Some(material) = material.as_mut() {
+            material.base_color_texture = Some(source_index);
+        }
         *sampler_options = sampler_options_from_gltf(base_color_texture.sampler());
         *base_color_image = images.get(source_index).cloned();
     }
@@ -515,6 +536,7 @@ fn colored_scene_from_gltf(
             buffers,
             &mut vertices,
             &mut indices,
+            0,
         )?;
     }
 
@@ -529,7 +551,13 @@ fn collect_colored_node(
     buffers: &[AssetBytes],
     vertices: &mut Vec<GltfColoredVertex>,
     indices: &mut Vec<u32>,
+    depth: u32,
 ) -> RenderResult<()> {
+    if depth > MAX_NODE_DEPTH {
+        return Err(RenderError::message(
+            "glTF node hierarchy is too deep or cyclic",
+        ));
+    }
     let transform = parent_transform * glam::Mat4::from_cols_array_2d(&node.transform().matrix());
 
     if let Some(node_mesh) = node.mesh() {
@@ -545,7 +573,7 @@ fn collect_colored_node(
     }
 
     for child in node.children() {
-        collect_colored_node(child, transform, buffers, vertices, indices)?;
+        collect_colored_node(child, transform, buffers, vertices, indices, depth + 1)?;
     }
 
     Ok(())
