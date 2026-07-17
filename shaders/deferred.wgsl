@@ -176,11 +176,21 @@ fn load_gbuffer(uv: vec2<f32>) -> MrtFragmentOutput {
     return gbuffer;
 }
 
+// Background texels hold the cleared zero normal; normalize(0) is NaN and
+// bleeds platform-dependent garbage into the lit color, so fall back to a
+// fixed axis (the matching zero albedo keeps those pixels dark anyway).
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
+    if (dot(v, v) < 0.00001) {
+        return vec3<f32>(0.0, 0.0, 1.0);
+    }
+    return normalize(v);
+}
+
 @fragment
 fn fs_deferred(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let gbuffer = load_gbuffer(input.uv);
     let frag_pos = gbuffer.position.xyz;
-    let normal = normalize(gbuffer.normal.xyz);
+    let normal = safe_normalize(gbuffer.normal.xyz);
     let albedo = gbuffer.albedo;
     let debug_target = i32(composition.params.x);
 
