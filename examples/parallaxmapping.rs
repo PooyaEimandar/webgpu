@@ -856,9 +856,6 @@ fn append_gltf_primitive(
             .transform_vector3(glam::Vec3::new(tangent[0], tangent[1], tangent[2]))
             .normalize_or_zero();
 
-        // glTF's UV origin is top-left like WebGPU's, so the coordinates pass
-        // through unchanged; flipping V here would invert the tangent-space V
-        // axis and march the parallax offset in the wrong direction.
         vertices.push(ParallaxVertex {
             position: position.to_array(),
             uv: [uv[0], uv[1]],
