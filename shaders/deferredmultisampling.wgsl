@@ -214,6 +214,16 @@ fn calculate_lighting(frag_pos: vec3<f32>, normal: vec3<f32>, albedo: vec4<f32>)
     return result;
 }
 
+// Background texels hold the cleared zero normal; normalize(0) is NaN and
+// bleeds platform-dependent garbage into the lit color, so fall back to a
+// fixed axis (the matching zero albedo keeps those pixels dark anyway).
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
+    if (dot(v, v) < 0.00001) {
+        return vec3<f32>(0.0, 0.0, 1.0);
+    }
+    return normalize(v);
+}
+
 @fragment
 fn fs_deferred(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let coord = gbuffer_coord(input.uv);
@@ -224,7 +234,7 @@ fn fs_deferred(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(first_sample.position.xyz * 0.08 + vec3<f32>(0.5), 1.0);
     }
     if (debug_target == 2) {
-        return vec4<f32>(normalize(first_sample.normal.xyz) * 0.5 + vec3<f32>(0.5), 1.0);
+        return vec4<f32>(safe_normalize(first_sample.normal.xyz) * 0.5 + vec3<f32>(0.5), 1.0);
     }
     if (debug_target == 3) {
         return vec4<f32>(first_sample.albedo.rgb, 1.0);
@@ -240,7 +250,7 @@ fn fs_deferred(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let sample = load_gbuffer_sample(coord, sample_index);
         lighting = lighting + calculate_lighting(
             sample.position.xyz,
-            normalize(sample.normal.xyz),
+            safe_normalize(sample.normal.xyz),
             sample.albedo,
         );
     }
