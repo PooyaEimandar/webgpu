@@ -103,6 +103,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     var color = input.color * 0.02 + radiance * 4.0;
-    color = pow(color, vec3<f32>(0.4545));
+    // cam_pos.w is 1.0 on sRGB surfaces (hardware encodes) and 1/2.2 on
+    // linear surfaces (manual encode); a fixed exponent double-encodes on
+    // sRGB swapchains.
+    color = pow(color, vec3<f32>(uniforms.cam_pos.w));
     return vec4<f32>(color, 1.0);
 }

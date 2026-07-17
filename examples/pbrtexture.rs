@@ -100,6 +100,7 @@ impl SceneUniforms {
         model: glam::Mat4,
         max_prefilter_lod: f32,
         controls: PbrTextureControls,
+        surface_is_srgb: bool,
     ) -> Self {
         let eye = glam::Vec3::new(0.25, 0.08, 4.85);
         let target = glam::Vec3::new(0.0, 0.0, 0.0);
@@ -120,7 +121,16 @@ impl SceneUniforms {
                 [p, -p * 0.5, p, 1.0],
                 [p, -p * 0.5, -p, 1.0],
             ],
-            params: [controls.exposure, controls.gamma, max_prefilter_lod, 0.0],
+            params: [
+                controls.exposure,
+                if surface_is_srgb {
+                    controls.gamma / 2.2
+                } else {
+                    controls.gamma
+                },
+                max_prefilter_lod,
+                0.0,
+            ],
         }
     }
 }
@@ -294,11 +304,10 @@ impl PbrTextureExample {
     }
 
     fn vertex_count(&self) -> usize {
-        let vertex_count = match self.assets.as_ref() {
+        match self.assets.as_ref() {
             Some(assets) => assets.mesh.vertices.len(),
             None => 0,
-        };
-        vertex_count
+        }
     }
 
     fn update_scene_uniforms(&self, context: &RenderContext) {
@@ -313,6 +322,7 @@ impl PbrTextureExample {
             assets.model,
             (ENV_MIP_COUNT - 1) as f32,
             self.controls,
+            context.surface_config.format.is_srgb(),
         );
         context
             .queue
@@ -534,6 +544,7 @@ impl Example for PbrTextureExample {
             assets.model,
             (ENV_MIP_COUNT - 1) as f32,
             self.controls,
+            context.surface_config.format.is_srgb(),
         );
         let uniform_buffer =
             buffer::uniform_buffer(&context.device, Some("pbrtexture uniforms"), &uniforms);
@@ -1000,11 +1011,25 @@ fn environment_cube_from_images(
         view_formats: &[],
     });
 
-    for mip_level in 0..ENV_MIP_COUNT {
-        let size = (ENV_CUBE_SIZE >> mip_level).max(1);
-        for (face_index, face) in faces.iter().enumerate() {
-            let rgba = resized_face_rgba(face, size)?;
-            write_cube_face(queue, &texture, mip_level, face_index as u32, size, &rgba);
+    for (face_index, face) in faces.iter().enumerate() {
+        // Successive linear-space box filtering: each mip is a true average
+        // of the previous one, so rough reflections sample smooth, energy-
+        // preserving blurs instead of aliased point samples.
+        let mut linear = resized_linear_face(face, ENV_CUBE_SIZE)?;
+        let mut size = ENV_CUBE_SIZE;
+        for mip_level in 0..ENV_MIP_COUNT {
+            write_cube_face(
+                queue,
+                &texture,
+                mip_level,
+                face_index as u32,
+                size,
+                &encode_linear_rgba(&linear),
+            );
+            if mip_level + 1 < ENV_MIP_COUNT {
+                linear = downsample_linear(&linear, size);
+                size = (size / 2).max(1);
+            }
         }
     }
 
@@ -1059,15 +1084,15 @@ fn irradiance_cube_from_images(
         view_formats: &[],
     });
 
-    for (face_index, face) in faces.iter().enumerate() {
-        let rgba = resized_face_rgba(face, IRRADIANCE_CUBE_SIZE)?;
+    let convolved = convolve_irradiance_faces(faces, IRRADIANCE_CUBE_SIZE)?;
+    for (face_index, rgba) in convolved.iter().enumerate() {
         write_cube_face(
             queue,
             &texture,
             0,
             face_index as u32,
             IRRADIANCE_CUBE_SIZE,
-            &rgba,
+            rgba,
         );
     }
 
@@ -1110,7 +1135,7 @@ fn generated_brdf_lut(
         let roughness = (y as f32 + 0.5) / BRDF_LUT_SIZE as f32;
         for x in 0..BRDF_LUT_SIZE {
             let ndotv = (x as f32 + 0.5) / BRDF_LUT_SIZE as f32;
-            let brdf = approximate_brdf(ndotv, roughness);
+            let brdf = integrated_brdf(ndotv, roughness);
             rgba.extend_from_slice(&[to_byte(brdf.x), to_byte(brdf.y), 0, 255]);
         }
     }
@@ -1248,32 +1273,162 @@ fn validate_cube_faces(faces: &[texture::ImageRgba8]) -> RenderResult<()> {
 }
 
 fn resized_face_rgba(face: &texture::ImageRgba8, size: u32) -> RenderResult<Vec<u8>> {
-    let capacity = size
-        .checked_mul(size)
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| RenderError::message("pbrtexture cubemap mip dimensions overflow"))?
-        as usize;
-    let mut rgba = Vec::with_capacity(capacity);
-    let width = face.width.max(1);
-    let height = face.height.max(1);
+    Ok(encode_linear_rgba(&resized_linear_face(face, size)?))
+}
 
-    for y in 0..size {
-        let src_y =
-            (((y as f32 + 0.5) * height as f32 / size as f32).floor() as u32).min(height - 1);
-        for x in 0..size {
-            let src_x =
-                (((x as f32 + 0.5) * width as f32 / size as f32).floor() as u32).min(width - 1);
-            let offset = ((src_y * width + src_x) * 4) as usize;
-            let Some(texel) = face.rgba.get(offset..offset + 4) else {
-                return Err(RenderError::message(
-                    "pbrtexture cubemap face texel is out of range",
-                ));
-            };
-            rgba.extend_from_slice(texel);
+/// Gamma used to filter 8-bit texels in linear space; averaging encoded
+/// values directly would darken every downsample.
+const FILTER_GAMMA: f32 = 2.2;
+
+fn texel_to_linear(byte: u8) -> f32 {
+    (f32::from(byte) / 255.0).powf(FILTER_GAMMA)
+}
+
+fn linear_to_texel(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0).powf(1.0 / FILTER_GAMMA) * 255.0 + 0.5) as u8
+}
+
+/// Area-averaged resample into size * size texels of linear-space RGB.
+fn resized_linear_face(face: &texture::ImageRgba8, size: u32) -> RenderResult<Vec<glam::Vec3>> {
+    let width = face.width.max(1) as usize;
+    let height = face.height.max(1) as usize;
+    let target = size.max(1) as usize;
+    let mut linear = Vec::with_capacity(target * target);
+
+    for y in 0..target {
+        let sy0 = y * height / target;
+        let sy1 = ((y + 1) * height).div_ceil(target).clamp(sy0 + 1, height);
+        for x in 0..target {
+            let sx0 = x * width / target;
+            let sx1 = ((x + 1) * width).div_ceil(target).clamp(sx0 + 1, width);
+            let mut sum = glam::Vec3::ZERO;
+            for sy in sy0..sy1 {
+                for sx in sx0..sx1 {
+                    let offset = (sy * width + sx) * 4;
+                    let Some(texel) = face.rgba.get(offset..offset + 3) else {
+                        return Err(RenderError::message("cubemap face texel is out of range"));
+                    };
+                    sum += glam::Vec3::new(
+                        texel_to_linear(texel[0]),
+                        texel_to_linear(texel[1]),
+                        texel_to_linear(texel[2]),
+                    );
+                }
+            }
+            linear.push(sum / ((sy1 - sy0) * (sx1 - sx0)) as f32);
         }
     }
 
-    Ok(rgba)
+    Ok(linear)
+}
+
+fn encode_linear_rgba(linear: &[glam::Vec3]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(linear.len() * 4);
+    for texel in linear {
+        rgba.extend_from_slice(&[
+            linear_to_texel(texel.x),
+            linear_to_texel(texel.y),
+            linear_to_texel(texel.z),
+            255,
+        ]);
+    }
+    rgba
+}
+
+/// 2x2 box average producing the next mip level, in linear space.
+fn downsample_linear(linear: &[glam::Vec3], size: u32) -> Vec<glam::Vec3> {
+    let size = size.max(1) as usize;
+    let next = (size / 2).max(1);
+    let mut output = Vec::with_capacity(next * next);
+    for y in 0..next {
+        for x in 0..next {
+            let x0 = (x * 2).min(size - 1);
+            let y0 = (y * 2).min(size - 1);
+            let x1 = (x0 + 1).min(size - 1);
+            let y1 = (y0 + 1).min(size - 1);
+            output.push(
+                (linear[y0 * size + x0]
+                    + linear[y0 * size + x1]
+                    + linear[y1 * size + x0]
+                    + linear[y1 * size + x1])
+                    * 0.25,
+            );
+        }
+    }
+    output
+}
+
+/// Direction through the center of cube-face texel (x, y) in the standard
+/// WebGPU cube-sampling convention.
+fn cube_texel_direction(face: usize, x: usize, y: usize, size: u32) -> glam::Vec3 {
+    let u = 2.0 * (x as f32 + 0.5) / size as f32 - 1.0;
+    let v = 2.0 * (y as f32 + 0.5) / size as f32 - 1.0;
+    match face {
+        0 => glam::Vec3::new(1.0, -v, -u),
+        1 => glam::Vec3::new(-1.0, -v, u),
+        2 => glam::Vec3::new(u, 1.0, v),
+        3 => glam::Vec3::new(u, -1.0, -v),
+        4 => glam::Vec3::new(u, -v, 1.0),
+        _ => glam::Vec3::new(-u, -v, -1.0),
+    }
+    .normalize()
+}
+
+/// Relative solid angle subtended by cube-face texel (x, y).
+fn cube_texel_weight(x: usize, y: usize, size: u32) -> f32 {
+    let u = 2.0 * (x as f32 + 0.5) / size as f32 - 1.0;
+    let v = 2.0 * (y as f32 + 0.5) / size as f32 - 1.0;
+    (1.0 + u * u + v * v).powf(-1.5)
+}
+
+/// Cosine-convolves the environment into a diffuse irradiance cube: each
+/// output texel is the solid-angle- and cosine-weighted average of the
+/// hemisphere around its direction, computed in linear space from a
+/// downsampled source cube (normalized so a constant environment is
+/// unchanged).
+fn convolve_irradiance_faces(
+    faces: &[texture::ImageRgba8],
+    size: u32,
+) -> RenderResult<Vec<Vec<u8>>> {
+    const SOURCE_SIZE: u32 = 16;
+    let mut source = Vec::new();
+    for (face_index, face) in faces.iter().enumerate() {
+        let linear = resized_linear_face(face, SOURCE_SIZE)?;
+        for y in 0..SOURCE_SIZE as usize {
+            for x in 0..SOURCE_SIZE as usize {
+                let weight = cube_texel_weight(x, y, SOURCE_SIZE);
+                source.push((
+                    cube_texel_direction(face_index, x, y, SOURCE_SIZE),
+                    linear[y * SOURCE_SIZE as usize + x] * weight,
+                    weight,
+                ));
+            }
+        }
+    }
+
+    let mut output = Vec::with_capacity(6);
+    for face_index in 0..6 {
+        let mut linear = Vec::with_capacity((size * size) as usize);
+        for y in 0..size as usize {
+            for x in 0..size as usize {
+                let normal = cube_texel_direction(face_index, x, y, size);
+                let mut radiance = glam::Vec3::ZERO;
+                let mut total_weight = 0.0f32;
+                for (direction, weighted_color, weight) in &source {
+                    let cosine = normal.dot(*direction);
+                    if cosine <= 0.0 {
+                        continue;
+                    }
+                    radiance += *weighted_color * cosine;
+                    total_weight += weight * cosine;
+                }
+                linear.push(radiance / total_weight.max(1.0e-6));
+            }
+        }
+        output.push(encode_linear_rgba(&linear));
+    }
+
+    Ok(output)
 }
 
 fn write_cube_face(
@@ -1309,14 +1464,42 @@ fn write_cube_face(
     );
 }
 
-fn approximate_brdf(ndotv: f32, roughness: f32) -> glam::Vec2 {
-    let ndotv = ndotv.clamp(0.0, 1.0);
-    let roughness = roughness.clamp(0.0, 1.0);
-    let fresnel = (1.0 - ndotv).powf(5.0);
-    let visibility = ndotv / (ndotv * (1.0 - roughness * 0.5) + roughness * 0.5 + 0.001);
-    let scale = (1.0 - fresnel) * visibility * (1.0 - roughness * 0.35);
-    let bias = fresnel * (1.0 - roughness).powf(2.0) * 0.22;
-    glam::Vec2::new(scale, bias).clamp(glam::Vec2::ZERO, glam::Vec2::ONE)
+/// Numerically integrates the GGX split-sum BRDF (Karis 2013): scale and
+/// bias for the specular reflectance at a given view angle and roughness.
+fn integrated_brdf(ndotv: f32, roughness: f32) -> glam::Vec2 {
+    const SAMPLE_COUNT: u32 = 256;
+    let ndotv = ndotv.clamp(1.0e-3, 1.0);
+    let alpha = (roughness * roughness).max(1.0e-4);
+    let view = glam::Vec3::new((1.0 - ndotv * ndotv).max(0.0).sqrt(), 0.0, ndotv);
+    let mut scale = 0.0f32;
+    let mut bias = 0.0f32;
+
+    for index in 0..SAMPLE_COUNT {
+        // Hammersley point: (i / N, radical inverse of i).
+        let xi_x = index as f32 / SAMPLE_COUNT as f32;
+        let xi_y = index.reverse_bits() as f32 * 2.328_306_4e-10;
+        // GGX importance sample around N = +Z.
+        let phi = 2.0 * std::f32::consts::PI * xi_x;
+        let cos_theta = ((1.0 - xi_y) / (1.0 + (alpha * alpha - 1.0) * xi_y)).sqrt();
+        let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+        let half = glam::Vec3::new(phi.cos() * sin_theta, phi.sin() * sin_theta, cos_theta);
+        let light = 2.0 * view.dot(half) * half - view;
+        if light.z <= 0.0 {
+            continue;
+        }
+
+        let ndotl = light.z;
+        let ndoth = half.z.max(0.0);
+        let vdoth = view.dot(half).max(0.0);
+        let k = alpha * 0.5;
+        let g = (ndotv / (ndotv * (1.0 - k) + k)) * (ndotl / (ndotl * (1.0 - k) + k));
+        let g_vis = g * vdoth / (ndoth * ndotv).max(1.0e-4);
+        let fresnel = (1.0 - vdoth).powf(5.0);
+        scale += (1.0 - fresnel) * g_vis;
+        bias += fresnel * g_vis;
+    }
+
+    glam::Vec2::new(scale, bias) / SAMPLE_COUNT as f32
 }
 
 struct MaterialImages {

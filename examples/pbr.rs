@@ -64,7 +64,7 @@ struct SceneUniforms {
 }
 
 impl SceneUniforms {
-    fn new(aspect_ratio: f32, animation_time: f32) -> Self {
+    fn new(aspect_ratio: f32, animation_time: f32, surface_is_srgb: bool) -> Self {
         let eye = glam::Vec3::new(12.0, 15.5, 5.0);
         let target = glam::Vec3::new(-1.25, 0.0, -1.25);
         let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
@@ -84,7 +84,12 @@ impl SceneUniforms {
         Self {
             view_projection: (projection * view).to_cols_array_2d(),
             model: model.to_cols_array_2d(),
-            cam_pos: [eye.x, eye.y, eye.z, 0.0],
+            cam_pos: [
+                eye.x,
+                eye.y,
+                eye.z,
+                if surface_is_srgb { 1.0 } else { 1.0 / 2.2 },
+            ],
             lights,
         }
     }
@@ -165,7 +170,11 @@ impl PbrExample {
 
     fn update_scene_uniforms(&self, context: &RenderContext) {
         if let Some(uniform_buffer) = &self.uniform_buffer {
-            let uniforms = SceneUniforms::new(context.aspect_ratio(), self.animation_time);
+            let uniforms = SceneUniforms::new(
+                context.aspect_ratio(),
+                self.animation_time,
+                context.surface_config.format.is_srgb(),
+            );
             context
                 .queue
                 .write_buffer(uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -189,7 +198,11 @@ impl Example for PbrExample {
             Some("pbr basic shader"),
             include_str!("../shaders/pbr.wgsl"),
         );
-        let uniforms = SceneUniforms::new(context.aspect_ratio(), 0.0);
+        let uniforms = SceneUniforms::new(
+            context.aspect_ratio(),
+            0.0,
+            context.surface_config.format.is_srgb(),
+        );
         let uniform_buffer =
             buffer::uniform_buffer(&context.device, Some("pbr basic uniforms"), &uniforms);
         let bind_group_layout =
