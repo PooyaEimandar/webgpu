@@ -29,5 +29,8 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOut {
 
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
-  return textureSample(ray_texture, ray_sampler, vec2<f32>(input.uv.x, 1.0 - input.uv.y));
+  // The compute pass already writes row 0 = scene bottom (screen.y = -1),
+  // which matches this pass's uv orientation directly; flipping v here
+  // would mirror the image vertically.
+  return textureSample(ray_texture, ray_sampler, input.uv);
 }
