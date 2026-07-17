@@ -103,7 +103,7 @@ fn fs_phongpass(input: PhongPassVertexOutput) -> @location(0) vec4<f32> {
 fn vs_radialblur(@builtin(vertex_index) vertex_index: u32) -> FullscreenVertexOutput {
     var output: FullscreenVertexOutput;
     output.uv = vec2<f32>(f32((vertex_index << 1u) & 2u), f32(vertex_index & 2u));
-    output.position = vec4<f32>(output.uv * 2.0 - vec2<f32>(1.0), 0.0, 1.0);
+    output.position = vec4<f32>(output.uv.x * 2.0 - 1.0, 1.0 - output.uv.y * 2.0, 0.0, 1.0);
     return output;
 }
 
