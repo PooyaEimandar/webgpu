@@ -124,6 +124,7 @@ impl Lcg {
 
 struct Pipelines {
     rocks: wgpu::RenderPipeline,
+    planet: wgpu::RenderPipeline,
     starfield: wgpu::RenderPipeline,
 }
 
@@ -297,6 +298,7 @@ impl Example for InstancingExample {
 
         self.pipelines = Some(Pipelines {
             rocks: create_rocks_pipeline(context, &pipeline_layout, &shader),
+            planet: create_planet_pipeline(context, &pipeline_layout, &shader),
             starfield: create_starfield_pipeline(context, &pipeline_layout, &shader),
         });
         self.rocks_bind_group = Some(rocks_bind_group);
@@ -415,6 +417,27 @@ impl Example for InstancingExample {
             pass.set_bind_group(0, planet_bind_group, &[]);
             pass.draw(0..3, 0..1);
 
+            pass.set_pipeline(&pipelines.planet);
+            pass.set_vertex_buffer(
+                0,
+                self.planet_vertex_buffer
+                    .as_ref()
+                    .ok_or_else(|| {
+                        RenderError::message("instancing planet vertex buffer initialized")
+                    })?
+                    .slice(..),
+            );
+            pass.set_index_buffer(
+                self.planet_index_buffer
+                    .as_ref()
+                    .ok_or_else(|| {
+                        RenderError::message("instancing planet index buffer initialized")
+                    })?
+                    .slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.draw_indexed(0..self.planet_index_count, 0, 0..1);
+
             pass.set_pipeline(&pipelines.rocks);
             pass.set_bind_group(0, rocks_bind_group, &[]);
             pass.set_vertex_buffer(
@@ -476,6 +499,23 @@ fn create_rocks_pipeline(
         "vs_rocks",
         "fs_rocks",
         &[MeshVertex::layout(), InstanceData::layout()],
+        true,
+    )
+}
+
+fn create_planet_pipeline(
+    context: &RenderContext,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+) -> wgpu::RenderPipeline {
+    create_pipeline(
+        context,
+        layout,
+        shader,
+        "instancing planet pipeline",
+        "vs_planet",
+        "fs_planet",
+        &[MeshVertex::layout()],
         true,
     )
 }
