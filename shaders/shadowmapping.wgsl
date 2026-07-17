@@ -4,6 +4,7 @@ struct ShadowUniforms {
     model: mat4x4<f32>,
     light_space: mat4x4<f32>,
     light_position: vec4<f32>,
+    camera_position: vec4<f32>,
     clip: vec4<f32>,
 };
 
@@ -91,7 +92,7 @@ fn shadow_factor(shadow_position: vec4<f32>, normal: vec3<f32>, light_direction:
 fn fs_scene(input: SceneVertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(input.normal);
     let light_direction = normalize(uniforms.light_position.xyz - input.world_position);
-    let view_direction = normalize(-input.world_position);
+    let view_direction = normalize(uniforms.camera_position.xyz - input.world_position);
     let reflected = reflect(-light_direction, normal);
 
     let ambient = input.color * 0.16;

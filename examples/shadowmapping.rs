@@ -24,12 +24,13 @@ struct ShadowUniforms {
     model: [[f32; 4]; 4],
     light_space: [[f32; 4]; 4],
     light_position: [f32; 4],
+    camera_position: [f32; 4],
     clip: [f32; 4],
 }
 
 impl ShadowUniforms {
     fn new(aspect_ratio: f32, animation_time: f32) -> Self {
-        let (projection, view) = camera_matrices(aspect_ratio);
+        let (projection, view, eye) = camera_matrices(aspect_ratio);
         let light_position = light_position(animation_time);
         let light_target = glam::Vec3::new(0.0, -0.45, 0.0);
         let light_projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 40.0);
@@ -41,6 +42,7 @@ impl ShadowUniforms {
             model: glam::Mat4::IDENTITY.to_cols_array_2d(),
             light_space: (light_projection * light_view).to_cols_array_2d(),
             light_position: [light_position.x, light_position.y, light_position.z, 1.0],
+            camera_position: [eye.x, eye.y, eye.z, 1.0],
             clip: [1.0, 40.0, 0.0, 0.0],
         }
     }
@@ -430,7 +432,7 @@ impl Example for ShadowMappingExample {
     }
 }
 
-fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4) {
+fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
     let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
     let yaw = -30.0_f32.to_radians();
     let pitch = 25.0_f32.to_radians();
@@ -438,7 +440,7 @@ fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4) {
     let eye = orbit * glam::Vec3::new(0.0, 0.0, -12.5);
     let view = glam::Mat4::look_at_rh(eye, glam::Vec3::new(0.0, -0.35, 0.0), glam::Vec3::Y);
 
-    (projection, view)
+    (projection, view, eye)
 }
 
 fn light_position(animation_time: f32) -> glam::Vec3 {
