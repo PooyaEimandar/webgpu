@@ -227,11 +227,16 @@ impl VirtualJoystick {
         [self.left.visual(), self.right.visual()]
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset_pointer_input(&mut self) {
         self.left.reset();
         self.right.reset();
-        self.keyboard.reset();
         self.cursor_position = None;
+        self.sync_overlay();
+    }
+
+    pub fn reset(&mut self) {
+        self.reset_pointer_input();
+        self.keyboard.reset();
     }
 
     fn start_pointer(

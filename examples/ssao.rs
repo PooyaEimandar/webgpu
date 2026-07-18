@@ -932,6 +932,7 @@ impl Example for SsaoExample {
                 context.window.request_redraw();
             }
             if response.consumed {
+                self.joystick.reset_pointer_input();
                 return true;
             }
         }

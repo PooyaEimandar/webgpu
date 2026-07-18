@@ -47,7 +47,6 @@ const STATIC_ROW_SPACING: f32 = 2.35 * MODEL_SCALE_MULTIPLIER;
 const SKINNED_COLUMN_SPACING: f32 = 2.8 * MODEL_SCALE_MULTIPLIER;
 const SKINNED_ROW_SPACING: f32 = 2.72 * MODEL_SCALE_MULTIPLIER;
 const INSTANCE_BASE_Y: f32 = 0.12 * MODEL_SCALE_MULTIPLIER;
-const STATIC_START_Z: f32 = -34.0 * MODEL_SCALE_MULTIPLIER;
 const SKINNED_START_Z: f32 = 7.0;
 const CAMERA_FAR_PLANE: f32 = 360.0 * MODEL_SCALE_MULTIPLIER;
 const CULL_WORKGROUP_SIZE: u32 = 64;
@@ -903,6 +902,24 @@ impl NaniteExample {
         }
     }
 
+    fn rebuild_instance_layout(&mut self, context: &RenderContext) -> RenderResult<()> {
+        self.instances = create_instances(
+            self.static_instance_capacity,
+            self.skinned_instance_capacity,
+            self.controls.static_instances,
+            self.controls.skinned_instances,
+        );
+        let instance_buffer = self
+            .instance_buffer
+            .as_ref()
+            .ok_or_else(|| RenderError::message("Nanite instance buffer initialized"))?;
+        context
+            .queue
+            .write_buffer(instance_buffer, 0, bytemuck::cast_slice(&self.instances));
+        self.hzb_valid = false;
+        Ok(())
+    }
+
     fn update_uniforms(&mut self, context: &RenderContext) {
         let camera = self.current_camera(context);
         if !self.controls.freeze_culling {
@@ -1409,6 +1426,8 @@ impl NaniteExample {
             self.gui_refresh_elapsed = 0.0;
         }
         if controls != self.controls {
+            let population_changed = controls.static_instances != self.controls.static_instances
+                || controls.skinned_instances != self.controls.skinned_instances;
             if self.controls.animate_camera && !controls.animate_camera {
                 let orbit = CameraState::new(context.aspect_ratio(), self.camera_angle);
                 self.fps_camera = fps_camera_looking_at(orbit.eye, scene_camera_target());
@@ -1423,6 +1442,9 @@ impl NaniteExample {
                 self.joystick.reset();
             }
             self.controls = controls;
+            if population_changed {
+                self.rebuild_instance_layout(context)?;
+            }
             self.update_uniforms(context);
         }
         Ok(())
@@ -1481,6 +1503,8 @@ impl Example for NaniteExample {
         self.instances = create_instances(
             self.static_instance_capacity,
             self.skinned_instance_capacity,
+            self.controls.static_instances,
+            self.controls.skinned_instances,
         );
 
         let nanite_mesh = build_nanite_mesh(&scene.mesh.vertices, &scene.mesh.indices)?;
@@ -1575,7 +1599,7 @@ impl Example for NaniteExample {
             &context.device,
             Some("nanite Jax instances"),
             &self.instances,
-            wgpu::BufferUsages::STORAGE,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
         let meshlet_buffer = buffer::buffer_from_data(
             &context.device,
@@ -1813,6 +1837,7 @@ impl Example for NaniteExample {
                 context.window.request_redraw();
             }
             if response.consumed {
+                self.joystick.reset_pointer_input();
                 return true;
             }
         }
@@ -2758,45 +2783,102 @@ fn bounding_sphere(vertices: &[SkinnedVertex], indices: &[u32]) -> RenderResult<
     Ok([center.x, center.y, center.z, radius.max(0.0001)])
 }
 
-fn create_instances(static_count: u32, skinned_count: u32) -> Vec<InstanceData> {
-    let mut instances = Vec::with_capacity((static_count + skinned_count) as usize);
-    let static_columns = (static_count as f32).sqrt().ceil().max(1.0) as u32;
-    let static_center = (static_columns as f32 - 1.0) * 0.5;
+fn create_instances(
+    static_capacity: u32,
+    skinned_capacity: u32,
+    static_count: u32,
+    skinned_count: u32,
+) -> Vec<InstanceData> {
+    let static_count = static_count.min(static_capacity);
+    let skinned_count = skinned_count.min(skinned_capacity);
+    let mut instances = Vec::with_capacity((static_capacity + skinned_capacity) as usize);
+
+    let skinned_columns = regular_grid_columns(skinned_count, SKINNED_INSTANCE_COLUMNS, 4.0);
+    let skinned_rows = grid_rows(skinned_count, skinned_columns);
+    let static_start_z = if skinned_rows == 0 {
+        SKINNED_START_Z
+    } else {
+        let last_skinned_row = skinned_rows.saturating_sub(1) as f32;
+        SKINNED_START_Z
+            - last_skinned_row * SKINNED_ROW_SPACING
+            - (SKINNED_ROW_SPACING + STATIC_ROW_SPACING) * 0.5
+    };
+
+    let static_columns = regular_grid_columns(static_count, STATIC_INSTANCE_SIDE, 1.0);
     for index in 0..static_count {
-        let row = index / static_columns;
+        let (row, column_offset) = centered_grid_position(index, static_count, static_columns);
         let column = index % static_columns;
         let hash = (row * 73 + column * 151) % 101;
         let rotation = (hash as f32 / 100.0 - 0.5) * 0.28;
         instances.push(InstanceData {
             position_scale: [
-                (column as f32 - static_center) * STATIC_COLUMN_SPACING,
+                column_offset * STATIC_COLUMN_SPACING,
                 INSTANCE_BASE_Y,
-                STATIC_START_Z - row as f32 * STATIC_ROW_SPACING,
+                static_start_z - row as f32 * STATIC_ROW_SPACING,
                 STATIC_INSTANCE_SCALE,
             ],
             rotation_kind: [rotation, 0.0, hash as f32 / 100.0, 0.0],
         });
     }
+    instances.resize(static_capacity as usize, InstanceData::zeroed());
 
-    let skinned_columns = (((skinned_count as f32).sqrt().ceil() as u32) * 2)
-        .clamp(1, SKINNED_INSTANCE_COLUMNS)
-        .min(skinned_count.max(1));
-    let skinned_rows = skinned_count.div_ceil(skinned_columns).max(1);
-    let skinned_center = (skinned_columns as f32 - 1.0) * 0.5;
     for index in 0..skinned_count {
-        let row = index / skinned_columns;
-        let column = index % skinned_columns;
+        let (row, column_offset) = centered_grid_position(index, skinned_count, skinned_columns);
         instances.push(InstanceData {
             position_scale: [
-                (column as f32 - skinned_center) * SKINNED_COLUMN_SPACING,
+                column_offset * SKINNED_COLUMN_SPACING,
                 INSTANCE_BASE_Y,
                 SKINNED_START_Z - row as f32 * SKINNED_ROW_SPACING,
                 SKINNED_INSTANCE_SCALE,
             ],
-            rotation_kind: [0.0, 1.0, row as f32 / skinned_rows as f32, 0.0],
+            rotation_kind: [0.0, 1.0, row as f32 / skinned_rows.max(1) as f32, 0.0],
         });
     }
+    instances.resize(
+        (static_capacity + skinned_capacity) as usize,
+        InstanceData::zeroed(),
+    );
     instances
+}
+
+fn regular_grid_columns(count: u32, max_columns: u32, target_aspect: f32) -> u32 {
+    if count == 0 {
+        return 0;
+    }
+
+    let max_columns = max_columns.max(1).min(count);
+    let mut best_columns = 1;
+    let mut best_score = f32::INFINITY;
+    for columns in 1..=max_columns {
+        let rows = count.div_ceil(columns);
+        let slots = columns * rows;
+        let empty_ratio = (slots - count) as f32 / count as f32;
+        let aspect = columns as f32 / rows as f32;
+        let aspect_error = (aspect / target_aspect.max(0.01)).ln().abs();
+        let score = aspect_error + empty_ratio * 16.0;
+        if score < best_score {
+            best_columns = columns;
+            best_score = score;
+        }
+    }
+    best_columns
+}
+
+fn grid_rows(count: u32, columns: u32) -> u32 {
+    if count == 0 || columns == 0 {
+        0
+    } else {
+        count.div_ceil(columns)
+    }
+}
+
+fn centered_grid_position(index: u32, count: u32, columns: u32) -> (u32, f32) {
+    let row = index / columns;
+    let row_start = row * columns;
+    let row_length = (count - row_start).min(columns);
+    let column = index - row_start;
+    let center = (row_length as f32 - 1.0) * 0.5;
+    (row, column as f32 - center)
 }
 
 fn cpu_stats(
@@ -2915,6 +2997,103 @@ fn normalize_plane(plane: glam::Vec4) -> [f32; 4] {
         return plane.to_array();
     }
     (plane / length).to_array()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 0.0001;
+
+    #[test]
+    fn population_tiers_use_complete_regular_grids() {
+        assert_eq!(
+            regular_grid_columns(MOBILE_STATIC_INSTANCES, STATIC_INSTANCE_SIDE, 1.0),
+            16
+        );
+        assert_eq!(
+            regular_grid_columns(MOBILE_SKINNED_INSTANCES, SKINNED_INSTANCE_COLUMNS, 4.0),
+            8
+        );
+        assert_eq!(
+            regular_grid_columns(
+                CONSERVATIVE_SKINNED_INSTANCES,
+                SKINNED_INSTANCE_COLUMNS,
+                4.0,
+            ),
+            12
+        );
+        assert_eq!(
+            regular_grid_columns(BALANCED_SKINNED_INSTANCES, SKINNED_INSTANCE_COLUMNS, 4.0,),
+            24
+        );
+        assert_eq!(
+            regular_grid_columns(MAX_SKINNED_INSTANCES, SKINNED_INSTANCE_COLUMNS, 4.0),
+            SKINNED_INSTANCE_COLUMNS
+        );
+    }
+
+    #[test]
+    fn mobile_grids_are_centered_and_contiguous() {
+        let instances = create_instances(
+            MOBILE_STATIC_INSTANCES,
+            MOBILE_SKINNED_INSTANCES,
+            MOBILE_STATIC_INSTANCES,
+            MOBILE_SKINNED_INSTANCES,
+        );
+        let skinned_start = MOBILE_STATIC_INSTANCES as usize;
+        let second_skinned_row = skinned_start + 8;
+
+        assert_eq!(
+            instances.len(),
+            (MOBILE_STATIC_INSTANCES + MOBILE_SKINNED_INSTANCES) as usize
+        );
+        assert!((instances[0].position_scale[0] + instances[15].position_scale[0]).abs() < EPSILON);
+        assert!(
+            (instances[skinned_start].position_scale[0]
+                + instances[skinned_start + 7].position_scale[0])
+                .abs()
+                < EPSILON
+        );
+        assert!(
+            (instances[second_skinned_row].position_scale[0]
+                + instances[second_skinned_row + 7].position_scale[0])
+                .abs()
+                < EPSILON
+        );
+
+        let transition =
+            instances[second_skinned_row].position_scale[2] - instances[0].position_scale[2];
+        let expected_transition = (SKINNED_ROW_SPACING + STATIC_ROW_SPACING) * 0.5;
+        assert!((transition - expected_transition).abs() < EPSILON);
+    }
+
+    #[test]
+    fn inactive_slots_keep_the_skinned_buffer_offset_stable() {
+        let instances = create_instances(16, 8, 9, 3);
+
+        assert_eq!(instances.len(), 24);
+        assert!(
+            instances[0..9]
+                .iter()
+                .all(|instance| instance.position_scale[3] > 0.0)
+        );
+        assert!(
+            instances[9..16]
+                .iter()
+                .all(|instance| instance.position_scale[3] == 0.0)
+        );
+        assert!(
+            instances[16..19]
+                .iter()
+                .all(|instance| instance.position_scale[3] > 0.0)
+        );
+        assert!(
+            instances[19..24]
+                .iter()
+                .all(|instance| instance.position_scale[3] == 0.0)
+        );
+    }
 }
 
 fn run_nanite(scene: SkinnedGltfScene) -> RenderResult<()> {
