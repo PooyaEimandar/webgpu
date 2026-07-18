@@ -235,7 +235,7 @@ impl ComputeNbodyExample {
                     .default_pos(egui::pos2(10.0, 10.0))
                     .default_width(270.0)
                     .resizable(false)
-                    .collapsible(false)
+                    .collapsible(true)
                     .show(&egui_context, |ui| {
                         ui.label("Compute shader N-body system");
                         ui.label(format!("{frame_ms:.2} ms/frame ({fps:.0} fps)"));

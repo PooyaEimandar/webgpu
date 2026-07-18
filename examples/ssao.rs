@@ -576,7 +576,7 @@ impl SsaoExample {
                     .default_pos(egui::pos2(10.0, 10.0))
                     .default_width(295.0)
                     .resizable(false)
-                    .collapsible(false)
+                    .collapsible(true)
                     .show(&egui_context, |ui| {
                         ui.label("Deferred shadows with SSAO");
                         ui.label(format!("{frame_ms:.2} ms/frame ({fps:.0} fps)"));

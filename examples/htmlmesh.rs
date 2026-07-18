@@ -3220,7 +3220,7 @@ impl HtmlMeshExample {
                     .default_pos(egui::pos2(10.0, 10.0))
                     .default_width(340.0)
                     .resizable(false)
-                    .collapsible(false)
+                    .collapsible(true)
                     .show(&egui_context, |ui| {
                         ui.label("HTML rendered on a 3D WebGPU plane");
                         ui.label(format!("{frame_ms:.2} ms/frame ({fps:.0} fps)"));
