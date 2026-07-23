@@ -46,6 +46,14 @@ pub struct JointMatrices {
     pub matrices: [[[f32; 4]; 4]; MAX_JOINTS],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PosedVertex {
+    pub position: glam::Vec3,
+    pub normal: glam::Vec3,
+    pub uv: glam::Vec2,
+    pub color: glam::Vec3,
+}
+
 impl Default for JointMatrices {
     fn default() -> Self {
         Self {
@@ -291,6 +299,71 @@ impl SkinnedGltfScene {
 
         matrices
     }
+
+    pub fn posed_vertices(&self, skinning_enabled: bool) -> RenderResult<Vec<PosedVertex>> {
+        if !skinning_enabled {
+            return Ok(self
+                .mesh
+                .vertices
+                .iter()
+                .map(|vertex| PosedVertex {
+                    position: glam::Vec3::from_array(vertex.position),
+                    normal: glam::Vec3::from_array(vertex.normal),
+                    uv: glam::Vec2::from_array(vertex.uv),
+                    color: glam::Vec3::from_array(vertex.color),
+                })
+                .collect());
+        }
+
+        let joints = self.joint_matrices();
+        self.mesh
+            .vertices
+            .iter()
+            .map(|vertex| pose_vertex(vertex, &joints))
+            .collect()
+    }
+}
+
+fn pose_vertex(vertex: &SkinnedVertex, joints: &JointMatrices) -> RenderResult<PosedVertex> {
+    let source_position = glam::Vec3::from_array(vertex.position);
+    let source_normal = glam::Vec3::from_array(vertex.normal);
+    let mut position = glam::Vec3::ZERO;
+    let mut normal = glam::Vec3::ZERO;
+    let mut total_weight = 0.0;
+
+    for slot in 0..4 {
+        let weight = vertex.weights[slot];
+        if weight <= f32::EPSILON {
+            continue;
+        }
+
+        let joint_index = vertex.joints[slot] as usize;
+        let joint_matrix = joints
+            .matrices
+            .get(joint_index)
+            .map(glam::Mat4::from_cols_array_2d)
+            .unwrap_or(glam::Mat4::IDENTITY);
+        position += joint_matrix.transform_point3(source_position) * weight;
+        normal += joint_matrix.transform_vector3(source_normal) * weight;
+        total_weight += weight;
+    }
+
+    if total_weight <= f32::EPSILON {
+        position = source_position;
+        normal = source_normal;
+    }
+    if !position.is_finite() || !normal.is_finite() {
+        return Err(RenderError::message(
+            "skinned glTF vertex produced a non-finite value",
+        ));
+    }
+
+    Ok(PosedVertex {
+        position,
+        normal: normal.try_normalize().unwrap_or(glam::Vec3::Y),
+        uv: glam::Vec2::from_array(vertex.uv),
+        color: glam::Vec3::from_array(vertex.color),
+    })
 }
 
 #[derive(Clone, Debug)]

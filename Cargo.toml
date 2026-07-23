@@ -11,8 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 base64 = { version = "0.22.1" }
-bytes = { version = "1.12.0" }
-bytemuck = { version = "1.25.0", features = ["derive"] }
+bvh = { version = "0.12.0", default-features = false, features = ["std"] }
+bytes = { version = "1.12.1" }
+bytemuck = { version = "1.25.2", features = ["derive"] }
 egui = { version = "0.35.0", default-features = false }
 egui-wgpu = { version = "0.35.0", default-features = false }
 egui-winit = { version = "0.35.0", default-features = false }
@@ -21,14 +22,28 @@ gltf = { version = "1.4.1", default-features = false, features = [
     "utils",
 ] }
 http = { version = "1.4.2" }
-image = { version = "0.25.10", default-features = false, features = [
-    "jpeg",
-    "png",
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
+# bvh 0.12 links nalgebra 0.34; accel.rs needs that exact version for
+nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = false, features = [
+    "std",
 ] }
 sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
+rapier3d = "0.34.0"
+
+# Just for Rapier Physics Engine, because it is generic-heavy
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-serde_json = { version = "1.0.150" }
+bvh = { version = "0.12.0", default-features = false, features = [
+    "rayon",
+    "std",
+] }
+serde_json = { version = "1.0.151" }
 sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-file-server",
     "net-h1-server",

@@ -184,14 +184,13 @@ impl AssetLoader {
 self.onmessage = async (event) => {
   try {
     const baseUrl = event.data.baseUrl;
-    const assets = [];
-    for (const { label, url } of event.data.urls) {
+    const assets = await Promise.all(event.data.urls.map(async ({ label, url }) => {
       const response = await fetch(new URL(url, baseUrl).href);
       if (!response.ok) {
         throw new Error(`${label}: HTTP ${response.status}`);
       }
-      assets.push({ label, buffer: await response.arrayBuffer() });
-    }
+      return { label, buffer: await response.arrayBuffer() };
+    }));
     const transfers = assets.map((asset) => asset.buffer);
     self.postMessage({ ok: true, assets }, transfers);
   } catch (error) {

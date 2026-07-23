@@ -8,12 +8,12 @@ const BRIDGE2_BASE_URL: &str = "assets/textures/skybox/bridge2";
 const BRIDGE2_BASE_URL: &str = "../assets/textures/skybox/bridge2";
 
 const BRIDGE2_FACES: &[(&str, &str)] = &[
-    ("px", "posx.jpg"),
-    ("nx", "negx.jpg"),
-    ("py", "posy.jpg"),
-    ("ny", "negy.jpg"),
-    ("pz", "posz.jpg"),
-    ("nz", "negz.jpg"),
+    ("px", "posx.ktx"),
+    ("nx", "negx.ktx"),
+    ("py", "posy.ktx"),
+    ("ny", "negy.ktx"),
+    ("pz", "posz.ktx"),
+    ("nz", "negz.ktx"),
 ];
 
 fn bridge2_url(file_name: &str) -> String {
@@ -24,6 +24,13 @@ pub fn bridge2_requests() -> Vec<(String, String)> {
     BRIDGE2_FACES
         .iter()
         .map(|(label, file_name)| ((*label).to_owned(), bridge2_url(file_name)))
+        .collect()
+}
+
+fn decode_faces(fetched: Vec<crate::asset::AssetBytes>) -> RenderResult<Vec<texture::ImageRgba8>> {
+    fetched
+        .iter()
+        .map(|asset| crate::ktx::decode_ktx1_rgba8(&asset.bytes, &asset.label))
         .collect()
 }
 
@@ -38,7 +45,7 @@ pub fn load_bridge2_rgba8() -> RenderResult<Vec<texture::ImageRgba8>> {
         })
         .collect::<Vec<_>>();
 
-    AssetLoader::new().fetch_images_rgba8_batch(&requests)
+    decode_faces(AssetLoader::new().fetch_url_bytes_batch(&requests)?)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -52,5 +59,5 @@ pub async fn load_bridge2_rgba8() -> RenderResult<Vec<texture::ImageRgba8>> {
         })
         .collect::<Vec<_>>();
 
-    AssetLoader::new().fetch_images_rgba8_batch(&requests).await
+    decode_faces(AssetLoader::new().fetch_url_bytes_batch(&requests).await?)
 }

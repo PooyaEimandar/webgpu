@@ -2,6 +2,10 @@ pub mod asset;
 pub mod gltf_scene;
 pub mod gltf_skin;
 pub mod joystick;
+pub mod ktx;
+pub mod light_gizmo;
+pub mod metropolis;
+pub mod restir;
 pub mod skybox;
 
 pub fn log_error(error: impl std::fmt::Display) {

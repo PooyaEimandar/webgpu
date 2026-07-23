@@ -84,7 +84,10 @@
           { "@type": "ListItem", "position": 39, "name": "shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmapping/" },
           { "@type": "ListItem", "position": 40, "name": "shadow mapping cascade", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingcascade/" },
           { "@type": "ListItem", "position": 41, "name": "omni directional shadow mapping", "url": "https://pooyaeimandar.github.io/webgpu/shadowmappingomni/" },
-          { "@type": "ListItem", "position": 42, "name": "Nanite-style meshlets", "url": "https://pooyaeimandar.github.io/webgpu/nanite/" }
+          { "@type": "ListItem", "position": 42, "name": "Nanite-style meshlets", "url": "https://pooyaeimandar.github.io/webgpu/nanite/" },
+          { "@type": "ListItem", "position": 43, "name": "Metropolis", "url": "https://pooyaeimandar.github.io/webgpu/metropolis/" },
+          { "@type": "ListItem", "position": 44, "name": "ReSTIR DI", "url": "https://pooyaeimandar.github.io/webgpu/restirdi/" },
+          { "@type": "ListItem", "position": 45, "name": "ReSTIR GI", "url": "https://pooyaeimandar.github.io/webgpu/restirgi/" }
         ]
       }
     }
@@ -310,6 +313,16 @@
           <span>Adapter-scaled populations, virtual geometry pages, meshlet LODs, two-pass HZB occlusion, indirect rasterization, and GPU skinning.</span>
         </span>
       </a>
+      <a href="./metropolis/">
+        <picture>
+          <source srcset="./screenshots/metropolis.webp" type="image/webp" />
+          <img src="./screenshots/metropolis.jpg" alt="Metropolis renderer in Sponza screenshot" />
+        </picture>
+        <span class="content">
+          <strong>Metropolis</strong>
+          <span>Forward+ Sponza scene with GPU culling, indirect draws, animated crowds, dynamic shadows, reflections, GI, and post-processing.</span>
+        </span>
+      </a>
       <a href="./computenbody/">
         <picture>
           <source srcset="./screenshots/computenbody.webp" type="image/webp" />
@@ -358,6 +371,26 @@
         <span class="content">
           <strong>ray tracing glTF</strong>
           <span>Compute ray tracing over a skinned and textured glTF mesh with runtime skinning controls.</span>
+        </span>
+      </a>
+      <a href="./restirdi/">
+        <picture>
+          <source srcset="./screenshots/restirdi.webp" type="image/webp" />
+          <img src="./screenshots/restirdi.jpg" alt="ReSTIR direct illumination in Sponza screenshot" />
+        </picture>
+        <span class="content">
+          <strong>ReSTIR DI</strong>
+          <span>Direct-light reservoirs reused across time and neighboring pixels over Sponza and animated Jax geometry.</span>
+        </span>
+      </a>
+      <a href="./restirgi/">
+        <picture>
+          <source srcset="./screenshots/restirgi.webp" type="image/webp" />
+          <img src="./screenshots/restirgi.jpg" alt="ReSTIR global illumination in Sponza screenshot" />
+        </picture>
+        <span class="content">
+          <strong>ReSTIR GI</strong>
+          <span>One-bounce path reservoirs with temporal and spatial reuse over the same animated Sponza test scene.</span>
         </span>
       </a>
       <a href="./htmlmesh/">
