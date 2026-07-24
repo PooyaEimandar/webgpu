@@ -1,9 +1,3 @@
-// Metropolis froxel light clustering. One thread per froxel computes the
-// froxel's view-space AABB (screen tile × exponential depth slice) and appends
-// every light whose bounding sphere intersects it into a fixed-size per-froxel
-// list. The lit passes then loop only their froxel's lights, so cost scales with
-// visible lights per froxel rather than total light count.
-
 struct GpuLight {
     position_range: vec4<f32>, // xyz world position, w range
     color_type: vec4<f32>,     // rgb colour×intensity, w type (0 point, 1 spot)

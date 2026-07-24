@@ -1,5 +1,3 @@
-//! Shared wireframe gizmos for visualizing directional, point, and spot lights.
-
 use bytemuck::{Pod, Zeroable};
 use sib::render::{RenderContext, glam, render_pass, shader, wgpu};
 

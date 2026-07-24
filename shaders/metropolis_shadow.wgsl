@@ -1,12 +1,3 @@
-// Metropolis sun shadow pass. Depth-only render of the static environment and
-// the skinned crowd from the sun's point of view. The lit passes sample the
-// resulting depth map to shadow the sun's direct contribution.
-//
-// Two vertex entry points share one bind group: `vs_static` for Sponza and
-// `vs_skinned` for the instanced, GPU-skinned characters (mirroring the crowd
-// transform in metropolis_forward.wgsl). There is no fragment stage — only
-// depth is written.
-
 struct ShadowUniform {
     view_projection: mat4x4<f32>,
 }

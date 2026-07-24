@@ -1,6 +1,3 @@
-//! Minimal KTX 1 loader for the uncompressed RGBA8 textures the examples
-//! ship; shared by the skybox and ReSTIR asset pipelines.
-
 use sib::render::{RenderError, RenderResult, texture};
 
 pub fn decode_ktx1_rgba8(bytes: &[u8], label: &str) -> RenderResult<texture::ImageRgba8> {

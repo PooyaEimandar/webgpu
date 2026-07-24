@@ -1,7 +1,3 @@
-// Variance-adaptive, edge-aware à-trous wavelet pass over the demodulated
-// lighting signal. The first pass estimates local luminance variance; later
-// passes bypass stable pixels instead of paying for every widening kernel.
-
 struct GBuffer {
     position_depth: vec4<f32>,
     normal_roughness: vec4<f32>,

@@ -1,12 +1,3 @@
-//! Metropolis: a runtime-tiered, GPU-driven render core for the CyberPunk
-//! metaverse project. Clustered Forward+ with GPU-driven culling, adapting from
-//! phone browsers to desktop discrete GPUs. This module is built in phases;
-//! phase 1 is the spine: tier detection + dynamic resolution + a GPU-skinned
-//! character crowd rendered forward into an HDR target that the present pass
-//! upscales and tonemaps. Sponza, GPU-driven culling, clustered lights,
-//! shadows, reflections, and the optional ultra ray-tracing paths land in the
-//! phases that follow.
-
 mod particles;
 mod physics;
 mod scene;
@@ -625,6 +616,11 @@ pub struct MetropolisExample {
     ssr_uniform_buffer: Option<wgpu::Buffer>,
     probe_view: Option<wgpu::TextureView>,
     probe_sampler: Option<wgpu::Sampler>,
+    probe_texture: Option<wgpu::Texture>,
+    probe_depth_view: Option<wgpu::TextureView>,
+    probe_stale: bool,
+    frames_rendered: u64,
+    last_probe_bake_frame: u64,
     bloom_bright_pipeline: Option<wgpu::RenderPipeline>,
     bloom_blur_pipeline: Option<wgpu::RenderPipeline>,
     bloom_layout: Option<wgpu::BindGroupLayout>,
@@ -723,8 +719,6 @@ impl MetropolisExample {
             shadow_texture: None,
             static_shadow_texture: None,
             static_shadow_view: None,
-            // Deliberately not IDENTITY-equal to any real matrix, so the first
-            // frame always bakes.
             cached_sun_view_proj: glam::Mat4::ZERO,
             shadow_uniform_buffer: None,
             spot_atlas_view: None,
@@ -735,6 +729,11 @@ impl MetropolisExample {
             ssr_uniform_buffer: None,
             probe_view: None,
             probe_sampler: None,
+            probe_texture: None,
+            probe_depth_view: None,
+            probe_stale: true,
+            frames_rendered: 0,
+            last_probe_bake_frame: 0,
             bloom_bright_pipeline: None,
             bloom_blur_pipeline: None,
             bloom_layout: None,
@@ -823,15 +822,100 @@ impl MetropolisExample {
         proj * view
     }
 
+    fn bake_reflection_probe(&self, context: &RenderContext) {
+        let (
+            Some(probe_texture),
+            Some(probe_depth_view),
+            Some(static_pipeline),
+            Some(static_bind_group),
+            Some(frame_uniform_buffer),
+            Some(gpu_static),
+        ) = (
+            self.probe_texture.as_ref(),
+            self.probe_depth_view.as_ref(),
+            self.static_pipeline.as_ref(),
+            self.static_bind_group.as_ref(),
+            self.frame_uniform_buffer.as_ref(),
+            self.gpu_static.as_ref(),
+        )
+        else {
+            return;
+        };
+        let probe_origin = self.scene_center + glam::Vec3::Y * (self.scene_extent.y * 0.10);
+        // Standard cubemap face bases (+X, -X, +Y, -Y, +Z, -Z).
+        let faces = [
+            (glam::Vec3::X, -glam::Vec3::Y),
+            (-glam::Vec3::X, -glam::Vec3::Y),
+            (glam::Vec3::Y, glam::Vec3::Z),
+            (-glam::Vec3::Y, -glam::Vec3::Z),
+            (glam::Vec3::Z, -glam::Vec3::Y),
+            (-glam::Vec3::Z, -glam::Vec3::Y),
+        ];
+        let probe_proj = glam::Mat4::perspective_rh(
+            std::f32::consts::FRAC_PI_2,
+            1.0,
+            0.1,
+            self.scene_extent.length() * 2.0,
+        );
+        for (face, (dir, up)) in faces.into_iter().enumerate() {
+            let view_proj =
+                probe_proj * glam::Mat4::look_at_rh(probe_origin, probe_origin + dir, up);
+            let mut face_uniforms = FrameUniforms::zeroed();
+            face_uniforms.view_projection = view_proj.to_cols_array_2d();
+            face_uniforms.sun_view_projection = self.sun_view_proj.to_cols_array_2d();
+            face_uniforms.camera_position = probe_origin.extend(1.0).to_array();
+            face_uniforms.sun_direction = self.controls.sun_direction().extend(0.0).to_array();
+            face_uniforms.sun_color = [1.0, 0.95, 0.85, self.controls.sun_intensity];
+            let amb = self.controls.ambient;
+            face_uniforms.ambient = [0.29 * amb, 0.34 * amb, 0.49 * amb, 0.4];
+            context
+                .queue
+                .write_buffer(frame_uniform_buffer, 0, bytemuck::bytes_of(&face_uniforms));
+            let face_view = probe_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("metropolis probe face"),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: face as u32,
+                array_layer_count: Some(1),
+                ..Default::default()
+            });
+            let mut enc = context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = render_pass::begin_color_depth(
+                    &mut enc,
+                    Some("metropolis probe face pass"),
+                    &face_view,
+                    Some(probe_depth_view),
+                    wgpu::Color {
+                        r: 0.02,
+                        g: 0.03,
+                        b: 0.05,
+                        a: 1.0,
+                    },
+                    1.0,
+                );
+                pass.set_pipeline(static_pipeline);
+                pass.set_bind_group(0, static_bind_group, &[]);
+                pass.set_vertex_buffer(0, gpu_static.vertex_buffer.slice(..));
+                pass.draw(0..gpu_static.vertex_count, 0..1);
+            }
+            context.queue.submit([enc.finish()]);
+        }
+    }
+
     fn create_instances(
         count: u32,
         center: glam::Vec3,
         floor: f32,
         scale: f32,
         spacing: f32,
+        interior_half: glam::Vec2,
     ) -> Vec<InstanceData> {
         let side = (count as f32).sqrt().ceil().max(1.0) as u32;
         let grid_center = (side as f32 - 1.0) * 0.5;
+        let spacing_x = spacing.min(interior_half.x * 2.0 * 0.9 / side as f32);
+        let spacing_z = spacing.min(interior_half.y * 2.0 * 0.9 / side as f32);
         let mut instances = Vec::with_capacity(count as usize);
         for index in 0..count {
             let row = index / side;
@@ -839,9 +923,9 @@ impl MetropolisExample {
             let hash = (row * 73 + column * 151) % 101;
             instances.push(InstanceData {
                 position_scale: [
-                    center.x + (column as f32 - grid_center) * spacing,
+                    center.x + (column as f32 - grid_center) * spacing_x,
                     floor,
-                    center.z + (row as f32 - grid_center) * spacing,
+                    center.z + (row as f32 - grid_center) * spacing_z,
                     scale,
                 ],
                 rotation: [hash as f32 / 100.0 * std::f32::consts::TAU, 0.0, 0.0, 0.0],
@@ -1385,6 +1469,7 @@ impl Example for MetropolisExample {
             foot_offset,
             character_scale,
             spacing,
+            glam::Vec2::new(sponza_extent.x, sponza_extent.z) * 0.5 * physics::INTERIOR_FRACTION,
         );
         let instance_count = instances.len() as u32;
 
@@ -1450,9 +1535,6 @@ impl Example for MetropolisExample {
                 dims: [1.0, 1.0, 0.0, 0.0],
             },
         );
-        // --- Clustered lighting -------------------------------------------
-        // Unified light storage (sized to MAX_LIGHTS), a froxel light grid, and
-        // a compute pass that assigns lights to froxels each frame.
         let light_buffer = buffer::buffer_from_data(
             &context.device,
             Some("metropolis lights"),
@@ -2238,69 +2320,6 @@ impl Example for MetropolisExample {
             view_formats: &[],
         });
         let probe_depth_view = probe_depth.create_view(&wgpu::TextureViewDescriptor::default());
-        let probe_origin = gpu_static.center + glam::Vec3::Y * (sponza_extent.y * 0.10);
-        // Standard cubemap face bases (+X, -X, +Y, -Y, +Z, -Z).
-        let faces = [
-            (glam::Vec3::X, -glam::Vec3::Y),
-            (-glam::Vec3::X, -glam::Vec3::Y),
-            (glam::Vec3::Y, glam::Vec3::Z),
-            (-glam::Vec3::Y, -glam::Vec3::Z),
-            (glam::Vec3::Z, -glam::Vec3::Y),
-            (-glam::Vec3::Z, -glam::Vec3::Y),
-        ];
-        let probe_proj = glam::Mat4::perspective_rh(
-            std::f32::consts::FRAC_PI_2,
-            1.0,
-            0.1,
-            sponza_extent.length() * 2.0,
-        );
-        for (face, (dir, up)) in faces.into_iter().enumerate() {
-            let view_proj =
-                probe_proj * glam::Mat4::look_at_rh(probe_origin, probe_origin + dir, up);
-            let mut face_uniforms = FrameUniforms::zeroed();
-            face_uniforms.view_projection = view_proj.to_cols_array_2d();
-            face_uniforms.sun_view_projection = self.sun_view_proj.to_cols_array_2d();
-            face_uniforms.camera_position = probe_origin.extend(1.0).to_array();
-            face_uniforms.sun_direction = self.controls.sun_direction().extend(0.0).to_array();
-            face_uniforms.sun_color = [1.0, 0.95, 0.85, self.controls.sun_intensity];
-            let amb = self.controls.ambient;
-            face_uniforms.ambient = [0.29 * amb, 0.34 * amb, 0.49 * amb, 0.4];
-            context.queue.write_buffer(
-                &frame_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&face_uniforms),
-            );
-            let face_view = probe_texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("metropolis probe face"),
-                dimension: Some(wgpu::TextureViewDimension::D2),
-                base_array_layer: face as u32,
-                array_layer_count: Some(1),
-                ..Default::default()
-            });
-            let mut enc = context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            {
-                let mut pass = render_pass::begin_color_depth(
-                    &mut enc,
-                    Some("metropolis probe face pass"),
-                    &face_view,
-                    Some(&probe_depth_view),
-                    wgpu::Color {
-                        r: 0.02,
-                        g: 0.03,
-                        b: 0.05,
-                        a: 1.0,
-                    },
-                    1.0,
-                );
-                pass.set_pipeline(&static_pipeline);
-                pass.set_bind_group(0, &static_bind_group, &[]);
-                pass.set_vertex_buffer(0, gpu_static.vertex_buffer.slice(..));
-                pass.draw(0..gpu_static.vertex_count, 0..1);
-            }
-            context.queue.submit([enc.finish()]);
-        }
         let probe_view = probe_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("metropolis probe cube"),
             dimension: Some(wgpu::TextureViewDimension::Cube),
@@ -2317,6 +2336,8 @@ impl Example for MetropolisExample {
         });
         self.probe_view = Some(probe_view);
         self.probe_sampler = Some(probe_sampler);
+        self.probe_texture = Some(probe_texture);
+        self.probe_depth_view = Some(probe_depth_view);
 
         let present_layout =
             context
@@ -2919,10 +2940,10 @@ impl Example for MetropolisExample {
                 .unwrap_or((1.0, 1.0));
             self.jitter_index = self.jitter_index.wrapping_add(1);
             let index = (self.jitter_index as usize) % JITTER.len();
-            // Halton offsets are in [0,1); centre them and convert to clip space.
+            let render_scale = self.dynamic_resolution.scale().max(0.05);
             self.jitter = glam::Vec2::new(
-                (JITTER[index][0] - 0.5) * 2.0 / w,
-                (JITTER[index][1] - 0.5) * 2.0 / h,
+                (JITTER[index][0] - 0.5) * 2.0 / (w * render_scale),
+                (JITTER[index][1] - 0.5) * 2.0 / (h * render_scale),
             );
         } else {
             self.jitter = glam::Vec2::ZERO;
@@ -2983,7 +3004,18 @@ impl Example for MetropolisExample {
         let sun_moved = self.cached_sun_view_proj != self.sun_view_proj;
         if sun_moved {
             self.cached_sun_view_proj = self.sun_view_proj;
+            self.probe_stale = true;
         }
+        if self.probe_stale
+            && self.frames_rendered > 0
+            && (self.last_probe_bake_frame == 0
+                || self.frames_rendered >= self.last_probe_bake_frame + 15)
+        {
+            self.bake_reflection_probe(context);
+            self.probe_stale = false;
+            self.last_probe_bake_frame = self.frames_rendered;
+        }
+        self.frames_rendered = self.frames_rendered.wrapping_add(1);
         let amb = self.controls.ambient;
 
         let uniforms = FrameUniforms {
@@ -3723,7 +3755,12 @@ impl Example for MetropolisExample {
                             inv_view_proj: stable_view_projection.inverse().to_cols_array_2d(),
                             prev_view_proj: self.prev_view_proj.to_cols_array_2d(),
                             params: [inv_w, inv_h, 0.9, scale],
-                            dims: [render_width, render_height, 0.0, 0.0],
+                            dims: [
+                                targets.width.max(1) as f32,
+                                targets.height.max(1) as f32,
+                                0.0,
+                                0.0,
+                            ],
                         }),
                     );
                 }

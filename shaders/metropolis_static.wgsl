@@ -1,8 +1,3 @@
-// Metropolis static environment pass (Sponza). PBR with a directional sun and
-// hemispherical ambient, sampling a per-material base-color texture array by
-// the material index carried on each vertex. Emission is added for the
-// cyberpunk look. Normal/metallic-roughness maps arrive in a later phase.
-
 struct FrameUniforms {
     view_projection: mat4x4<f32>,
     sun_view_projection: mat4x4<f32>,
@@ -144,7 +139,7 @@ fn frag_cluster(frag_xy: vec2<f32>, world_pos: vec3<f32>) -> u32 {
 fn sample_shadow(world_pos: vec3<f32>, n_dot_l: f32) -> f32 {
     let light_clip = frame.sun_view_projection * vec4<f32>(world_pos, 1.0);
     let ndc = light_clip.xyz / light_clip.w;
-    if ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z > 1.0 {
+    if ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0 {
         return 1.0;
     }
     let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
@@ -192,8 +187,11 @@ fn spot_shadow(world_pos: vec3<f32>, slot: f32) -> f32 {
     let base = tile.xy + uv * tile.zw;
     let texel = 1.0 / f32(textureDimensions(spot_atlas).x);
     let compare = ndc.z - 0.0015;
-    let lo = tile.xy;
-    let hi = tile.xy + tile.zw - vec2<f32>(texel);
+    // Inset both edges by half a texel: the comparison sampler's bilinear
+    // footprint spans half a texel each way, so clamping to the raw tile
+    // edge still blended depth from the neighbouring spot's tile.
+    let lo = tile.xy + vec2<f32>(texel * 0.5);
+    let hi = tile.xy + tile.zw - vec2<f32>(texel * 0.5);
     var sum = 0.0;
     for (var y = -1; y <= 1; y = y + 1) {
         for (var x = -1; x <= 1; x = x + 1) {

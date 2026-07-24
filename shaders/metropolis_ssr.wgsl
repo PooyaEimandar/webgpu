@@ -1,11 +1,3 @@
-// Metropolis screen-space reflections.
-//
-// A fullscreen pass that reconstructs view-space position and normals from the
-// depth buffer (so no G-buffer / MRT is needed), reflects the view ray, and
-// marches it against the depth buffer. On a hit it samples the lit HDR colour.
-// Reflections fade out at screen edges, with distance, and at grazing angles,
-// and are weighted toward up-facing surfaces (the wet-floor look).
-
 struct SsrParams {
     projection: mat4x4<f32>,
     inv_projection: mat4x4<f32>,

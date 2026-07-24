@@ -1,12 +1,3 @@
-//! Static environment GPU resources for metropolis.
-//!
-//! The ReSTIR asset loader already decodes Sponza into a triangle soup plus
-//! per-material texture arrays (for its BVH ray tracer). Rather than write a
-//! second glTF mesh loader, phase 1 expands that soup into a rasterizable
-//! vertex buffer and reuses the material/texture arrays verbatim. A later phase
-//! can swap in proper indexed, material-batched meshes if the ~2x vertex
-//! memory becomes a concern.
-
 use bytemuck::{Pod, Zeroable};
 use sib::render::{RenderError, RenderResult, buffer, glam, texture, wgpu};
 

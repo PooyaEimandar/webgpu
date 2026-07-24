@@ -1,8 +1,3 @@
-// Metropolis GPU particle simulation. One thread per particle integrates snow,
-// rain, and fire entirely on the GPU (no CPU cost), respawning dead/out-of-
-// bounds particles. Particles are grouped by kind in the buffer: [0,snow) snow,
-// [snow, snow+rain) rain, the rest fire.
-
 struct Particle {
     pos_size: vec4<f32>,  // xyz position, w size
     vel_life: vec4<f32>,  // xyz velocity, w remaining life (s)

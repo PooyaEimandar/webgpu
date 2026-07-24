@@ -1,13 +1,3 @@
-// Metropolis irradiance probe volume (DDGI-lite bake).
-//
-// One thread per probe. Each probe gathers the sun plus every punctual light in
-// range and projects them into spherical harmonics (L1), which the lit passes
-// then evaluate along the surface normal and trilinearly interpolate between
-// probes. That gives indirect light that varies through the scene and picks up
-// the colour of nearby fixtures, instead of one flat hemispherical constant.
-//
-// Coefficients are stored as 4 vec4 per probe: sh0..sh3 (rgb used).
-
 struct GpuLight {
     position_range: vec4<f32>,
     color_type: vec4<f32>,

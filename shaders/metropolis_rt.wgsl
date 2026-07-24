@@ -1,11 +1,3 @@
-// Metropolis ultra-tier ray-traced reflections.
-//
-// Replaces the screen-space march with real rays against the Sponza BVH (the
-// same acceleration structure the ReSTIR examples use), so reflections include
-// geometry that is off-screen or hidden behind the camera — exactly what SSR
-// cannot do. Position and normal still come from the depth buffer, so no
-// G-buffer is needed; only the reflection ray itself is traced.
-
 struct Triangle {
     p0: vec4<f32>,
     p1: vec4<f32>,
@@ -131,7 +123,7 @@ fn trace(origin: vec3<f32>, dir: vec3<f32>, max_t: f32) -> Hit {
     }
     let inv_dir = 1.0 / dir;
 
-    var stack: array<u32, 32>;
+    var stack: array<u32, 128>;
     var sp = 0;
     stack[0] = 0u;
     sp = 1;
@@ -155,7 +147,7 @@ fn trace(origin: vec3<f32>, dir: vec3<f32>, max_t: f32) -> Hit {
             continue;
         }
         // Interior: push both children (bounded by the stack size).
-        if sp < 30 {
+        if sp < 126 {
             if node.first < node_count {
                 stack[sp] = node.first;
                 sp = sp + 1;

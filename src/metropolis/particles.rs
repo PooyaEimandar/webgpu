@@ -1,21 +1,14 @@
-//! GPU particle system for metropolis: snow, rain, and fire.
-//!
-//! Everything runs on the GPU — a compute pass integrates and respawns every
-//! particle each frame (no CPU cost, so it doesn't move the frame rate), and a
-//! billboard pass expands each particle into a camera-facing quad. Particles are
-//! grouped by kind in one buffer so each group can be drawn with its own blend
-//! (alpha for snow/rain, additive for fire) and toggled independently.
-
 use bytemuck::{Pod, Zeroable};
 use sib::render::{RenderContext, buffer, glam, shader, texture, wgpu};
 
 const SNOW_COUNT: u32 = 6000;
 const RAIN_COUNT: u32 = 5000;
-// Four small eye flames need far fewer particles than four braziers did. Too
-// many additive sprites stacked on one small quad just clips to solid white and
-// the flame shape disappears.
 const FIRE_COUNT: u32 = 400;
 const TOTAL: u32 = SNOW_COUNT + RAIN_COUNT + FIRE_COUNT;
+
+const LION_X_FRAC: f32 = 0.357;
+const EYE_HEIGHT_FRAC: f32 = 0.127;
+const EYE_GAP_FRAC: f32 = 0.009;
 
 const SIM_SHADER: &str = include_str!("../../shaders/metropolis_particle_sim.wgsl");
 const DRAW_SHADER: &str = include_str!("../../shaders/metropolis_particle.wgsl");
@@ -211,18 +204,9 @@ impl ParticleSystem {
         let half = self.extent * 0.5;
         let ceiling_lo = self.floor + self.extent.y * 0.9;
         let ceiling_hi = self.floor + self.extent.y * 1.4;
-        // Four small flames, one per eye of the two stone lion reliefs on the
-        // short walls at either end of the nave. The fractions below are
-        // measured from the lion primitives in sponza.gltf (material 4), which
-        // are thin plates facing down the nave: the ground-level pair spans
-        // y 40.8..306.3 and z -160.5..88.6, with front faces at x = +1277.0 and
-        // x = -1405.4. Expressed against the scene bounds so they survive any
-        // scale applied at load: eyes ~14.5% of the height above the floor,
-        // lions ~35.7% of the length either side of centre, eyes ~1.5% of the
-        // width either side of the lion's midline.
-        let eye_height = self.floor + self.extent.y * 0.127;
-        let lion_x = self.extent.x * 0.357;
-        let eye_gap = self.extent.z * 0.009;
+        let eye_height = self.floor + self.extent.y * EYE_HEIGHT_FRAC;
+        let lion_x = self.extent.x * LION_X_FRAC;
+        let eye_gap = self.extent.z * EYE_GAP_FRAC;
         let e = |ax: f32, lz: f32| {
             [
                 self.center.x + ax * lion_x,
@@ -390,15 +374,16 @@ fn initial_particles(center: glam::Vec3, floor: f32, extent: glam::Vec3) -> Vec<
         let z = center.z + (next(&mut rng) - 0.5) * extent.z;
         let p = if i < SNOW_COUNT {
             let y = floor + next(&mut rng) * extent.y * 1.4;
+            let life = 6.0 + next(&mut rng) * 4.0;
             Particle {
                 pos_size: [x, y, z, 0.05 + next(&mut rng) * 0.05],
                 vel_life: [
                     0.0,
                     -(0.7 + next(&mut rng) * 0.6),
                     0.0,
-                    next(&mut rng) * 8.0,
+                    next(&mut rng) * life,
                 ],
-                kind_life: [0.0, 8.0, 0.0, 0.0],
+                kind_life: [0.0, life, 0.0, 0.0],
             }
         } else if i < SNOW_COUNT + RAIN_COUNT {
             let y = floor + next(&mut rng) * extent.y * 1.4;
@@ -413,22 +398,24 @@ fn initial_particles(center: glam::Vec3, floor: f32, extent: glam::Vec3) -> Vec<
                 kind_life: [1.0, 4.0, 0.0, 0.0],
             }
         } else {
-            // Seed on the lion eyes too, so frame 0 already looks right (see
-            // the matching fractions in prepare()).
-            let ex = center.x + [(-0.357f32), 0.357, -0.357, 0.357][(i % 4) as usize] * extent.x;
-            let ez = center.z + [(-0.009f32), -0.009, 0.009, 0.009][(i % 4) as usize] * extent.z;
-            let life = 0.5 + next(&mut rng) * 0.5;
+            let ex = center.x
+                + [(-LION_X_FRAC), LION_X_FRAC, -LION_X_FRAC, LION_X_FRAC][(i % 4) as usize]
+                    * extent.x;
+            let ez = center.z
+                + [(-EYE_GAP_FRAC), -EYE_GAP_FRAC, EYE_GAP_FRAC, EYE_GAP_FRAC][(i % 4) as usize]
+                    * extent.z;
+            let life = 0.3 + next(&mut rng) * 0.25;
             Particle {
                 pos_size: [
                     ex,
-                    floor + extent.y * 0.127,
+                    floor + extent.y * EYE_HEIGHT_FRAC,
                     ez,
-                    0.05 + next(&mut rng) * 0.04,
+                    0.05 + next(&mut rng) * 0.03,
                 ],
                 vel_life: [
-                    (next(&mut rng) - 0.5) * 0.12,
-                    0.5 + next(&mut rng) * 0.5,
-                    (next(&mut rng) - 0.5) * 0.12,
+                    (next(&mut rng) - 0.5) * 0.1,
+                    0.22 + next(&mut rng) * 0.28,
+                    (next(&mut rng) - 0.5) * 0.1,
                     next(&mut rng) * life,
                 ],
                 kind_life: [2.0, life, 0.0, 0.0],

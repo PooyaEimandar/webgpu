@@ -1,14 +1,3 @@
-// Metropolis temporal anti-aliasing.
-//
-// The camera projection is jittered by a sub-pixel offset each frame, so over
-// time the samples cover the pixel. This pass reprojects the previous resolved
-// frame using last frame's view-projection and the current depth, then blends it
-// with the current frame. History is clamped to the neighbourhood colour range
-// so movement produces a little softness instead of long ghost trails.
-//
-// Reprojection uses depth only (no motion-vector buffer), so it is exact for
-// static geometry; moving characters rely on the neighbourhood clamp.
-
 struct TaaParams {
     inv_view_proj: mat4x4<f32>,
     prev_view_proj: mat4x4<f32>,

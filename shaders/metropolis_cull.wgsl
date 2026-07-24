@@ -1,12 +1,3 @@
-// Metropolis GPU frustum culling.
-//
-// One thread per crowd instance tests the instance's bounding sphere against
-// the six camera frustum planes. Survivors are compacted into a `visible`
-// buffer via an atomic append, and the count is written straight into an
-// indirect draw-args buffer so the forward pass issues a single
-// draw_indexed_indirect with exactly the visible instances — no CPU readback,
-// no per-instance draw calls.
-
 struct Instance {
     position_scale: vec4<f32>,
     rotation: vec4<f32>,

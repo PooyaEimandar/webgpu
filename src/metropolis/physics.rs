@@ -1,20 +1,3 @@
-//! Rapier-backed crowd physics for metropolis.
-//!
-//! Sponza becomes one static triangle-mesh collider; each Jax character is a
-//! kinematic capsule steered by Rapier's `KinematicCharacterController`. The
-//! controller sweeps the capsule against the environment every frame so the
-//! crowd walks the atrium, slides along columns and walls, and stays grounded
-//! under gravity. Characters wander with a small per-agent pseudo-random turn
-//! and steer away when a sweep reports they are blocked.
-//!
-//! Placement is authored in *feet* space (the visual model's lowest point sits
-//! on the floor). This module converts between capsule-center space (what
-//! Rapier tracks) and the instance transform the forward shader consumes.
-//!
-//! Rapier 0.34 uses glam math: `Vector`/`Point` are `glam::Vec3`, poses are
-//! `Pose`, and scene queries run through a lightweight `QueryPipeline` view
-//! built from the broad-phase BVH each frame rather than a persistent object.
-
 use rapier3d::control::{CharacterLength, KinematicCharacterController};
 use rapier3d::math::{Pose, Vector};
 use rapier3d::parry::query::DefaultQueryDispatcher;
@@ -35,8 +18,6 @@ struct Character {
 
 impl Character {
     fn next_u32(&mut self) -> u32 {
-        // Numerical Recipes LCG — deterministic, no external rng dependency and
-        // no reliance on wall-clock entropy (unavailable on some targets).
         self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.rng
     }
@@ -46,6 +27,8 @@ impl Character {
         (self.next_u32() >> 8) as f32 / (1u32 << 24) as f32
     }
 }
+
+pub const INTERIOR_FRACTION: f32 = 0.55;
 
 pub struct PhysicsWorld {
     bodies: RigidBodySet,
@@ -74,20 +57,11 @@ pub struct PhysicsWorld {
     /// Walkable rectangle the crowd is steered to stay inside (x, z).
     interior_min: [f32; 2],
     interior_max: [f32; 2],
-    /// Lowest a capsule centre may sink to — keeps feet on the flat floor even
-    /// on the first frames before the broad-phase BVH exists.
     min_center_y: f32,
-    /// Distance from the nave boundary at which characters begin curving back
-    /// toward the centre, so they never pile up and freeze against a wall.
     steer_margin: f32,
 }
 
 impl PhysicsWorld {
-    /// Build the world from Sponza's triangle soup and the authored crowd
-    /// placement (`instances`, whose `position_scale.xz` and `rotation.x` seed
-    /// each capsule). `floor_y` is where feet rest, `char_height` the character
-    /// world height, `model_min_y` the model-space lowest vertex, and `scale`
-    /// the uniform scale the shader applies.
     pub fn new(
         triangles: &[GpuTriangle],
         instances: &[InstanceData],
@@ -121,9 +95,7 @@ impl PhysicsWorld {
         }
         let center_xz = [(min_xz[0] + max_xz[0]) * 0.5, (min_xz[1] + max_xz[1]) * 0.5];
         let half_xz = [(max_xz[0] - min_xz[0]) * 0.5, (max_xz[1] - min_xz[1]) * 0.5];
-        // Central walkable rectangle: well inside the footprint so the crowd
-        // roams the nave rather than the aisles or the outer walls.
-        let interior = 0.55;
+        let interior = INTERIOR_FRACTION;
         let interior_min = [
             center_xz[0] - half_xz[0] * interior,
             center_xz[1] - half_xz[1] * interior,
@@ -217,16 +189,12 @@ impl PhysicsWorld {
 
     /// Advance the crowd by `dt` seconds.
     pub fn step(&mut self, dt: f32) {
-        let dt = dt.clamp(0.0, 1.0 / 20.0);
+        let dt = dt.clamp(0.0, 1.0 / 15.0);
         if dt <= 0.0 {
             return;
         }
         self.integration.dt = dt;
 
-        // Intent update: occasional wander turns, plus a gentle pull back toward
-        // the centre as a character approaches the nave boundary. Steering early
-        // (rather than only clamping at the wall) stops the crowd from piling up
-        // and freezing against the perimeter.
         for ch in self.characters.iter_mut() {
             ch.wander_timer -= dt;
             if ch.wander_timer <= 0.0 {
@@ -295,8 +263,6 @@ impl PhysicsWorld {
                 ch.yaw = to_center_x.atan2(to_center_z) + (ch.rng_unit() - 0.5) * 0.8;
                 ch.wander_timer = ch.wander_timer.max(1.5);
             }
-            // Never let feet punch through the flat floor (guards the first
-            // frames before the ground collider is in the broad-phase BVH).
             let ty = target.y.max(self.min_center_y);
             if let Some(body) = self.bodies.get_mut(handle) {
                 body.set_next_kinematic_translation(Vector::new(tx, ty, tz));

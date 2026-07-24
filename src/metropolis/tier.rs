@@ -1,12 +1,3 @@
-//! Runtime quality tiering for the metropolis render core.
-//!
-//! The same engine must run on a phone browser and a desktop discrete GPU, so
-//! nothing about the pipeline is hard-coded: an adapter probe picks a starting
-//! [`QualityTier`], the tier expands into a [`TierConfig`] of concrete knobs
-//! every pass reads, and a [`DynamicResolution`] controller then nudges the
-//! internal render scale each frame to hold a frame-time target. A later phase
-//! adds a startup micro-benchmark that can promote/demote the starting tier.
-
 use sib::render::wgpu;
 
 /// Coarse capability bucket chosen at startup and adjustable at runtime.
@@ -243,12 +234,7 @@ pub struct DynamicResolution {
     min_scale: f32,
     max_scale: f32,
     target_ms: f32,
-    /// Smoothed frame time so a single spike does not swing resolution.
     smoothed_ms: f32,
-    /// Frames to ignore at startup: shader compilation and first-use texture
-    /// uploads produce multi-hundred-ms frames that would otherwise crater the
-    /// resolution and then recover only slowly. Hold the scale until the app
-    /// reaches steady state.
     warmup_frames: u32,
 }
 
@@ -278,21 +264,16 @@ impl DynamicResolution {
     /// Feed the last frame's GPU/CPU time; returns the (possibly nudged) scale.
     /// Moves in small steps with a deadband so it settles instead of hunting.
     pub fn update(&mut self, frame_ms: f32) -> f32 {
-        // Hold the starting scale through startup; those frames are dominated by
-        // one-time compilation/uploads, not pixel cost, so adapting to them only
-        // hurts.
         if self.warmup_frames > 0 {
             self.warmup_frames -= 1;
             self.smoothed_ms = self.target_ms;
             return self.scale;
         }
-        // Exponential moving average; clamp the input so a hitch (asset upload,
-        // GC) does not crater the resolution.
         let clamped = frame_ms.clamp(0.1, 100.0);
         self.smoothed_ms += (clamped - self.smoothed_ms) * 0.1;
 
         let high = self.target_ms * 1.1;
-        let low = self.target_ms * 0.85;
+        let low = self.target_ms * 1.02;
         if self.smoothed_ms > high {
             self.scale = (self.scale - 0.02).max(self.min_scale);
         } else if self.smoothed_ms < low {
@@ -306,21 +287,20 @@ impl DynamicResolution {
     }
 }
 
-/// Runtime tier auto-tuner.
-///
-/// [`DynamicResolution`] is the fast, fine-grained knob; this is the coarse one.
-/// It only re-tiers once the resolution scaler has run out of room — over budget
-/// at the minimum scale means demote, comfortably under budget at full scale
-/// means promote — so the two controllers never fight each other. A cooldown
-/// after every decision prevents oscillation.
 pub struct AutoTuner {
     cooldown: f32,
+    probation: Option<(QualityTier, f32)>,
+    blocked: Option<(QualityTier, f32)>,
 }
 
 impl AutoTuner {
     /// Start with a grace period so startup hitches never trigger a re-tier.
     pub fn new() -> Self {
-        Self { cooldown: 5.0 }
+        Self {
+            cooldown: 5.0,
+            probation: None,
+            blocked: None,
+        }
     }
 
     /// Returns the tier to switch to, if a change is warranted this frame.
@@ -332,27 +312,48 @@ impl AutoTuner {
         scale: f32,
         config: &TierConfig,
     ) -> Option<QualityTier> {
+        if let Some((tier, t)) = self.blocked.take() {
+            let t = t - dt;
+            if t > 0.0 {
+                self.blocked = Some((tier, t));
+            }
+        }
+        if let Some((fallback, time_left)) = self.probation.take() {
+            if smoothed_ms > target_ms * 1.15 || scale < config.render_scale * 0.92 {
+                self.blocked = Some((config.tier, 120.0));
+                self.cooldown = 6.0;
+                return Some(fallback);
+            }
+            let time_left = time_left - dt;
+            if time_left > 0.0 {
+                self.probation = Some((fallback, time_left));
+            }
+        }
         self.cooldown -= dt;
         if self.cooldown > 0.0 {
             return None;
         }
         self.cooldown = 1.0;
 
-        // Over budget with no resolution headroom left → drop a tier.
         if smoothed_ms > target_ms * 1.35 && scale <= config.min_render_scale + 0.01 {
             let next = config.tier.next_down();
             if next != config.tier {
+                self.blocked = Some((config.tier, 120.0));
                 self.cooldown = 6.0;
                 return Some(next);
             }
         }
-        // Well under budget at full resolution → we can afford more.
-        if smoothed_ms < target_ms * 0.65 && scale >= config.render_scale - 0.01 {
-            let next = config.tier.next_up();
-            if next != config.tier {
-                self.cooldown = 6.0;
-                return Some(next);
-            }
+        let next = config.tier.next_up();
+        let next_blocked = matches!(self.blocked, Some((t, _)) if t == next);
+        if next != config.tier
+            && !next_blocked
+            && self.probation.is_none()
+            && smoothed_ms <= target_ms * 1.02
+            && scale >= config.render_scale - 0.01
+        {
+            self.probation = Some((config.tier, 4.0));
+            self.cooldown = 6.0;
+            return Some(next);
         }
         None
     }

@@ -1,8 +1,3 @@
-// Metropolis particle billboards. Each particle expands into a camera-facing
-// quad (2 triangles, 6 verts) in the vertex shader, read from the storage
-// buffer by instance index. Snow = soft round dots, rain = tall thin streaks,
-// fire = additive glow that reddens with age.
-
 struct Particle {
     pos_size: vec4<f32>,
     vel_life: vec4<f32>,

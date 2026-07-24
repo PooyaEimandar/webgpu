@@ -1,7 +1,3 @@
-// Metropolis present pass: upscale the dynamic-resolution HDR target to the
-// swapchain and tonemap. The render target is smaller than the window whenever
-// dynamic resolution has scaled down, so a bilinear sampler upscales it.
-
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -39,7 +35,13 @@ fn upsample_reflection(uv: vec2<f32>) -> vec3<f32> {
     for (var y = -1; y <= 1; y = y + 1) {
         for (var x = -1; x <= 1; x = x + 1) {
             let offset = vec2<f32>(f32(x), f32(y)) * step;
-            let tap_uv = uv + offset;
+            // Keep taps inside the rendered sub-rect: past it the SSR target
+            // holds cleared black, dimming reflections in the edge band.
+            let tap_uv = clamp(
+                uv + offset,
+                vec2<f32>(0.0),
+                present.uv_scale.xy - 0.5 / present.dims.xy,
+            );
             let tap_pixel = clamp(vec2<i32>(tap_uv * dims), vec2<i32>(0), size - vec2<i32>(1));
             let tap_depth = textureLoad(depth_texture, tap_pixel, 0);
             // Falls off sharply, so taps across an edge contribute ~nothing.
@@ -76,8 +78,13 @@ fn aces_film(color: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample only the rendered sub-rectangle (dynamic resolution renders into
-    // the top-left of a full-size target).
-    let uv = input.uv * present.uv_scale.xy;
+    // the top-left of a full-size target). Clamped half a texel inside the
+    // sub-rect edge: at input.uv = 1 the raw product lands exactly ON the
+    // boundary, where bilinear filtering blends the last rendered column/row
+    // 50/50 with the cleared texels outside it — a dark seam along the right
+    // and bottom of the image whenever dynamic resolution is below 1.
+    let max_uv = present.uv_scale.xy - 0.5 / present.dims.xy;
+    let uv = min(input.uv * present.uv_scale.xy, max_uv);
     // Lit colour plus reflections (half-res, upsampled depth-aware).
     let reflection = upsample_reflection(uv);
     // Bloom targets cover the whole frame, so they sample at plain uv.

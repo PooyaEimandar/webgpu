@@ -1,10 +1,3 @@
-// Metropolis FXAA resolve.
-//
-// The present pass now tonemaps into an LDR texture; this pass takes that to the
-// swapchain, optionally applying FXAA. Anti-aliasing has to happen after
-// tonemapping — luma-based edge detection on raw HDR would key off the wrong
-// contrast. When AA is disabled by the tier this degenerates to a plain blit.
-
 struct FxaaParams {
     // xy = 1/texture size, z = enabled (0/1), w = edge threshold
     params: vec4<f32>,

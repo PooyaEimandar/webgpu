@@ -1,11 +1,3 @@
-// Metropolis bloom: a bright-pass followed by a separable Gaussian blur.
-//
-// The bright pass reads the lit HDR target (remapping into the dynamic-
-// resolution sub-rect) and keeps only energy above a threshold. The blur runs
-// twice at half resolution — once horizontally, once vertically — and the
-// present pass adds the result back. Bloom textures always represent the whole
-// logical frame, so the blur itself never has to think about dynamic res.
-
 struct BloomParams {
     // xy = source texel size, z = threshold, w = intensity
     params: vec4<f32>,

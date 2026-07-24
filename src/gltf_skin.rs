@@ -5,9 +5,6 @@ use gltf::animation::util::ReadOutputs;
 use sib::render::{RenderError, RenderResult, glam, mesh, texture, wgpu};
 
 pub const MAX_JOINTS: usize = 128;
-
-/// Deep enough for any real asset; a malformed file whose node graph forms a
-/// cycle would otherwise recurse until the stack overflows.
 const MAX_NODE_DEPTH: u32 = 256;
 
 #[repr(C)]
