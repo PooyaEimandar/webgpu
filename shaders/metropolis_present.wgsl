@@ -6,8 +6,10 @@ struct VertexOutput {
 struct PresentUniforms {
     // xy = UV scale into the HDR target, z = exposure, w = bloom intensity.
     uv_scale: vec4<f32>,
-    // xy = full target dimensions.
+    // xy = full target dimensions, z = 1 when volumetric fog is enabled.
     dims: vec4<f32>,
+    // x = camera near, y = camera far, z = volume near, w = volume far.
+    fog: vec4<f32>,
 }
 
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;
@@ -16,12 +18,31 @@ struct PresentUniforms {
 @group(0) @binding(3) var ssr_texture: texture_2d<f32>;
 @group(0) @binding(4) var bloom_texture: texture_2d<f32>;
 @group(0) @binding(5) var depth_texture: texture_depth_2d;
+@group(0) @binding(6) var volume_texture: texture_3d<f32>;
+
+// Fetch the integrated fog in front of this pixel.
+fn sample_fog(display_uv: vec2<f32>, depth_pixel: vec2<i32>) -> vec4<f32> {
+    let device_depth = textureLoad(depth_texture, depth_pixel, 0);
+    let near = present.fog.x;
+    let far = present.fog.y;
+    // Linear view depth from a [0,1] reverse-of-nothing perspective depth.
+    let linear_depth = far * near / max(far - (far - near) * device_depth, 1e-6);
+    let volume_near = present.fog.z;
+    let volume_far = present.fog.w;
+    let slice = clamp(
+        log(max(linear_depth, volume_near) / volume_near) / log(volume_far / volume_near),
+        0.0,
+        1.0,
+    );
+    return textureSampleLevel(
+        volume_texture,
+        hdr_sampler,
+        vec3<f32>(display_uv, slice),
+        0.0,
+    );
+}
 
 // Depth-aware upsample of the half-resolution reflection buffer.
-//
-// A plain bilinear stretch blends reflection across depth discontinuities,
-// which smears it over silhouettes. Weighting each tap by how well its depth
-// matches this pixel keeps the reflection on its own surface.
 fn upsample_reflection(uv: vec2<f32>) -> vec3<f32> {
     let dims = present.dims.xy;
     let size = vec2<i32>(dims);
@@ -35,8 +56,6 @@ fn upsample_reflection(uv: vec2<f32>) -> vec3<f32> {
     for (var y = -1; y <= 1; y = y + 1) {
         for (var x = -1; x <= 1; x = x + 1) {
             let offset = vec2<f32>(f32(x), f32(y)) * step;
-            // Keep taps inside the rendered sub-rect: past it the SSR target
-            // holds cleared black, dimming reflections in the edge band.
             let tap_uv = clamp(
                 uv + offset,
                 vec2<f32>(0.0),
@@ -44,7 +63,7 @@ fn upsample_reflection(uv: vec2<f32>) -> vec3<f32> {
             );
             let tap_pixel = clamp(vec2<i32>(tap_uv * dims), vec2<i32>(0), size - vec2<i32>(1));
             let tap_depth = textureLoad(depth_texture, tap_pixel, 0);
-            // Falls off sharply, so taps across an edge contribute ~nothing.
+            
             let w = exp(-abs(tap_depth - center_depth) * 800.0);
             sum += textureSampleLevel(ssr_texture, hdr_sampler, tap_uv, 0.0).rgb * w;
             weight_sum += w;
@@ -77,12 +96,6 @@ fn aces_film(color: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample only the rendered sub-rectangle (dynamic resolution renders into
-    // the top-left of a full-size target). Clamped half a texel inside the
-    // sub-rect edge: at input.uv = 1 the raw product lands exactly ON the
-    // boundary, where bilinear filtering blends the last rendered column/row
-    // 50/50 with the cleared texels outside it — a dark seam along the right
-    // and bottom of the image whenever dynamic resolution is below 1.
     let max_uv = present.uv_scale.xy - 0.5 / present.dims.xy;
     let uv = min(input.uv * present.uv_scale.xy, max_uv);
     // Lit colour plus reflections (half-res, upsampled depth-aware).
@@ -90,9 +103,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Bloom targets cover the whole frame, so they sample at plain uv.
     let bloom = textureSampleLevel(bloom_texture, hdr_sampler, input.uv, 0.0).rgb
         * present.uv_scale.w;
-    let hdr = textureSampleLevel(hdr_texture, hdr_sampler, uv, 0.0).rgb + reflection + bloom;
-    // Exposure (from the controls) tames the near-overexposed scene so shadows
-    // and midtones read; default 0.55.
+    var hdr = textureSampleLevel(hdr_texture, hdr_sampler, uv, 0.0).rgb + reflection + bloom;
+    if present.dims.z > 0.5 {
+        let pixel = clamp(
+            vec2<i32>(uv * present.dims.xy),
+            vec2<i32>(0),
+            vec2<i32>(present.dims.xy) - vec2<i32>(1),
+        );
+        let fog = sample_fog(input.uv, pixel);
+        hdr = hdr * fog.a + fog.rgb;
+    }
     let exposure = max(present.uv_scale.z, 0.01);
     let mapped = aces_film(max(hdr, vec3<f32>(0.0)) * exposure);
     // Linear -> sRGB (the swapchain is a non-sRGB view for portability).

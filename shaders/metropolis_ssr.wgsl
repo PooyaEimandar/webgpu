@@ -69,10 +69,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let xm = view_from_uv(uv - vec2<f32>(inv.x, 0.0), load_depth(pixel - vec2<i32>(2, 0), size));
     let yp = view_from_uv(uv + vec2<f32>(0.0, inv.y), load_depth(pixel + vec2<i32>(0, 2), size));
     let ym = view_from_uv(uv - vec2<f32>(0.0, inv.y), load_depth(pixel - vec2<i32>(0, 2), size));
-    // Reject on curvature, not slope: a floor seen at a grazing angle has a
-    // huge depth gradient yet is perfectly continuous, while a silhouette
-    // spikes the second difference. Slope-based rejection got both wrong.
-    let tol = abs(origin.z) * 0.03 + 0.05;
+    let tol = min(abs(origin.z) * 0.03 + 0.05, 0.25);
     if abs(xp.z + xm.z - 2.0 * origin.z) > tol || abs(yp.z + ym.z - 2.0 * origin.z) > tol {
         return vec4<f32>(0.0);
     }

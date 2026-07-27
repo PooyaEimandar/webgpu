@@ -23,9 +23,23 @@ struct Material {
     texture_settings: vec4<f32>,
 }
 
+struct GpuLight {
+    position_range: vec4<f32>, // xyz world position, w range
+    color_type: vec4<f32>,     // rgb colour×intensity, w type (0 point, 1 spot)
+    direction: vec4<f32>,      // xyz spot direction, w cos(outer)
+    cone: vec4<f32>,           // x cos(inner), y atlas slot (-1 = none)
+}
+
+// Per-spot shadow matrices and their atlas tiles (xy = offset, zw = scale).
+struct SpotShadows {
+    matrices: array<mat4x4<f32>, 4>,
+    tiles: array<vec4<f32>, 4>,
+}
+
 struct RtParams {
     inv_projection: mat4x4<f32>,
     inv_view: mat4x4<f32>,
+    sun_view_projection: mat4x4<f32>,
     // x = RT target width, y = RT target height, z = strength, w = max ray distance
     params: vec4<f32>,
     // xyz = sun direction (toward ground), w = sun intensity
@@ -34,6 +48,10 @@ struct RtParams {
     ambient: vec4<f32>,
     // x = node count, y = triangle count, zw = full-res depth dimensions
     counts: vec4<f32>,
+    // x = light count, y = fog density, z = fog height falloff, w = fog floor y
+    fog: vec4<f32>,
+    // rgb = fog in-scatter tint, w = fog ambient strength
+    fog_color: vec4<f32>,
 }
 
 @group(0) @binding(0) var depth_texture: texture_depth_2d;
@@ -43,6 +61,51 @@ struct RtParams {
 @group(0) @binding(4) var base_color_textures: texture_2d_array<f32>;
 @group(0) @binding(5) var base_color_sampler: sampler;
 @group(0) @binding(6) var<uniform> rt: RtParams;
+@group(0) @binding(7) var<storage, read> lights: array<GpuLight>;
+@group(0) @binding(8) var shadow_map: texture_depth_2d;
+@group(0) @binding(9) var shadow_sampler: sampler_comparison;
+@group(0) @binding(10) var spot_atlas: texture_depth_2d;
+@group(0) @binding(11) var<uniform> spot_shadows: SpotShadows;
+
+fn range_attenuation(dist: f32, range: f32) -> f32 {
+    let window = clamp(1.0 - pow(dist / max(range, 1e-3), 4.0), 0.0, 1.0);
+    return window * window / (dist * dist + 0.01);
+}
+
+fn sun_visibility(world_position: vec3<f32>) -> f32 {
+    let clip = rt.sun_view_projection * vec4<f32>(world_position, 1.0);
+    if clip.w <= 0.0 {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    if ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0 {
+        return 1.0;
+    }
+    let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
+    return textureSampleCompareLevel(shadow_map, shadow_sampler, uv, ndc.z - 0.0015);
+}
+
+fn spot_visibility(world_position: vec3<f32>, slot: f32) -> f32 {
+    if slot < 0.0 {
+        return 1.0;
+    }
+    let idx = i32(slot);
+    let clip = spot_shadows.matrices[idx] * vec4<f32>(world_position, 1.0);
+    if clip.w <= 0.0 {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    if ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0 {
+        return 1.0;
+    }
+    let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
+    let tile = spot_shadows.tiles[idx];
+    let texel = 1.0 / f32(textureDimensions(spot_atlas).x);
+    let lo = tile.xy + vec2<f32>(texel * 0.5);
+    let hi = tile.xy + tile.zw - vec2<f32>(texel * 0.5);
+    let atlas_uv = clamp(tile.xy + uv * tile.zw, lo, hi);
+    return textureSampleCompareLevel(spot_atlas, shadow_sampler, atlas_uv, ndc.z - 0.0015);
+}
 
 const LEAF_BIT: u32 = 0x80000000u;
 
@@ -187,7 +250,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let yp = view_from_uv(uv + vec2<f32>(0.0, inv.y), load_depth(pixel + vec2<i32>(0, 2), size));
     let ym = view_from_uv(uv - vec2<f32>(0.0, inv.y), load_depth(pixel - vec2<i32>(0, 2), size));
     // Curvature, not slope — see the SSR shader for why.
-    let tol = abs(origin_v.z) * 0.03 + 0.05;
+    let tol = min(abs(origin_v.z) * 0.03 + 0.05, 0.25);
     if abs(xp.z + xm.z - 2.0 * origin_v.z) > tol || abs(yp.z + ym.z - 2.0 * origin_v.z) > tol {
         return vec4<f32>(0.0);
     }
@@ -239,11 +302,50 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSampleLevel(base_color_textures, base_color_sampler, tex_uv, layer, 0.0);
     let albedo = texel.rgb * material.base_color.rgb;
 
+    let hit_position = world_origin + world_dir * hit.t;
+
+    // Sun, now shadowed: an unshadowed sun made reflections of shadowed
+    // geometry read brighter than the geometry itself.
     let sun_l = normalize(-rt.sun_direction.xyz);
     let n_dot_l = max(dot(n, sun_l), 0.0);
-    let lit = albedo
-        * (rt.ambient.rgb + rt.sun_color.rgb * rt.sun_direction.w * n_dot_l * 0.3)
-        + material.emission_roughness.rgb;
+    var lit = albedo * rt.ambient.rgb;
+    if n_dot_l > 0.0 {
+        lit += albedo
+            * rt.sun_color.rgb
+            * rt.sun_direction.w
+            * n_dot_l
+            * sun_visibility(hit_position)
+            * 0.3;
+    }
+
+    let light_count = u32(rt.fog.x);
+    for (var i = 0u; i < light_count; i = i + 1u) {
+        let light = lights[i];
+        let to_light = light.position_range.xyz - hit_position;
+        let dist = length(to_light);
+        if dist >= light.position_range.w {
+            continue;
+        }
+        let l = to_light / max(dist, 1e-4);
+        let n_dot_light = max(dot(n, l), 0.0);
+        if n_dot_light <= 0.0 {
+            continue;
+        }
+        var radiance = light.color_type.rgb * range_attenuation(dist, light.position_range.w);
+        if light.color_type.w > 0.5 {
+            radiance *= smoothstep(light.direction.w, light.cone.x, dot(light.direction.xyz, -l));
+            radiance *= spot_visibility(hit_position, light.cone.y);
+        }
+        lit += albedo * radiance * n_dot_light;
+    }
+    lit += material.emission_roughness.rgb;
+
+    if rt.fog.y > 0.0 {
+        let midpoint = (world_origin + hit_position) * 0.5;
+        let density = rt.fog.y * exp(-max(midpoint.y - rt.fog.w, 0.0) * rt.fog.z);
+        let transmittance = exp(-density * hit.t);
+        lit = lit * transmittance + rt.fog_color.rgb * rt.fog_color.w * (1.0 - transmittance);
+    }
 
     // Clamped so a single very bright hit can't become a bloom firefly.
     return vec4<f32>(min(lit, vec3<f32>(8.0)) * weight, weight);

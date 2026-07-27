@@ -34,6 +34,9 @@ const GI_SHADER: &str = include_str!("../../shaders/metropolis_gi.wgsl");
 const RT_SHADER: &str = include_str!("../../shaders/metropolis_rt.wgsl");
 const FXAA_SHADER: &str = include_str!("../../shaders/metropolis_fxaa.wgsl");
 const TAA_SHADER: &str = include_str!("../../shaders/metropolis_taa.wgsl");
+const VOLUME_SHADER: &str = include_str!("../../shaders/metropolis_volumetric.wgsl");
+const VOLUME_INTEGRATE_SHADER: &str =
+    include_str!("../../shaders/metropolis_volumetric_integrate.wgsl");
 
 /// Anti-aliasing mode selectable from the panel.
 const AA_OFF: u32 = 0;
@@ -65,6 +68,16 @@ const CLUSTER_Z: u32 = 24;
 const NUM_CLUSTERS: u32 = CLUSTER_X * CLUSTER_Y * CLUSTER_Z;
 const MAX_PER_CLUSTER: u32 = 64;
 const MAX_LIGHTS: u32 = 128;
+
+// Volumetric fog froxel grid. Deliberately coarse in x/y (the result is
+// low-frequency and gets trilinearly filtered on the way out) and generous in
+// z, where slice count controls how crisply a light shaft's edge reads.
+const VOLUME_X: u32 = 128;
+const VOLUME_Y: u32 = 72;
+const VOLUME_Z: u32 = 64;
+/// Fog is only integrated to here; past it the last slice's value persists, so
+/// the medium saturates with distance instead of ending abruptly.
+const VOLUME_NEAR: f32 = 0.25;
 
 // Local (spot) light shadows: one depth atlas of 2x2 tiles, one slot per spot.
 const SPOT_SHADOW_COUNT: u32 = 4;
@@ -133,6 +146,21 @@ struct Controls {
     snow: bool,
     rain: bool,
     fire: bool,
+    /// Volumetric fog (the participating medium itself).
+    fog: bool,
+    fog_density: f32,
+    /// Exponential density falloff with height above the floor.
+    fog_height_falloff: f32,
+    /// Ambient in-scatter, so fog reads as haze even without shafts.
+    fog_ambient: f32,
+    /// Distance the froxel volume covers; fog saturates past it.
+    fog_range: f32,
+    /// Shadowed in-scattering from the sun and local lights — the visible beams.
+    light_shafts: bool,
+    shaft_intensity: f32,
+    /// Henyey-Greenstein g: forward scattering, how sharply shafts bloom when
+    /// looking toward a light.
+    shaft_anisotropy: f32,
 }
 
 impl Default for Controls {
@@ -166,6 +194,17 @@ impl Default for Controls {
             snow: false,
             rain: false,
             fire: true,
+            fog: true,
+            // Tuned for Sponza's ~30-unit nave: thin enough to see down the
+            // arcade, thick enough that the sun shafts through the clerestory
+            // read without washing the floor out.
+            fog_density: 0.05,
+            fog_height_falloff: 0.22,
+            fog_ambient: 0.5,
+            fog_range: 45.0,
+            light_shafts: true,
+            shaft_intensity: 1.0,
+            shaft_anisotropy: 0.72,
         }
     }
 }
@@ -221,8 +260,35 @@ impl InstanceData {
 struct PresentUniforms {
     // xy = UV scale into the HDR target, z = exposure, w = bloom intensity.
     uv_scale: [f32; 4],
-    // xy = full target dimensions (for the depth-aware reflection upsample).
+    // xy = full target dimensions (for the depth-aware reflection upsample),
+    // z = 1 when volumetric fog should be composited.
     dims: [f32; 4],
+    // x = camera near, y = camera far, z = volume near, w = volume far.
+    fog: [f32; 4],
+}
+
+/// Inputs to both volumetric passes (injection and integration).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct VolumeParams {
+    inv_projection: [[f32; 4]; 4],
+    inv_view: [[f32; 4]; 4],
+    prev_view_projection: [[f32; 4]; 4],
+    sun_view_projection: [[f32; 4]; 4],
+    /// xyz = camera world position, w = per-frame slice jitter.
+    camera_position: [f32; 4],
+    /// xyz = sun travel direction, w = intensity.
+    sun_direction: [f32; 4],
+    /// rgb = sun colour, w = 1 when light shafts are on.
+    sun_color: [f32; 4],
+    /// x = density, y = height falloff, z = floor height, w = anisotropy.
+    fog: [f32; 4],
+    /// rgb = ambient in-scatter tint, w = ambient strength.
+    fog_color: [f32; 4],
+    /// xyz = volume dimensions, w = volume far.
+    dims: [f32; 4],
+    /// x = volume near, y = temporal blend, z = light count, w = shaft gain.
+    misc: [f32; 4],
 }
 
 /// Culling inputs: the camera frustum plus the crowd's bounding-sphere shape.
@@ -287,6 +353,7 @@ struct FxaaParams {
 struct RtParams {
     inv_projection: [[f32; 4]; 4],
     inv_view: [[f32; 4]; 4],
+    sun_view_projection: [[f32; 4]; 4],
     /// x = render width, y = render height, z = strength, w = max ray distance.
     params: [f32; 4],
     /// xyz = sun direction, w = intensity.
@@ -295,6 +362,10 @@ struct RtParams {
     ambient: [f32; 4],
     /// x = BVH node count, y = triangle count, zw = full-res depth dimensions.
     counts: [f32; 4],
+    /// x = light count, y = fog density, z = fog height falloff, w = floor y.
+    fog: [f32; 4],
+    /// rgb = fog in-scatter tint, w = fog ambient strength.
+    fog_color: [f32; 4],
 }
 
 /// Irradiance probe volume parameters (shared by the bake and the lit passes).
@@ -608,6 +679,8 @@ pub struct MetropolisExample {
     cached_sun_view_proj: glam::Mat4,
     shadow_uniform_buffer: Option<wgpu::Buffer>,
     spot_atlas_view: Option<wgpu::TextureView>,
+    /// Kept so the RT bind group (rebuilt on resize) can bind it too.
+    shadow_comparison_sampler: Option<wgpu::Sampler>,
     spot_shadow_buffer: Option<wgpu::Buffer>,
     /// Per-spot culled crowd instances, one contiguous segment per caster.
     spot_instance_buffer: Option<wgpu::Buffer>,
@@ -670,6 +743,16 @@ pub struct MetropolisExample {
     cluster_params_buffer: Option<wgpu::Buffer>,
     cluster_pipeline: Option<wgpu::ComputePipeline>,
     cluster_bind_group: Option<wgpu::BindGroup>,
+    volume_inject_pipeline: Option<wgpu::ComputePipeline>,
+    volume_integrate_pipeline: Option<wgpu::ComputePipeline>,
+    volume_params_buffer: Option<wgpu::Buffer>,
+    /// Scattering volumes, ping-ponged so the injection pass can read last
+    /// frame's result while writing this frame's.
+    volume_inject_bind_groups: Option<[wgpu::BindGroup; 2]>,
+    volume_integrate_bind_groups: Option<[wgpu::BindGroup; 2]>,
+    /// Front-to-back integrated scattering + transmittance, sampled at present.
+    volume_integrated_view: Option<wgpu::TextureView>,
+    volume_parity: bool,
     targets: Option<Targets>,
     overlay: Option<text::TextOverlay>,
     stats_text: Option<text::TextItemId>,
@@ -722,6 +805,7 @@ impl MetropolisExample {
             cached_sun_view_proj: glam::Mat4::ZERO,
             shadow_uniform_buffer: None,
             spot_atlas_view: None,
+            shadow_comparison_sampler: None,
             spot_shadow_buffer: None,
             spot_instance_buffer: None,
             ssr_pipeline: None,
@@ -781,6 +865,13 @@ impl MetropolisExample {
             cluster_params_buffer: None,
             cluster_pipeline: None,
             cluster_bind_group: None,
+            volume_inject_pipeline: None,
+            volume_integrate_pipeline: None,
+            volume_params_buffer: None,
+            volume_inject_bind_groups: None,
+            volume_integrate_bind_groups: None,
+            volume_integrated_view: None,
+            volume_parity: false,
             targets: None,
             overlay: None,
             stats_text: None,
@@ -968,6 +1059,11 @@ impl MetropolisExample {
             .present_uniform_buffer
             .as_ref()
             .ok_or_else(|| RenderError::message("metropolis present uniforms unavailable"))?;
+        // Window-independent (fixed froxel grid), so it survives resizes.
+        let volume_integrated_view = self
+            .volume_integrated_view
+            .as_ref()
+            .ok_or_else(|| RenderError::message("metropolis fog volume unavailable"))?;
         let width = context.surface_config.width.max(1);
         let height = context.surface_config.height.max(1);
         let hdr = context.device.create_texture(&wgpu::TextureDescriptor {
@@ -1061,8 +1157,28 @@ impl MetropolisExample {
             self.rt_triangle_buffer.as_ref(),
             self.rt_uniform_buffer.as_ref(),
             self.gpu_static.as_ref(),
+            (
+                self.light_buffer.as_ref(),
+                self.shadow_view.as_ref(),
+                self.shadow_comparison_sampler.as_ref(),
+                self.spot_atlas_view.as_ref(),
+                self.spot_shadow_buffer.as_ref(),
+            ),
         ) {
-            (Some(layout), Some(bvh), Some(tris), Some(uniform), Some(gpu_static)) => Some(
+            (
+                Some(layout),
+                Some(bvh),
+                Some(tris),
+                Some(uniform),
+                Some(gpu_static),
+                (
+                    Some(lights),
+                    Some(sun_shadow),
+                    Some(shadow_compare),
+                    Some(spot_atlas),
+                    Some(spot_shadows),
+                ),
+            ) => Some(
                 context
                     .device
                     .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1098,6 +1214,26 @@ impl MetropolisExample {
                             wgpu::BindGroupEntry {
                                 binding: 6,
                                 resource: uniform.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: lights.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 8,
+                                resource: wgpu::BindingResource::TextureView(sun_shadow),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 9,
+                                resource: wgpu::BindingResource::Sampler(shadow_compare),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 10,
+                                resource: wgpu::BindingResource::TextureView(spot_atlas),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 11,
+                                resource: spot_shadows.as_entire_binding(),
                             },
                         ],
                     }),
@@ -1354,6 +1490,10 @@ impl MetropolisExample {
                         binding: 5,
                         resource: wgpu::BindingResource::TextureView(&depth.view),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(volume_integrated_view),
+                    },
                 ],
             });
         self.targets = Some(Targets {
@@ -1533,6 +1673,7 @@ impl Example for MetropolisExample {
             &PresentUniforms {
                 uv_scale: [1.0, 1.0, 0.0, 0.0],
                 dims: [1.0, 1.0, 0.0, 0.0],
+                fog: [0.05, 400.0, VOLUME_NEAR, 45.0],
             },
         );
         let light_buffer = buffer::buffer_from_data(
@@ -1781,6 +1922,231 @@ impl Example for MetropolisExample {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // --- Volumetric fog -----------------------------------------------
+        // A view-aligned froxel volume: the injection pass lights each froxel,
+        // the integrate pass marches it front-to-back, and the present pass
+        // composites the result with one trilinear fetch per pixel. Sized
+        // independently of the window, so it survives resizes untouched.
+        let volume_extent = wgpu::Extent3d {
+            width: VOLUME_X,
+            height: VOLUME_Y,
+            depth_or_array_layers: VOLUME_Z,
+        };
+        let make_volume = |label: &'static str| {
+            context
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: volume_extent,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D3,
+                    format: HDR_FORMAT,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let volume_scatter_views = [
+            make_volume("metropolis fog scatter A"),
+            make_volume("metropolis fog scatter B"),
+        ];
+        let volume_integrated_view = make_volume("metropolis fog integrated");
+        let volume_sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("metropolis fog sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let volume_params_buffer = buffer::uniform_buffer(
+            &context.device,
+            Some("metropolis fog params"),
+            &VolumeParams::zeroed(),
+        );
+        let volume_texture_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D3,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let volume_storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: HDR_FORMAT,
+                view_dimension: wgpu::TextureViewDimension::D3,
+            },
+            count: None,
+        };
+        let volume_depth_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let volume_inject_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("metropolis fog inject layout"),
+                    entries: &[
+                        uniform_entry(0, wgpu::ShaderStages::COMPUTE),
+                        storage_entry(1, true),
+                        volume_depth_entry(2),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                            count: None,
+                        },
+                        volume_depth_entry(4),
+                        uniform_entry(5, wgpu::ShaderStages::COMPUTE),
+                        volume_texture_entry(6),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        volume_storage_entry(8),
+                    ],
+                });
+        let volume_integrate_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("metropolis fog integrate layout"),
+                    entries: &[
+                        uniform_entry(0, wgpu::ShaderStages::COMPUTE),
+                        volume_texture_entry(1),
+                        volume_storage_entry(2),
+                    ],
+                });
+        // parity p reads the volume written on frame p-1 and writes volume p.
+        let volume_inject_bind_groups = [0_usize, 1].map(|parity| {
+            context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("metropolis fog inject bind group"),
+                    layout: &volume_inject_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: volume_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: light_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&shadow_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&spot_atlas_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: spot_shadow_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(
+                                &volume_scatter_views[1 - parity],
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::Sampler(&volume_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(
+                                &volume_scatter_views[parity],
+                            ),
+                        },
+                    ],
+                })
+        });
+        let volume_integrate_bind_groups = [0_usize, 1].map(|parity| {
+            context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("metropolis fog integrate bind group"),
+                    layout: &volume_integrate_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: volume_params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(
+                                &volume_scatter_views[parity],
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&volume_integrated_view),
+                        },
+                    ],
+                })
+        });
+        let volume_compute = |label: &'static str,
+                              source: &'static str,
+                              layout: &wgpu::BindGroupLayout,
+                              entry: &'static str| {
+            let module = shader::wgsl_module(&context.device, Some(label), source);
+            let pipeline_layout =
+                context
+                    .device
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some(label),
+                        bind_group_layouts: &[Some(layout)],
+                        immediate_size: 0,
+                    });
+            context
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    module: &module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+        };
+        let volume_inject_pipeline = volume_compute(
+            "metropolis fog inject",
+            VOLUME_SHADER,
+            &volume_inject_layout,
+            "cs_inject",
+        );
+        let volume_integrate_pipeline = volume_compute(
+            "metropolis fog integrate",
+            VOLUME_INTEGRATE_SHADER,
+            &volume_integrate_layout,
+            "cs_integrate",
+        );
+
         let shadow_layout =
             context
                 .device
@@ -2384,8 +2750,20 @@ impl Example for MetropolisExample {
                             },
                             count: None,
                         },
-                        // Depth, for the depth-aware reflection upsample.
+                        // Depth, for the depth-aware reflection upsample and
+                        // for placing each pixel inside the fog volume.
                         shadow_texture_entry(5),
+                        // Integrated volumetric fog (scattering + transmittance).
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D3,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
                     ],
                 });
 
@@ -2524,6 +2902,13 @@ impl Example for MetropolisExample {
                         count: None,
                     },
                     uniform_entry(6, wgpu::ShaderStages::FRAGMENT),
+                    // Lights + shadow maps, so ray-traced hits are shaded with
+                    // the same local lighting the forward pass uses.
+                    storage_read_frag(7),
+                    shadow_texture_entry(8),
+                    shadow_sampler_entry(9),
+                    shadow_texture_entry(10),
+                    uniform_entry(11, wgpu::ShaderStages::FRAGMENT),
                 ],
             });
         let rt_pipeline_layout =
@@ -2842,6 +3227,7 @@ impl Example for MetropolisExample {
         self.static_shadow_view = Some(static_shadow_view);
         self.shadow_uniform_buffer = Some(shadow_uniform_buffer);
         self.spot_atlas_view = Some(spot_atlas_view);
+        self.shadow_comparison_sampler = Some(shadow_sampler);
         self.spot_shadow_buffer = Some(spot_shadow_buffer);
         self.spot_instance_buffer = Some(spot_instance_buffer);
         self.cull_pipeline = Some(cull_pipeline);
@@ -2859,6 +3245,12 @@ impl Example for MetropolisExample {
         self.cluster_params_buffer = Some(cluster_params_buffer);
         self.cluster_pipeline = Some(cluster_pipeline);
         self.cluster_bind_group = Some(cluster_bind_group);
+        self.volume_inject_pipeline = Some(volume_inject_pipeline);
+        self.volume_integrate_pipeline = Some(volume_integrate_pipeline);
+        self.volume_params_buffer = Some(volume_params_buffer);
+        self.volume_inject_bind_groups = Some(volume_inject_bind_groups);
+        self.volume_integrate_bind_groups = Some(volume_integrate_bind_groups);
+        self.volume_integrated_view = Some(volume_integrated_view);
         self.gi_pipeline = Some(gi_pipeline);
         self.gi_bind_group = Some(gi_bind_group);
         self.gi_probe_buffer = Some(gi_probe_buffer);
@@ -3240,7 +3632,13 @@ impl Example for MetropolisExample {
                         0.0
                     },
                 ],
-                dims: [target_w.max(1) as f32, target_h.max(1) as f32, 0.0, 0.0],
+                dims: [
+                    target_w.max(1) as f32,
+                    target_h.max(1) as f32,
+                    if self.controls.fog { 1.0 } else { 0.0 },
+                    0.0,
+                ],
+                fog: [0.05, 400.0, VOLUME_NEAR, self.controls.fog_range],
             }),
         );
 
@@ -3519,6 +3917,85 @@ impl Example for MetropolisExample {
             }
         }
 
+        // Volumetric fog. Runs after the shadow maps it samples and before the
+        // present pass that composites it; independent of the forward pass, so
+        // it only needs shadows to be up to date.
+        if self.controls.fog
+            && let (
+                Some(inject_pipeline),
+                Some(integrate_pipeline),
+                Some(params_buffer),
+                Some(inject_binds),
+                Some(integrate_binds),
+            ) = (
+                &self.volume_inject_pipeline,
+                &self.volume_integrate_pipeline,
+                &self.volume_params_buffer,
+                &self.volume_inject_bind_groups,
+                &self.volume_integrate_bind_groups,
+            )
+        {
+            self.volume_parity = !self.volume_parity;
+            let parity = usize::from(self.volume_parity);
+            // Jitter the froxel's z sample within its slice, cycling over 8
+            // frames; the temporal blend then integrates the whole slice.
+            let jitter = JITTER[(self.frames_rendered as usize) % JITTER.len()][0] - 0.5;
+            let shafts = self.controls.light_shafts;
+            context.queue.write_buffer(
+                params_buffer,
+                0,
+                bytemuck::bytes_of(&VolumeParams {
+                    inv_projection: projection.inverse().to_cols_array_2d(),
+                    inv_view: view_matrix.inverse().to_cols_array_2d(),
+                    prev_view_projection: self.prev_view_proj.to_cols_array_2d(),
+                    sun_view_projection: self.sun_view_proj.to_cols_array_2d(),
+                    camera_position: self.camera.eye.extend(jitter).to_array(),
+                    sun_direction: sun_dir.extend(self.controls.sun_intensity).to_array(),
+                    sun_color: [1.0, 0.95, 0.85, if shafts { 1.0 } else { 0.0 }],
+                    fog: [
+                        self.controls.fog_density,
+                        self.controls.fog_height_falloff,
+                        self.scene_floor,
+                        self.controls.shaft_anisotropy,
+                    ],
+                    // Tinted toward the sky fill so the haze sits in the scene's
+                    // palette rather than reading as flat grey.
+                    fog_color: [
+                        0.42 * amb,
+                        0.49 * amb,
+                        0.66 * amb,
+                        self.controls.fog_ambient,
+                    ],
+                    dims: [
+                        VOLUME_X as f32,
+                        VOLUME_Y as f32,
+                        VOLUME_Z as f32,
+                        self.controls.fog_range,
+                    ],
+                    misc: [
+                        VOLUME_NEAR,
+                        // No history on the first frame, and none while the
+                        // camera teleports — otherwise fog smears.
+                        if self.frames_rendered > 1 { 0.88 } else { 0.0 },
+                        light_count as f32,
+                        self.controls.shaft_intensity,
+                    ],
+                }),
+            );
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("metropolis fog pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(inject_pipeline);
+            pass.set_bind_group(0, &inject_binds[parity], &[]);
+            pass.dispatch_workgroups(VOLUME_X.div_ceil(8), VOLUME_Y.div_ceil(8), VOLUME_Z);
+            // Each thread of the integrate pass marches a whole froxel column,
+            // so it dispatches over x/y only.
+            pass.set_pipeline(integrate_pipeline);
+            pass.set_bind_group(0, &integrate_binds[parity], &[]);
+            pass.dispatch_workgroups(VOLUME_X.div_ceil(8), VOLUME_Y.div_ceil(8), 1);
+        }
+
         {
             let mut pass = render_pass::begin_color_depth(
                 encoder,
@@ -3549,16 +4026,8 @@ impl Example for MetropolisExample {
             pass.set_vertex_buffer(1, visible_instance_buffer.slice(..));
             pass.set_index_buffer(gpu_scene.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed_indirect(draw_args_buffer, 0);
-
-            // GPU particles (billboards), depth-tested against the scene.
-            if let Some(p) = &self.particles {
-                p.render(
-                    &mut pass,
-                    self.controls.snow,
-                    self.controls.rain,
-                    self.controls.fire,
-                );
-            }
+            // Particles are deliberately NOT drawn here — see the pass after
+            // the reflections below.
         }
 
         // Screen-space reflections: march the depth buffer and sample the lit
@@ -3592,6 +4061,7 @@ impl Example for MetropolisExample {
                     bytemuck::bytes_of(&RtParams {
                         inv_projection: projection.inverse().to_cols_array_2d(),
                         inv_view: view_matrix.inverse().to_cols_array_2d(),
+                        sun_view_projection: self.sun_view_proj.to_cols_array_2d(),
                         params: [
                             (render_width * 0.5).max(1.0),
                             (render_height * 0.5).max(1.0),
@@ -3601,6 +4071,22 @@ impl Example for MetropolisExample {
                         sun_direction: sun_dir.extend(self.controls.sun_intensity).to_array(),
                         sun_color: [1.0, 0.95, 0.85, 0.0],
                         ambient: [0.29 * amb, 0.34 * amb, 0.49 * amb, 0.0],
+                        fog: [
+                            light_count as f32,
+                            if self.controls.fog {
+                                self.controls.fog_density
+                            } else {
+                                0.0
+                            },
+                            self.controls.fog_height_falloff,
+                            self.scene_floor,
+                        ],
+                        fog_color: [
+                            0.42 * amb,
+                            0.49 * amb,
+                            0.66 * amb,
+                            self.controls.fog_ambient,
+                        ],
                         counts: [
                             self.rt_counts[0] as f32,
                             self.rt_counts[1] as f32,
@@ -3653,6 +4139,49 @@ impl Example for MetropolisExample {
                 }
             }
             pass.draw(0..3, 0..1);
+        }
+
+        // GPU particles (billboards), drawn AFTER the reflections on purpose.
+        //
+        // They blend additively and never write depth, so the colour buffer and
+        // the depth buffer disagree about what occupies a pixel. Screen-space
+        // reflections march depth and then sample colour, so with particles in
+        // the source a ray that lands on a wall behind a flame came back with
+        // the flame's colour — fire smeared across masonry that never sees it.
+        // Drawn here they still reach bloom (so the flames glow) but are no
+        // longer a reflection source. The cost is that SSR cannot reflect them
+        // at all; it never could do so correctly, having no depth for them.
+        if let Some(p) = &self.particles {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("metropolis particle pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.hdr_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &targets.depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(0.0, 0.0, render_width, render_height, 0.0, 1.0);
+            p.render(
+                &mut pass,
+                self.controls.snow,
+                self.controls.rain,
+                self.controls.fire,
+            );
         }
 
         // Bloom: bright-pass the lit HDR, then blur it horizontally and
@@ -3918,6 +4447,51 @@ impl Example for MetropolisExample {
                                 ui.checkbox(&mut controls.snow, "Snow");
                                 ui.checkbox(&mut controls.rain, "Rain");
                                 ui.checkbox(&mut controls.fire, "Fire");
+                            });
+                            ui.separator();
+                            ui.heading("Volumetrics");
+                            ui.checkbox(&mut controls.fog, "Fog");
+                            ui.add_enabled_ui(controls.fog, |ui| {
+                                ui.indent("fog_params", |ui| {
+                                    ui.add(
+                                        egui::Slider::new(&mut controls.fog_density, 0.0..=0.35)
+                                            .text("Density"),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut controls.fog_height_falloff,
+                                            0.0..=1.5,
+                                        )
+                                        .text("Height falloff"),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut controls.fog_ambient, 0.0..=2.0)
+                                            .text("Ambient"),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut controls.fog_range, 5.0..=120.0)
+                                            .text("Range"),
+                                    );
+                                });
+                                ui.checkbox(&mut controls.light_shafts, "Light shafts");
+                                ui.add_enabled_ui(controls.light_shafts, |ui| {
+                                    ui.indent("shaft_params", |ui| {
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut controls.shaft_intensity,
+                                                0.0..=4.0,
+                                            )
+                                            .text("Intensity"),
+                                        );
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut controls.shaft_anisotropy,
+                                                0.0..=0.95,
+                                            )
+                                            .text("Anisotropy"),
+                                        );
+                                    });
+                                });
                             });
                             ui.separator();
                             ui.heading("Post");
