@@ -55,6 +55,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `shadowmapping` | Renders a depth-only light pass into a shadow map, then samples that depth texture in the scene pass for projected shadows with PCF filtering. | <picture><source srcset="screenshots/shadowmapping.webp" type="image/webp"><img src="screenshots/shadowmapping.jpg" alt="Projected shadow mapping"></picture> |
 | `shadowmappingcascade` | Splits the camera frustum into four cascades, renders each split into a depth texture array layer, and samples the selected layer for directional shadows. | <picture><source srcset="screenshots/shadowmappingcascade.webp" type="image/webp"><img src="screenshots/shadowmappingcascade.jpg" alt="Cascade shadow mapping"></picture> |
 | `shadowmappingomni` | Renders the scene into the six faces of a floating-point cube map, stores point-light distance, and samples it for omni-directional shadows. | <picture><source srcset="screenshots/shadowmappingomni.webp" type="image/webp"><img src="screenshots/shadowmappingomni.jpg" alt="Omni-directional shadow mapping"></picture> |
+| `geometrydash` | Runs an original one-button rhythm platformer with fixed-step physics, procedural GPU geometry, obstacle collisions, jump pads, progress, and responsive mouse, keyboard, and touch controls. | <picture><source srcset="screenshots/geometrydash.webp" type="image/webp"><img src="screenshots/geometrydash.jpg" alt="Geometry dash WebGPU game"></picture> |
 
 ## ReSTIR acceleration
 

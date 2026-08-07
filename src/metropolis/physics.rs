@@ -11,7 +11,9 @@ struct Character {
     body: RigidBodyHandle,
     yaw: f32,
     speed: f32,
-    wander_timer: f32,
+    route_lane: usize,
+    waypoint: usize,
+    route_direction: i32,
     rng: u32,
     blocked: bool,
 }
@@ -29,6 +31,46 @@ impl Character {
 }
 
 pub const INTERIOR_FRACTION: f32 = 0.55;
+const ROUTE_LANES: usize = 6;
+const ROUTE_POINTS: usize = 8;
+
+fn wrap_angle(angle: f32) -> f32 {
+    let tau = std::f32::consts::TAU;
+    angle - tau * (angle / tau).round()
+}
+
+fn route_points(
+    interior_min: [f32; 2],
+    interior_max: [f32; 2],
+    lane: usize,
+    clearance: f32,
+) -> [[f32; 2]; ROUTE_POINTS] {
+    let lane_t = (lane as f32 + 0.5) / ROUTE_LANES as f32;
+    let max_inset_x = ((interior_max[0] - interior_min[0]) * 0.32).max(clearance);
+    let max_inset_z = ((interior_max[1] - interior_min[1]) * 0.32).max(clearance);
+    let inset_x = clearance + max_inset_x * lane_t;
+    let inset_z = clearance + max_inset_z * lane_t;
+    let min_x = (interior_min[0] + inset_x).min(interior_max[0] - clearance);
+    let max_x = (interior_max[0] - inset_x).max(interior_min[0] + clearance);
+    let min_z = (interior_min[1] + inset_z).min(interior_max[1] - clearance);
+    let max_z = (interior_max[1] - inset_z).max(interior_min[1] + clearance);
+    let mid_x = (min_x + max_x) * 0.5;
+    let mid_z = (min_z + max_z) * 0.5;
+    [
+        [min_x, min_z],
+        [mid_x, min_z],
+        [max_x, min_z],
+        [max_x, mid_z],
+        [max_x, max_z],
+        [mid_x, max_z],
+        [min_x, max_z],
+        [min_x, mid_z],
+    ]
+}
+
+fn advance_waypoint(waypoint: usize, direction: i32) -> usize {
+    (waypoint as i32 + direction).rem_euclid(ROUTE_POINTS as i32) as usize
+}
 
 pub struct PhysicsWorld {
     bodies: RigidBodySet,
@@ -142,12 +184,30 @@ impl PhysicsWorld {
                 .wrapping_add(12345);
             // Prime the generator so early draws differ between agents.
             rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let route_lane = index % ROUTE_LANES;
+            let route = route_points(interior_min, interior_max, route_lane, radius * 2.2);
+            let nearest = route
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    let da = (a[0] - x).powi(2) + (a[1] - z).powi(2);
+                    let db = (b[0] - x).powi(2) + (b[1] - z).powi(2);
+                    da.total_cmp(&db)
+                })
+                .map_or(0, |(waypoint, _)| waypoint);
+            let route_direction = if (index / ROUTE_LANES).is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
             characters.push(Character {
                 body: handle,
                 yaw,
                 // Modest walking pace scaled to character size (~0.9 m/s human).
                 speed: char_height * (0.55 + (rng >> 8 & 0xff) as f32 / 255.0 * 0.35),
-                wander_timer: (rng >> 4 & 0x7) as f32 * 0.7,
+                route_lane,
+                waypoint: advance_waypoint(nearest, route_direction),
+                route_direction,
                 rng,
                 blocked: false,
             });
@@ -195,25 +255,73 @@ impl PhysicsWorld {
         }
         self.integration.dt = dt;
 
-        for ch in self.characters.iter_mut() {
-            ch.wander_timer -= dt;
-            if ch.wander_timer <= 0.0 {
-                ch.wander_timer = 2.0 + ch.rng_unit() * 3.0;
-                ch.yaw += (ch.rng_unit() - 0.5) * 1.2;
+        let positions: Vec<[f32; 2]> = self
+            .characters
+            .iter()
+            .map(|ch| {
+                let center = self.bodies[ch.body].translation();
+                [center.x, center.z]
+            })
+            .collect();
+        let personal_space = (self.center_to_feet * 0.72).max(0.08);
+        let arrival_radius = (personal_space * 0.9).max(0.12);
+
+        for (index, ch) in self.characters.iter_mut().enumerate() {
+            let position = positions[index];
+            let route = route_points(
+                self.interior_min,
+                self.interior_max,
+                ch.route_lane,
+                personal_space,
+            );
+            let mut target = route[ch.waypoint];
+            let mut to_target = [target[0] - position[0], target[1] - position[1]];
+            if to_target[0] * to_target[0] + to_target[1] * to_target[1]
+                < arrival_radius * arrival_radius
+            {
+                ch.waypoint = advance_waypoint(ch.waypoint, ch.route_direction);
+                target = route[ch.waypoint];
+                to_target = [target[0] - position[0], target[1] - position[1]];
             }
-            let center = self.bodies[ch.body].translation();
-            let near = (center.x - self.interior_min[0])
-                .min(self.interior_max[0] - center.x)
-                .min(center.z - self.interior_min[1])
-                .min(self.interior_max[1] - center.z);
+
+            let target_length = (to_target[0] * to_target[0] + to_target[1] * to_target[1])
+                .sqrt()
+                .max(1e-4);
+            let mut desired = [to_target[0] / target_length, to_target[1] / target_length];
+
+            // Anticipatory separation avoids the stop-turn-stop pattern caused
+            // by waiting for the physics capsules to collide.
+            let mut separation = [0.0_f32; 2];
+            for (other_index, other) in positions.iter().enumerate() {
+                if other_index == index {
+                    continue;
+                }
+                let dx = position[0] - other[0];
+                let dz = position[1] - other[1];
+                let distance_sq = dx * dx + dz * dz;
+                if distance_sq > 1e-6 && distance_sq < personal_space * personal_space {
+                    let distance = distance_sq.sqrt();
+                    let weight = (1.0 - distance / personal_space) / distance;
+                    separation[0] += dx * weight;
+                    separation[1] += dz * weight;
+                }
+            }
+            desired[0] += separation[0] * 1.65;
+            desired[1] += separation[1] * 1.65;
+
+            let near = (position[0] - self.interior_min[0])
+                .min(self.interior_max[0] - position[0])
+                .min(position[1] - self.interior_min[1])
+                .min(self.interior_max[1] - position[1]);
             if near < self.steer_margin {
-                let to_center = (self.center_xz[0] - center.x).atan2(self.center_xz[1] - center.z);
-                let mut delta = to_center - ch.yaw;
-                let tau = std::f32::consts::TAU;
-                delta -= tau * (delta / tau).round();
                 let strength = (1.0 - near / self.steer_margin).clamp(0.0, 1.0);
-                ch.yaw += delta * strength * 0.2;
+                desired[0] += (self.center_xz[0] - position[0]) * strength * 0.35;
+                desired[1] += (self.center_xz[1] - position[1]) * strength * 0.35;
             }
+
+            let desired_yaw = desired[0].atan2(desired[1]);
+            let max_turn = 2.8 * dt;
+            ch.yaw += wrap_angle(desired_yaw - ch.yaw).clamp(-max_turn, max_turn);
         }
 
         // Sweep each capsule against the environment (immutable borrows only)
@@ -260,8 +368,8 @@ impl PhysicsWorld {
                 tz = tz.clamp(self.interior_min[1], self.interior_max[1]);
                 let to_center_x = self.center_xz[0] - tx;
                 let to_center_z = self.center_xz[1] - tz;
-                ch.yaw = to_center_x.atan2(to_center_z) + (ch.rng_unit() - 0.5) * 0.8;
-                ch.wander_timer = ch.wander_timer.max(1.5);
+                ch.yaw = to_center_x.atan2(to_center_z);
+                ch.waypoint = advance_waypoint(ch.waypoint, ch.route_direction);
             }
             let ty = target.y.max(self.min_center_y);
             if let Some(body) = self.bodies.get_mut(handle) {
@@ -269,8 +377,8 @@ impl PhysicsWorld {
             }
             ch.blocked = blocked;
             if blocked && !out {
-                ch.yaw += 1.7;
-                ch.wander_timer = ch.wander_timer.max(1.2);
+                ch.waypoint = advance_waypoint(ch.waypoint, ch.route_direction);
+                ch.yaw += (ch.rng_unit() - 0.5) * 0.7;
             }
         }
 

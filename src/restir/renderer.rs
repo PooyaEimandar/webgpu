@@ -208,11 +208,11 @@ impl Controls {
 }
 
 fn default_render_scale(mode: RestirMode) -> f32 {
-    // Native and WASM deliberately start at the same full-quality ray budget.
-    // The UI still exposes balanced and performance presets for slower GPUs.
+    // Native and WASM deliberately share the same quality defaults. The
+    // reconstruction pass improves a sparse signal, but it cannot recover
+    // stable sub-pixel geometry from an excessively small ray target.
     match mode {
-        RestirMode::DirectIllumination => 1.0,
-        RestirMode::GlobalIllumination => 1.0,
+        RestirMode::DirectIllumination | RestirMode::GlobalIllumination => 1.0,
     }
 }
 
@@ -510,6 +510,7 @@ pub struct RestirExample {
 
 impl RestirExample {
     pub fn new(mode: RestirMode, assets: RestirAssets) -> Self {
+        let has_jax = assets.jax.is_some();
         let bounds = assets.sponza.bounds;
         let center = bounds.center();
         let extent = bounds.extent();
@@ -581,6 +582,7 @@ impl RestirExample {
                 if std::env::var("RESTIR_NO_ANIM").is_ok() {
                     controls.animate_jax = false;
                 }
+                controls.animate_jax &= has_jax;
                 controls
             },
             frame_stats: FrameStats::new(),
@@ -610,7 +612,8 @@ impl RestirExample {
             .uniform_buffer
             .as_ref()
             .ok_or_else(|| RenderError::message("ReSTIR uniform buffer is unavailable"))?;
-        let (width, height) = target_dimensions(context, self.controls.render_scale);
+        let (width, height) =
+            target_dimensions(context, self.controls.render_scale, MAX_TARGET_DIMENSION);
         let pixel_count = u64::from(width) * u64::from(height);
         let gbuffer_size = pixel_count * 64;
         let reservoir_size = pixel_count * RESERVOIR_STRIDE;
@@ -673,13 +676,16 @@ impl RestirExample {
             moment_textures[0].create_view(&wgpu::TextureViewDescriptor::default()),
             moment_textures[1].create_view(&wgpu::TextureViewDescriptor::default()),
         ];
-        let gi_flag = u32::from(self.mode == RestirMode::GlobalIllumination);
+        let render_mode = match self.mode {
+            RestirMode::DirectIllumination => 0,
+            RestirMode::GlobalIllumination => 1,
+        };
         let static_triangles = self.static_triangle_count;
         let atrous_stride_buffers = [1_u32, 2, 4, 8].map(|stride| {
             buffer::buffer_from_data(
                 &context.device,
                 Some("ReSTIR a-trous stride"),
-                &[[stride, gi_flag, static_triangles, 0_u32]],
+                &[[stride, render_mode, static_triangles, 0_u32]],
                 wgpu::BufferUsages::UNIFORM,
             )
         });
@@ -1060,14 +1066,7 @@ impl RestirExample {
                 .resizable(false)
                 .collapsible(true)
                 .show(root_ui.ctx(), |ui| {
-                    ui.label(match mode {
-                        RestirMode::DirectIllumination => {
-                            "Spatiotemporal reservoir resampling for direct lighting"
-                        }
-                        RestirMode::GlobalIllumination => {
-                            "Spatiotemporal path-reservoir reuse for multi-bounce GI"
-                        }
-                    });
+                    ui.label(mode.description());
                     ui.label(format!("{frame_ms:.2} ms/frame ({fps:.0} fps)"));
                     if let Some((total_ms, pass_count, pass_times_ms)) = gpu_profile {
                         ui.label(format!("GPU compute: {total_ms:.2} ms"));
@@ -1120,7 +1119,11 @@ impl RestirExample {
                     ui.checkbox(&mut controls.spatial_reuse, "Spatial reuse");
                     ui.separator();
                     ui.heading("Scene");
-                    ui.checkbox(&mut controls.animate_jax, "Animate Jax");
+                    if self.jax.is_some() {
+                        ui.checkbox(&mut controls.animate_jax, "Animate Jax");
+                    } else {
+                        ui.label("Static Sponza scene");
+                    }
                     ui.separator();
                     ui.heading("Lights");
                     ui.checkbox(&mut controls.show_light_gizmos, "Light gizmos (wireframe)");
@@ -1207,7 +1210,7 @@ impl RestirExample {
                     ui.add(
                         egui::Slider::new(&mut controls.ambient, 0.0..=1.0).text("Ambient fill"),
                     );
-                    if mode == RestirMode::GlobalIllumination {
+                    if mode.uses_gi() {
                         ui.add(
                             egui::Slider::new(&mut controls.gi_bounces, 1..=2)
                                 .text("GI bounces"),
@@ -1279,7 +1282,7 @@ impl RestirExample {
             gui.renderer.free_texture(id);
         }
         self.controls = controls;
-        if previous_controls.animate_jax != controls.animate_jax {
+        if self.jax.is_some() && previous_controls.animate_jax != controls.animate_jax {
             self.upload_dynamic_jax(context)?;
             self.jax_update_elapsed = 0.0;
         }
@@ -1323,19 +1326,36 @@ impl Example for RestirExample {
         self.scene_bounds = assets.sponza.bounds;
         self.static_triangle_count = assets.sponza.triangles.len() as u32;
         self.static_bvh_count = assets.sponza.bvh_nodes.len() as u32;
-        self.dynamic_triangle_capacity = assets.jax.mesh.indices.len() / 3;
+        self.dynamic_triangle_capacity = assets
+            .jax
+            .as_ref()
+            .map_or(0, |jax| jax.mesh.indices.len() / 3);
         self.dynamic_bvh_capacity = self
             .dynamic_triangle_capacity
             .saturating_mul(2)
             .saturating_sub(1);
-        self.jax_transform = jax_world_transform(&assets.jax, assets.sponza.bounds)?;
-        self.jax_material_index = assets.jax_material_index;
-        let (dynamic_triangles, dynamic_nodes) = build_jax_geometry(
-            &assets.jax,
-            self.jax_transform,
-            assets.jax_material_index,
-            self.controls.animate_jax,
-        )?;
+        let (dynamic_triangles, dynamic_nodes) =
+            match (assets.jax.as_ref(), assets.jax_material_index) {
+                (Some(jax), Some(material_index)) => {
+                    self.jax_transform = jax_world_transform(jax, assets.sponza.bounds)?;
+                    self.jax_material_index = material_index;
+                    build_jax_geometry(
+                        jax,
+                        self.jax_transform,
+                        material_index,
+                        self.controls.animate_jax,
+                    )?
+                }
+                (None, None) => {
+                    self.controls.animate_jax = false;
+                    (Vec::new(), Vec::new())
+                }
+                _ => {
+                    return Err(RenderError::message(
+                        "ReSTIR Jax scene and material index must be provided together",
+                    ));
+                }
+            };
         self.dynamic_triangle_count = dynamic_triangles.len() as u32;
         self.dynamic_bvh_count = dynamic_nodes.len() as u32;
         let triangle_capacity = assets
@@ -1367,30 +1387,36 @@ impl Example for RestirExample {
             0,
             bytemuck::cast_slice(&assets.sponza.triangles),
         );
-        context.queue.write_buffer(
-            &triangle_buffer,
-            u64::from(self.static_triangle_count) * std::mem::size_of::<GpuTriangle>() as u64,
-            bytemuck::cast_slice(&dynamic_triangles),
-        );
+        if !dynamic_triangles.is_empty() {
+            context.queue.write_buffer(
+                &triangle_buffer,
+                u64::from(self.static_triangle_count) * std::mem::size_of::<GpuTriangle>() as u64,
+                bytemuck::cast_slice(&dynamic_triangles),
+            );
+        }
         context.queue.write_buffer(
             &bvh_buffer,
             0,
             bytemuck::cast_slice(&assets.sponza.bvh_nodes),
         );
-        context.queue.write_buffer(
-            &bvh_buffer,
-            u64::from(self.static_bvh_count) * std::mem::size_of::<GpuBvhNode>() as u64,
-            bytemuck::cast_slice(&dynamic_nodes),
-        );
+        if !dynamic_nodes.is_empty() {
+            context.queue.write_buffer(
+                &bvh_buffer,
+                u64::from(self.static_bvh_count) * std::mem::size_of::<GpuBvhNode>() as u64,
+                bytemuck::cast_slice(&dynamic_nodes),
+            );
+        }
         let previous_dynamic_triangle_texture = create_previous_dynamic_triangle_texture(
             &context.device,
             self.dynamic_triangle_capacity,
         );
-        upload_previous_dynamic_triangles(
-            &context.queue,
-            &previous_dynamic_triangle_texture,
-            &dynamic_triangles,
-        )?;
+        if !dynamic_triangles.is_empty() {
+            upload_previous_dynamic_triangles(
+                &context.queue,
+                &previous_dynamic_triangle_texture,
+                &dynamic_triangles,
+            )?;
+        }
         let previous_dynamic_triangle_view =
             previous_dynamic_triangle_texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.dynamic_triangles = dynamic_triangles;
@@ -1590,7 +1616,7 @@ impl Example for RestirExample {
         self._normal_texture = Some(normal_texture);
         self._metallic_roughness_texture = Some(metallic_roughness_texture);
         self._material_sampler = Some(material_sampler);
-        self.jax = Some(assets.jax);
+        self.jax = assets.jax;
         self.gpu_profiler = GpuProfiler::new(context);
         self.gui = Some(RestirGui::new(context));
         self.joystick_overlay = Some(JoystickOverlay::new(context)?);
@@ -1643,7 +1669,7 @@ impl Example for RestirExample {
         let delta = self.frame_stats.delta_seconds().clamp(0.0, 1.0 / 15.0);
         self.elapsed_seconds += delta;
         self.camera.update(&self.joystick, delta);
-        if self.controls.animate_jax {
+        if self.controls.animate_jax && self.jax.is_some() {
             if let Some(jax) = &mut self.jax {
                 jax.advance(delta);
             }
@@ -1740,12 +1766,12 @@ impl Example for RestirExample {
                 1.0,
             );
             pass.set_pipeline(&pipelines.present);
-            let present_bind_group = if denoise {
+            let baseline_bind_group = if denoise {
                 &frames.present_denoised_bind_groups[parity]
             } else {
                 &frames.present_bind_groups[parity]
             };
-            pass.set_bind_group(0, present_bind_group, &[]);
+            pass.set_bind_group(0, baseline_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
         if self.debug_dump_path.is_some()
@@ -1881,13 +1907,13 @@ fn install_egui_font(context: &egui::Context) {
     context.set_fonts(fonts);
 }
 
-fn target_dimensions(context: &RenderContext, scale: f32) -> (u32, u32) {
+fn target_dimensions(context: &RenderContext, scale: f32, maximum_dimension: u32) -> (u32, u32) {
     // Cap to the maximum dimension first and apply the user scale to the
     // capped size: on high-DPI surfaces the cap used to swallow the whole
     // scale range, leaving the Ray scale slider without any effect.
     let mut width = context.surface_config.width.max(1) as f32;
     let mut height = context.surface_config.height.max(1) as f32;
-    let maximum = MAX_TARGET_DIMENSION as f32;
+    let maximum = maximum_dimension as f32;
     let largest = width.max(height);
     if largest > maximum {
         let cap_scale = maximum / largest;

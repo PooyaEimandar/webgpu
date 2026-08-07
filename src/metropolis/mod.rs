@@ -24,6 +24,7 @@ use scene::{GpuStatic, StaticVertex};
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/Vazirmatn-Regular.ttf");
 const FORWARD_SHADER: &str = include_str!("../../shaders/metropolis_forward.wgsl");
 const STATIC_SHADER: &str = include_str!("../../shaders/metropolis_static.wgsl");
+const GROUND_SHADER: &str = include_str!("../../shaders/metropolis_ground.wgsl");
 const PRESENT_SHADER: &str = include_str!("../../shaders/metropolis_present.wgsl");
 const SHADOW_SHADER: &str = include_str!("../../shaders/metropolis_shadow.wgsl");
 const CULL_SHADER: &str = include_str!("../../shaders/metropolis_cull.wgsl");
@@ -109,7 +110,6 @@ const SPOT_COLORS: [[f32; 3]; 4] = [
 ];
 const SPOT_HEIGHT: f32 = 4.8;
 const SPOT_OUTER_DEG: f32 = 32.0;
-
 /// Live, egui-tunable scene controls (sun, lights, exposure, debug view).
 #[derive(Clone, Copy, Debug)]
 struct Controls {
@@ -125,6 +125,7 @@ struct Controls {
     point_range: f32,
     spot_range: f32,
     animate_lights: bool,
+    animate_character: bool,
     /// 0 = lit, 1 = shadow factor, 2 = sun N·L.
     debug_view: u32,
     /// Draw the Blender-style light gizmos.
@@ -181,6 +182,7 @@ impl Default for Controls {
             point_range: 4.0,
             spot_range: 6.0,
             animate_lights: false,
+            animate_character: true,
             debug_view: 0,
             show_gizmos: false,
             local_shadows: true,
@@ -242,6 +244,13 @@ struct InstanceData {
     rotation: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct GroundUniforms {
+    center_floor: [f32; 4],
+    half_extent_tile: [f32; 4],
+}
+
 impl InstanceData {
     const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
         wgpu::vertex_attr_array![6 => Float32x4, 7 => Float32x4];
@@ -261,7 +270,7 @@ struct PresentUniforms {
     // xy = UV scale into the HDR target, z = exposure, w = bloom intensity.
     uv_scale: [f32; 4],
     // xy = full target dimensions (for the depth-aware reflection upsample),
-    // z = 1 when volumetric fog should be composited.
+    // z = 1 when volumetric fog should be composited, w = reserved.
     dims: [f32; 4],
     // x = camera near, y = camera far, z = volume near, w = volume far.
     fog: [f32; 4],
@@ -630,7 +639,8 @@ struct GpuScene {
     index_count: u32,
     instance_buffer: wgpu::Buffer,
     instance_count: u32,
-    _base_color: texture::Texture,
+    _base_colors: Vec<texture::Texture>,
+    primitive_draws: Vec<(std::ops::Range<u32>, usize)>,
 }
 
 struct Targets {
@@ -667,6 +677,8 @@ pub struct MetropolisExample {
     gpu_static: Option<GpuStatic>,
     forward_pipeline: Option<wgpu::RenderPipeline>,
     static_pipeline: Option<wgpu::RenderPipeline>,
+    ground_pipeline: Option<wgpu::RenderPipeline>,
+    ground_bind_group: Option<wgpu::BindGroup>,
     present_pipeline: Option<wgpu::RenderPipeline>,
     shadow_static_pipeline: Option<wgpu::RenderPipeline>,
     shadow_skinned_pipeline: Option<wgpu::RenderPipeline>,
@@ -730,7 +742,7 @@ pub struct MetropolisExample {
     draw_args_buffer: Option<wgpu::Buffer>,
     cull_bounds: [f32; 2],
     light_gizmo_renderer: Option<LightGizmoRenderer>,
-    forward_bind_group: Option<wgpu::BindGroup>,
+    forward_bind_groups: Vec<wgpu::BindGroup>,
     static_bind_group: Option<wgpu::BindGroup>,
     present_layout: Option<wgpu::BindGroupLayout>,
     present_sampler: Option<wgpu::Sampler>,
@@ -787,13 +799,16 @@ impl MetropolisExample {
         let dynamic_resolution = tier::DynamicResolution::new(&config, TARGET_FPS);
         let eye = glam::Vec3::new(0.0, 3.0, 12.0);
         let camera = FpsCamera::new(eye, 0.0, -0.12);
+        let controls = Controls::default();
         Self {
-            scene: Some(assets.jax),
+            scene: assets.jax,
             pending_static: Some(assets.sponza),
             gpu_scene: None,
             gpu_static: None,
             forward_pipeline: None,
             static_pipeline: None,
+            ground_pipeline: None,
+            ground_bind_group: None,
             present_pipeline: None,
             shadow_static_pipeline: None,
             shadow_skinned_pipeline: None,
@@ -852,7 +867,7 @@ impl MetropolisExample {
             draw_args_buffer: None,
             cull_bounds: [1.0, 0.5],
             light_gizmo_renderer: None,
-            forward_bind_group: None,
+            forward_bind_groups: Vec::new(),
             static_bind_group: None,
             present_layout: None,
             present_sampler: None,
@@ -889,12 +904,53 @@ impl MetropolisExample {
             physics: None,
             particles: None,
             instances: Vec::new(),
-            controls: Controls::default(),
+            controls,
             scene_center: glam::Vec3::ZERO,
             scene_floor: 0.0,
             scene_extent: glam::Vec3::ONE,
             shadow_radius: 1.0,
             light_phase: 0.0,
+        }
+    }
+
+    fn apply_initial_quality_controls(&mut self) {
+        self.controls.aa_mode = match self.config.anti_aliasing {
+            tier::AntiAliasing::None => AA_OFF,
+            tier::AntiAliasing::Fxaa | tier::AntiAliasing::Msaa4x => AA_FXAA,
+            tier::AntiAliasing::Taa => AA_TAA,
+        };
+        self.controls.local_shadows = self.config.shadow_atlas_casters > 0;
+        self.controls.ssr_strength = if self.config.ssr_steps == 0 {
+            0.0
+        } else {
+            self.controls.ssr_strength
+        };
+        self.controls.rt_reflections = self.config.rt_reflections;
+        self.controls.bloom_intensity = if self.config.bloom {
+            self.controls.bloom_intensity
+        } else {
+            0.0
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Browser WebGPU implementations have a tighter first-frame
+            // command and memory budget than the same adapter used natively.
+            // Start without independent desktop-only effects.
+            self.config.character_budget = self.config.character_budget.min(32);
+            self.config.bloom = false;
+            self.config.ssr_steps = 0;
+            self.config.shadow_atlas_casters = 0;
+            self.controls.aa_mode = AA_FXAA;
+            self.controls.local_shadows = false;
+            self.controls.ssr_strength = 0.0;
+            self.controls.rt_reflections = false;
+            self.controls.bloom_intensity = 0.0;
+            self.controls.fire = false;
+            self.controls.snow = false;
+            self.controls.rain = false;
+            self.controls.fog = false;
+            self.controls.light_shafts = false;
         }
     }
 
@@ -1460,42 +1516,45 @@ impl MetropolisExample {
             resolve_bind(&history_views[1]),
         ];
 
-        let present_bind_group = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("metropolis present bind group"),
-                layout: present_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&hdr_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(present_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: present_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&ssr_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&bloom_a_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::TextureView(&depth.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(volume_integrated_view),
-                    },
-                ],
-            });
+        let present_bind = |label: &str, source: &wgpu::TextureView| {
+            context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: present_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(source),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(present_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: present_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&ssr_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&bloom_a_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::TextureView(&depth.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(volume_integrated_view),
+                        },
+                    ],
+                })
+        };
+        let present_bind_group = present_bind("metropolis present bind group", &hdr_view);
         self.targets = Some(Targets {
             _hdr: hdr,
             hdr_view,
@@ -1532,7 +1591,8 @@ impl MetropolisExample {
             })
             .unwrap_or((0, 0));
         format!(
-            "metropolis  |  {}\n{}\n{:.1} fps ({:.2} ms)\ntier: {}   render scale: {:.2}\nrender target: {}x{}   characters: {}",
+            "{}  |  {}\n{}\n{:.1} fps ({:.2} ms)\ntier: {}   render scale: {:.2}\nrender target: {}x{}   characters: {}",
+            "metropolis",
             self.gpu_device_info,
             match self.config.gi {
                 GiMode::Ibl => "GI: IBL ambient",
@@ -1565,10 +1625,16 @@ impl Example for MetropolisExample {
     }
 
     fn init(&mut self, context: &mut RenderContext) -> RenderResult<()> {
+        context
+            .device
+            .on_uncaptured_error(std::sync::Arc::new(|error| {
+                crate::log_error(format!("Metropolis WebGPU uncaptured error: {error}"));
+            }));
         self.gpu_device_info = context.gpu_device_info();
 
         // Runtime tier detection — the heart of the mobile/desktop adaptation.
         self.config = tier::detect(&context.adapter, &context.device);
+        self.apply_initial_quality_controls();
         self.dynamic_resolution = tier::DynamicResolution::new(&self.config, TARGET_FPS);
 
         let scene = self
@@ -1586,10 +1652,22 @@ impl Example for MetropolisExample {
         // height first, then target a fraction of the atrium height.
         let sponza_extent = sponza.bounds.extent();
         let jax_bounds = scene.mesh.bounds;
-        let jax_height = (jax_bounds.max[1] - jax_bounds.min[1]).max(0.01);
+        let orientation = glam::Mat4::IDENTITY;
+        let mut oriented_min = glam::Vec3::splat(f32::INFINITY);
+        let mut oriented_max = glam::Vec3::splat(f32::NEG_INFINITY);
+        for x in [jax_bounds.min[0], jax_bounds.max[0]] {
+            for y in [jax_bounds.min[1], jax_bounds.max[1]] {
+                for z in [jax_bounds.min[2], jax_bounds.max[2]] {
+                    let point = orientation.transform_point3(glam::Vec3::new(x, y, z));
+                    oriented_min = oriented_min.min(point);
+                    oriented_max = oriented_max.max(point);
+                }
+            }
+        }
+        let jax_height = (oriented_max.y - oriented_min.y).max(0.01);
         let character_scale = (sponza_extent.y * 0.09) / jax_height;
         // Seat the feet on the floor: the lowest scaled vertex should land there.
-        let foot_offset = gpu_static.floor_height - jax_bounds.min[1] * character_scale;
+        let foot_offset = gpu_static.floor_height - oriented_min.y * character_scale;
         let spacing = jax_height * character_scale * 1.8;
         // Start in the centre of the atrium at standing height, looking down
         // the nave (Sponza's long axis is X).
@@ -1617,22 +1695,57 @@ impl Example for MetropolisExample {
         // capsule that walks and slides through the atrium. The controller
         // owns each transform from here on; the instance buffer is refreshed
         // from it every frame.
-        self.physics = Some(PhysicsWorld::new(
-            &sponza.triangles,
-            &instances,
-            gpu_static.floor_height,
-            jax_height * character_scale,
-            jax_bounds.min[1],
-            character_scale,
-        ));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.physics = Some(PhysicsWorld::new(
+                &sponza.triangles,
+                &instances,
+                gpu_static.floor_height,
+                jax_height * character_scale,
+                jax_bounds.min[1],
+                character_scale,
+            ));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Constructing Rapier's collision acceleration structure for the
+            // 262k-triangle Sponza mesh blocks the browser main thread during
+            // startup. The portable crowd scene does not render that mesh, so
+            // keep its instances static and animate only their shared skin.
+            self.physics = None;
+        }
         self.instances = instances.clone();
-        let base_color = texture::Texture::from_rgba8_2d_with_sampler(
-            &context.device,
-            &context.queue,
-            Some("metropolis character base color"),
-            &scene.base_color_image,
-            scene.sampler_options,
-        )?;
+        let primitive_sources = if scene.primitives.is_empty() {
+            vec![(
+                0..scene.mesh.indices.len() as u32,
+                scene.base_color_image.clone(),
+                scene.sampler_options,
+            )]
+        } else {
+            scene
+                .primitives
+                .iter()
+                .map(|primitive| {
+                    (
+                        primitive.index_range.clone(),
+                        primitive.base_color_image.clone(),
+                        primitive.sampler_options,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut base_colors = Vec::with_capacity(primitive_sources.len());
+        let mut primitive_draws = Vec::with_capacity(primitive_sources.len());
+        for (index, (range, image, sampler)) in primitive_sources.iter().enumerate() {
+            base_colors.push(texture::Texture::from_rgba8_2d_with_sampler(
+                &context.device,
+                &context.queue,
+                Some("metropolis character base color"),
+                image,
+                *sampler,
+            )?);
+            primitive_draws.push((range.clone(), index));
+        }
         let gpu_scene = GpuScene {
             vertex_buffer: buffer::vertex_buffer(
                 &context.device,
@@ -1654,7 +1767,8 @@ impl Example for MetropolisExample {
                     | wgpu::BufferUsages::STORAGE,
             ),
             instance_count,
-            _base_color: base_color,
+            _base_colors: base_colors,
+            primitive_draws,
         };
 
         let frame_uniform_buffer = buffer::uniform_buffer(
@@ -1662,6 +1776,114 @@ impl Example for MetropolisExample {
             Some("metropolis frame uniforms"),
             &FrameUniforms::zeroed(),
         );
+        let ground_uniform_buffer = buffer::uniform_buffer(
+            &context.device,
+            Some("metropolis ground uniforms"),
+            &GroundUniforms {
+                center_floor: [
+                    gpu_static.center.x,
+                    gpu_static.floor_height,
+                    gpu_static.center.z,
+                    0.0,
+                ],
+                half_extent_tile: [
+                    sponza_extent.x * 0.5 * physics::INTERIOR_FRACTION,
+                    sponza_extent.z * 0.5 * physics::INTERIOR_FRACTION,
+                    (jax_height * character_scale * 0.8).max(0.25),
+                    0.0,
+                ],
+            },
+        );
+        let ground_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("metropolis ground layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let ground_bind_group = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("metropolis ground bind group"),
+                layout: &ground_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: frame_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: ground_uniform_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        let ground_shader = shader::wgsl_module(
+            &context.device,
+            Some("metropolis ground shader"),
+            GROUND_SHADER,
+        );
+        let ground_pipeline_layout =
+            context
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("metropolis ground pipeline layout"),
+                    bind_group_layouts: &[Some(&ground_layout)],
+                    immediate_size: 0,
+                });
+        let ground_pipeline =
+            context
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("metropolis ground pipeline"),
+                    layout: Some(&ground_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &ground_shader,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &ground_shader,
+                        entry_point: Some("fs_main"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(HDR_FORMAT.into())],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: texture::DEPTH_FORMAT,
+                        depth_write_enabled: Some(true),
+                        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview_mask: None,
+                    cache: None,
+                });
         let joint_buffer = buffer::uniform_buffer(
             &context.device,
             Some("metropolis joint palette"),
@@ -1685,13 +1907,13 @@ impl Example for MetropolisExample {
         let cluster_counts_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("metropolis cluster counts"),
             size: (NUM_CLUSTERS as u64) * 4,
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let cluster_indices_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("metropolis cluster indices"),
             size: (NUM_CLUSTERS as u64) * (MAX_PER_CLUSTER as u64) * 4,
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let cluster_params_buffer = buffer::uniform_buffer(
@@ -1765,9 +1987,24 @@ impl Example for MetropolisExample {
             label: Some("metropolis GI probes"),
             // 4 SH coefficients (vec4) per probe.
             size: (PROBE_COUNT as u64) * 4 * 16,
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        context.queue.write_buffer(
+            &cluster_counts_buffer,
+            0,
+            bytemuck::cast_slice(&vec![0_u32; NUM_CLUSTERS as usize]),
+        );
+        context.queue.write_buffer(
+            &cluster_indices_buffer,
+            0,
+            bytemuck::cast_slice(&vec![0_u32; (NUM_CLUSTERS * MAX_PER_CLUSTER) as usize]),
+        );
+        context.queue.write_buffer(
+            &gi_probe_buffer,
+            0,
+            bytemuck::cast_slice(&vec![0.0_f32; (PROBE_COUNT * 16) as usize]),
+        );
         let gi_params_buffer = buffer::uniform_buffer(
             &context.device,
             Some("metropolis GI params"),
@@ -2386,70 +2623,76 @@ impl Example for MetropolisExample {
                         uniform_entry(13, wgpu::ShaderStages::FRAGMENT),
                     ],
                 });
-        let forward_bind_group = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("metropolis forward bind group"),
-                layout: &forward_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: frame_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: joint_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&gpu_scene._base_color.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&gpu_scene._base_color.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: light_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::TextureView(&shadow_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Sampler(&shadow_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: cluster_counts_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: cluster_indices_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: cluster_params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::TextureView(&spot_atlas_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: spot_shadow_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: gi_probe_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: gi_params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+        let forward_bind_groups = gpu_scene
+            ._base_colors
+            .iter()
+            .map(|base_color| {
+                context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("metropolis forward bind group"),
+                        layout: &forward_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: frame_uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: joint_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(&base_color.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Sampler(&base_color.sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: light_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::TextureView(&shadow_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: cluster_counts_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 8,
+                                resource: cluster_indices_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 9,
+                                resource: cluster_params_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 10,
+                                resource: wgpu::BindingResource::TextureView(&spot_atlas_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 11,
+                                resource: spot_shadow_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 12,
+                                resource: gi_probe_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 13,
+                                resource: gi_params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    })
+            })
+            .collect::<Vec<_>>();
 
         let forward_pipeline_layout =
             context
@@ -2543,6 +2786,26 @@ impl Example for MetropolisExample {
                         uniform_entry(11, wgpu::ShaderStages::FRAGMENT),
                         storage_read_frag(12),
                         uniform_entry(13, wgpu::ShaderStages::FRAGMENT),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 14,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2Array,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 15,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2Array,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
                     ],
                 });
         let static_bind_group = context
@@ -2606,6 +2869,16 @@ impl Example for MetropolisExample {
                     wgpu::BindGroupEntry {
                         binding: 13,
                         resource: gi_params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::TextureView(&gpu_static.normal.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: wgpu::BindingResource::TextureView(
+                            &gpu_static.metallic_roughness.view,
+                        ),
                     },
                 ],
             });
@@ -2856,97 +3129,103 @@ impl Example for MetropolisExample {
         // --- Ultra: ray-traced reflections ---------------------------------
         // Reuses the Sponza BVH the ReSTIR examples build, so rays can hit
         // geometry that is off-screen — the thing SSR fundamentally cannot do.
-        let rt_bvh_buffer = buffer::buffer_from_data(
-            &context.device,
-            Some("metropolis RT bvh"),
-            &sponza.bvh_nodes,
-            wgpu::BufferUsages::STORAGE,
-        );
-        let rt_triangle_buffer = buffer::buffer_from_data(
-            &context.device,
-            Some("metropolis RT triangles"),
-            &sponza.triangles,
-            wgpu::BufferUsages::STORAGE,
-        );
-        self.rt_counts = [sponza.bvh_nodes.len() as u32, sponza.triangles.len() as u32];
-        let rt_uniform_buffer = buffer::uniform_buffer(
-            &context.device,
-            Some("metropolis RT uniforms"),
-            &RtParams::zeroed(),
-        );
-        let rt_shader =
-            shader::wgsl_module(&context.device, Some("metropolis RT shader"), RT_SHADER);
-        let rt_layout = context
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("metropolis RT layout"),
-                entries: &[
-                    shadow_texture_entry(0),
-                    storage_read_frag(1),
-                    storage_read_frag(2),
-                    storage_read_frag(3),
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
-                            multisampled: false,
+        if self.config.rt_reflections {
+            let rt_bvh_buffer = buffer::buffer_from_data(
+                &context.device,
+                Some("metropolis RT bvh"),
+                &sponza.bvh_nodes,
+                wgpu::BufferUsages::STORAGE,
+            );
+            let rt_triangle_buffer = buffer::buffer_from_data(
+                &context.device,
+                Some("metropolis RT triangles"),
+                &sponza.triangles,
+                wgpu::BufferUsages::STORAGE,
+            );
+            self.rt_counts = [sponza.bvh_nodes.len() as u32, sponza.triangles.len() as u32];
+            let rt_uniform_buffer = buffer::uniform_buffer(
+                &context.device,
+                Some("metropolis RT uniforms"),
+                &RtParams::zeroed(),
+            );
+            let rt_shader =
+                shader::wgsl_module(&context.device, Some("metropolis RT shader"), RT_SHADER);
+            let rt_layout =
+                context
+                    .device
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("metropolis RT layout"),
+                        entries: &[
+                            shadow_texture_entry(0),
+                            storage_read_frag(1),
+                            storage_read_frag(2),
+                            storage_read_frag(3),
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 4,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Texture {
+                                    sample_type: wgpu::TextureSampleType::Float {
+                                        filterable: true,
+                                    },
+                                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                                    multisampled: false,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 5,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                                count: None,
+                            },
+                            uniform_entry(6, wgpu::ShaderStages::FRAGMENT),
+                            // Lights + shadow maps, so ray-traced hits are shaded with
+                            // the same local lighting the forward pass uses.
+                            storage_read_frag(7),
+                            shadow_texture_entry(8),
+                            shadow_sampler_entry(9),
+                            shadow_texture_entry(10),
+                            uniform_entry(11, wgpu::ShaderStages::FRAGMENT),
+                        ],
+                    });
+            let rt_pipeline_layout =
+                context
+                    .device
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("metropolis RT pipeline layout"),
+                        bind_group_layouts: &[Some(&rt_layout)],
+                        immediate_size: 0,
+                    });
+            let rt_pipeline =
+                context
+                    .device
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("metropolis RT pipeline"),
+                        layout: Some(&rt_pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &rt_shader,
+                            entry_point: Some("vs_main"),
+                            compilation_options: Default::default(),
+                            buffers: &[],
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    uniform_entry(6, wgpu::ShaderStages::FRAGMENT),
-                    // Lights + shadow maps, so ray-traced hits are shaded with
-                    // the same local lighting the forward pass uses.
-                    storage_read_frag(7),
-                    shadow_texture_entry(8),
-                    shadow_sampler_entry(9),
-                    shadow_texture_entry(10),
-                    uniform_entry(11, wgpu::ShaderStages::FRAGMENT),
-                ],
-            });
-        let rt_pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("metropolis RT pipeline layout"),
-                    bind_group_layouts: &[Some(&rt_layout)],
-                    immediate_size: 0,
-                });
-        let rt_pipeline = context
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("metropolis RT pipeline"),
-                layout: Some(&rt_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &rt_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &rt_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(HDR_FORMAT.into())],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview_mask: None,
-                cache: None,
-            });
-        self.rt_bvh_buffer = Some(rt_bvh_buffer);
-        self.rt_triangle_buffer = Some(rt_triangle_buffer);
-        self.rt_uniform_buffer = Some(rt_uniform_buffer);
-        self.rt_layout = Some(rt_layout);
-        self.rt_pipeline = Some(rt_pipeline);
+                        fragment: Some(wgpu::FragmentState {
+                            module: &rt_shader,
+                            entry_point: Some("fs_main"),
+                            compilation_options: Default::default(),
+                            targets: &[Some(HDR_FORMAT.into())],
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: None,
+                        multisample: wgpu::MultisampleState::default(),
+                        multiview_mask: None,
+                        cache: None,
+                    });
+            self.rt_bvh_buffer = Some(rt_bvh_buffer);
+            self.rt_triangle_buffer = Some(rt_triangle_buffer);
+            self.rt_uniform_buffer = Some(rt_uniform_buffer);
+            self.rt_layout = Some(rt_layout);
+            self.rt_pipeline = Some(rt_pipeline);
+        }
 
         // --- Bloom ---------------------------------------------------------
         let bloom_shader = shader::wgsl_module(
@@ -3213,9 +3492,11 @@ impl Example for MetropolisExample {
         self.gpu_static = Some(gpu_static);
         self.static_pipeline = Some(static_pipeline);
         self.static_bind_group = Some(static_bind_group);
+        self.ground_pipeline = Some(ground_pipeline);
+        self.ground_bind_group = Some(ground_bind_group);
         self.forward_pipeline = Some(forward_pipeline);
         self.present_pipeline = Some(present_pipeline);
-        self.forward_bind_group = Some(forward_bind_group);
+        self.forward_bind_groups = forward_bind_groups;
         self.present_layout = Some(present_layout);
         self.present_sampler = Some(present_sampler);
         self.shadow_static_pipeline = Some(shadow_static_pipeline);
@@ -3262,13 +3543,15 @@ impl Example for MetropolisExample {
         )?);
         self.joystick_overlay = Some(JoystickOverlay::new(context)?);
         self.gui = Some(MetropolisGui::new(context));
-        self.particles = Some(ParticleSystem::new(
-            context,
-            HDR_FORMAT,
-            self.scene_center,
-            self.scene_floor,
-            self.scene_extent,
-        ));
+        self.particles = (!cfg!(target_arch = "wasm32")).then(|| {
+            ParticleSystem::new(
+                context,
+                HDR_FORMAT,
+                self.scene_center,
+                self.scene_floor,
+                self.scene_extent,
+            )
+        });
         self.scene = Some(scene);
 
         let value = self.stats_text();
@@ -3315,7 +3598,9 @@ impl Example for MetropolisExample {
         let delta = self.frame_stats.delta_seconds().clamp(0.0, 1.0 / 15.0);
         self.elapsed_seconds += delta;
         self.camera.update(&self.joystick, delta);
-        if let Some(scene) = &mut self.scene {
+        if self.controls.animate_character
+            && let Some(scene) = &mut self.scene
+        {
             scene.advance(delta);
             self.joint_matrices = scene.joint_matrices();
         }
@@ -3350,9 +3635,46 @@ impl Example for MetropolisExample {
                 bytemuck::cast_slice(&self.instances),
             );
         }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(gpu_scene) = &self.gpu_scene {
+            // Browser builds avoid constructing Rapier's large static scene on
+            // the main thread. Keep a cheap, deterministic crowd walk instead:
+            // agents move in lanes, turn at the floor boundary, and never alter
+            // their grounded y coordinate.
+            let half_x = self.scene_extent.x * 0.5 * physics::INTERIOR_FRACTION;
+            let half_z = self.scene_extent.z * 0.5 * physics::INTERIOR_FRACTION;
+            let margin = self.cull_bounds[0].max(0.1);
+            let min_x = self.scene_center.x - (half_x - margin).max(margin);
+            let max_x = self.scene_center.x + (half_x - margin).max(margin);
+            let min_z = self.scene_center.z - (half_z - margin).max(margin);
+            let max_z = self.scene_center.z + (half_z - margin).max(margin);
+            for (index, instance) in self.instances.iter_mut().enumerate() {
+                let speed = self.cull_bounds[0] * (0.48 + (index % 7) as f32 * 0.035);
+                let yaw = instance.rotation[0];
+                instance.position_scale[0] += yaw.sin() * speed * delta;
+                instance.position_scale[2] += yaw.cos() * speed * delta;
+
+                let hit_x =
+                    instance.position_scale[0] <= min_x || instance.position_scale[0] >= max_x;
+                let hit_z =
+                    instance.position_scale[2] <= min_z || instance.position_scale[2] >= max_z;
+                instance.position_scale[0] = instance.position_scale[0].clamp(min_x, max_x);
+                instance.position_scale[2] = instance.position_scale[2].clamp(min_z, max_z);
+                if hit_x {
+                    instance.rotation[0] = -instance.rotation[0];
+                }
+                if hit_z {
+                    instance.rotation[0] = std::f32::consts::PI - instance.rotation[0];
+                }
+            }
+            context.queue.write_buffer(
+                &gpu_scene.instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.instances),
+            );
+        }
         self.dynamic_resolution
             .update(self.frame_stats.delta_seconds() * 1000.0);
-
         // Coarse auto-tune: re-tier only once dynamic resolution has run out of
         // headroom. Knobs baked into GPU resources at startup (shadow map size,
         // character budget, cluster grid) are preserved so nothing is resized.
@@ -3696,10 +4018,11 @@ impl Example for MetropolisExample {
             .forward_pipeline
             .as_ref()
             .ok_or_else(|| RenderError::message("metropolis forward pipeline unavailable"))?;
-        let forward_bind_group = self
-            .forward_bind_group
-            .as_ref()
-            .ok_or_else(|| RenderError::message("metropolis forward bind group unavailable"))?;
+        if self.forward_bind_groups.is_empty() {
+            return Err(RenderError::message(
+                "metropolis forward bind groups unavailable",
+            ));
+        }
         let present_pipeline = self
             .present_pipeline
             .as_ref()
@@ -3716,6 +4039,14 @@ impl Example for MetropolisExample {
             .static_bind_group
             .as_ref()
             .ok_or_else(|| RenderError::message("metropolis static bind group unavailable"))?;
+        let ground_pipeline = self
+            .ground_pipeline
+            .as_ref()
+            .ok_or_else(|| RenderError::message("metropolis ground pipeline unavailable"))?;
+        let ground_bind_group = self
+            .ground_bind_group
+            .as_ref()
+            .ok_or_else(|| RenderError::message("metropolis ground bind group unavailable"))?;
         let gpu_static = self
             .gpu_static
             .as_ref()
@@ -3750,7 +4081,7 @@ impl Example for MetropolisExample {
 
         // GPU frustum culling: compact the crowd to the visible set before the
         // forward pass consumes it via an indirect draw.
-        {
+        if !cfg!(target_arch = "wasm32") {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("metropolis cull pass"),
                 timestamp_writes: None,
@@ -3766,7 +4097,9 @@ impl Example for MetropolisExample {
         }
 
         // Bake the irradiance probe volume (192 probes — trivial cost).
-        if let (Some(pipeline), Some(bind)) = (&self.gi_pipeline, &self.gi_bind_group) {
+        if !cfg!(target_arch = "wasm32")
+            && let (Some(pipeline), Some(bind)) = (&self.gi_pipeline, &self.gi_bind_group)
+        {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("metropolis GI bake pass"),
                 timestamp_writes: None,
@@ -3777,7 +4110,9 @@ impl Example for MetropolisExample {
         }
 
         // Assign lights to froxels for this frame's clustered shading.
-        if let (Some(pipeline), Some(bind)) = (&self.cluster_pipeline, &self.cluster_bind_group) {
+        if !cfg!(target_arch = "wasm32")
+            && let (Some(pipeline), Some(bind)) = (&self.cluster_pipeline, &self.cluster_bind_group)
+        {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("metropolis cluster pass"),
                 timestamp_writes: None,
@@ -4013,26 +4348,65 @@ impl Example for MetropolisExample {
             // Dynamic resolution: render only into the top-left sub-rectangle.
             pass.set_viewport(0.0, 0.0, render_width, render_height, 0.0, 1.0);
 
-            // Static environment (Sponza) first, then the skinned crowd.
-            pass.set_pipeline(static_pipeline);
-            pass.set_bind_group(0, static_bind_group, &[]);
-            pass.set_vertex_buffer(0, gpu_static.vertex_buffer.slice(..));
-            pass.draw(0..gpu_static.vertex_count, 0..1);
+            // The full static-environment pipeline exceeds the portable WebGPU
+            // binding profile on some browsers. The WASM neural demo uses the
+            // lightweight crowd scene, while native keeps the full environment.
+            if !cfg!(target_arch = "wasm32") {
+                pass.set_pipeline(static_pipeline);
+                pass.set_bind_group(0, static_bind_group, &[]);
+                pass.set_vertex_buffer(0, gpu_static.vertex_buffer.slice(..));
+                pass.draw(0..gpu_static.vertex_count, 0..1);
+            } else {
+                pass.set_pipeline(ground_pipeline);
+                pass.set_bind_group(0, ground_bind_group, &[]);
+                pass.draw(0..6, 0..1);
+            }
 
             pass.set_pipeline(forward_pipeline);
-            pass.set_bind_group(0, forward_bind_group, &[]);
             pass.set_vertex_buffer(0, gpu_scene.vertex_buffer.slice(..));
-            // Draw only the GPU-culled visible instances via indirect args.
-            pass.set_vertex_buffer(1, visible_instance_buffer.slice(..));
             pass.set_index_buffer(gpu_scene.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed_indirect(draw_args_buffer, 0);
+            if gpu_scene.primitive_draws.len() > 1 {
+                pass.set_vertex_buffer(1, gpu_scene.instance_buffer.slice(..));
+                for (range, material_index) in &gpu_scene.primitive_draws {
+                    if let Some(bind_group) = self.forward_bind_groups.get(*material_index) {
+                        pass.set_bind_group(0, bind_group, &[]);
+                        pass.draw_indexed(range.clone(), 0, 0..instance_count);
+                    }
+                }
+            } else if cfg!(target_arch = "wasm32") {
+                pass.set_bind_group(0, &self.forward_bind_groups[0], &[]);
+                pass.set_vertex_buffer(1, gpu_scene.instance_buffer.slice(..));
+                pass.draw_indexed(0..gpu_scene.index_count, 0, 0..instance_count);
+            } else {
+                // Draw only the GPU-culled visible instances via indirect args.
+                pass.set_bind_group(0, &self.forward_bind_groups[0], &[]);
+                pass.set_vertex_buffer(1, visible_instance_buffer.slice(..));
+                pass.draw_indexed_indirect(draw_args_buffer, 0);
+            }
             // Particles are deliberately NOT drawn here — see the pass after
             // the reflections below.
         }
 
         // Screen-space reflections: march the depth buffer and sample the lit
         // colour, into a separate target the present pass composites.
-        {
+        if cfg!(target_arch = "wasm32") {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("metropolis WASM reflection clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.ssr_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        } else {
             let ssr_uniform_buffer = self
                 .ssr_uniform_buffer
                 .as_ref()
@@ -4342,7 +4716,8 @@ impl Example for MetropolisExample {
                 _ => "  [V] view: lit",
             };
             let value = format!(
-                "metropolis  |  {}\n{}\n{:.1} fps ({:.2} ms)\ntier: {}   render scale: {:.2}\nrender target: {}x{}   crowd: {} (visible {}){}",
+                "{}  |  {}\n{}\n{:.1} fps ({:.2} ms)\ntier: {}   render scale: {:.2}\nrender target: {}x{}   crowd: {} (visible {}){}",
+                "metropolis",
                 self.gpu_device_info,
                 match self.config.gi {
                     GiMode::Ibl => "GI: IBL ambient",
@@ -4391,12 +4766,17 @@ impl Example for MetropolisExample {
             if let Some(gui) = &mut self.gui {
                 let raw_input = gui.state.take_egui_input(&context.window);
                 let full_output = gui.context.run_ui(raw_input, |root_ui| {
+                    let max_panel_height =
+                        (root_ui.ctx().content_rect().height() - 24.0).max(180.0);
                     egui::Window::new("Metropolis")
                         .default_pos(egui::pos2(12.0, 200.0))
                         .default_width(300.0)
+                        .max_height(max_panel_height)
+                        .vscroll(true)
                         .resizable(false)
                         .collapsible(true)
                         .show(root_ui.ctx(), |ui| {
+                            ui.label("GPU-driven clustered-forward rendering");
                             ui.label(device.as_str());
                             ui.label(format!("{fps:.0} fps ({ms:.2} ms)   tier: {tier}"));
                             ui.label(format!("crowd {instance_count} · visible {cull_visible}"));

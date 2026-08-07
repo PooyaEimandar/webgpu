@@ -88,6 +88,7 @@
           { "@type": "ListItem", "position": 43, "name": "Metropolis", "url": "https://pooyaeimandar.github.io/webgpu/metropolis/" },
           { "@type": "ListItem", "position": 44, "name": "ReSTIR DI", "url": "https://pooyaeimandar.github.io/webgpu/restirdi/" },
           { "@type": "ListItem", "position": 45, "name": "ReSTIR GI", "url": "https://pooyaeimandar.github.io/webgpu/restirgi/" }
+          { "@type": "ListItem", "position": 47, "name": "geometry dash", "url": "https://pooyaeimandar.github.io/webgpu/geometrydash/" },
         ]
       }
     }
@@ -243,6 +244,17 @@
     <h1>Rust WebGPU examples</h1>
     <p>WASM and native wgpu ports of Sascha Willems' Vulkan rendering samples.</p>
     <div class="examples" aria-label="Examples">
+      <a href="./geometrydash/">
+        <picture>
+          <source srcset="./screenshots/geometrydash.webp" type="image/webp" />
+          <img src="./screenshots/geometrydash.jpg" alt="Geometry dash WebGPU game screenshot" />
+        </picture>
+        <span class="content">
+          <strong>Geometry dash</strong>
+          <span>One-button rhythm platforming with fixed-step physics, procedural GPU visuals, and touch
+            controls.</span>
+        </span>
+      </a>
       <a href="./triangle/">
         <picture>
           <source srcset="./screenshots/triangle.webp" type="image/webp" />
@@ -310,7 +322,8 @@
         </picture>
         <span class="content">
           <strong>Nanite-style meshlets</strong>
-          <span>Adapter-scaled populations, virtual geometry pages, meshlet LODs, two-pass HZB occlusion, indirect rasterization, and GPU skinning.</span>
+          <span>Adapter-scaled populations, virtual geometry pages, meshlet LODs, two-pass HZB occlusion, indirect
+            rasterization, and GPU skinning.</span>
         </span>
       </a>
       <a href="./metropolis/">
@@ -320,7 +333,8 @@
         </picture>
         <span class="content">
           <strong>Metropolis</strong>
-          <span>Forward+ Sponza scene with GPU culling, indirect draws, animated crowds, dynamic shadows, reflections, GI, and post-processing.</span>
+          <span>Forward+ Sponza scene with GPU culling, indirect draws, animated crowds, dynamic shadows, reflections,
+            GI, and post-processing.</span>
         </span>
       </a>
       <a href="./computenbody/">
@@ -340,7 +354,8 @@
         </picture>
         <span class="content">
           <strong>compute shader ray tracing</strong>
-          <span>Compute shader software ray tracing into a storage texture, displayed by a fullscreen present pass.</span>
+          <span>Compute shader software ray tracing into a storage texture, displayed by a fullscreen present
+            pass.</span>
         </span>
       </a>
       <a href="./raytracingshadows/">
@@ -380,7 +395,8 @@
         </picture>
         <span class="content">
           <strong>ReSTIR DI</strong>
-          <span>Direct-light reservoirs reused across time and neighboring pixels over Sponza and animated Jax geometry.</span>
+          <span>Direct-light reservoirs reused across time and neighboring pixels over Sponza and animated Jax
+            geometry.</span>
         </span>
       </a>
       <a href="./restirgi/">
@@ -390,7 +406,8 @@
         </picture>
         <span class="content">
           <strong>ReSTIR GI</strong>
-          <span>One-bounce path reservoirs with temporal and spatial reuse over the same animated Sponza test scene.</span>
+          <span>One-bounce path reservoirs with temporal and spatial reuse over the same animated Sponza test
+            scene.</span>
         </span>
       </a>
       <a href="./htmlmesh/">
@@ -400,7 +417,8 @@
         </picture>
         <span class="content">
           <strong>HTML mesh</strong>
-          <span>Offline-rasterized HTML surface mapped onto a 3D plane with ray-mapped pointer and keyboard input.</span>
+          <span>Offline-rasterized HTML surface mapped onto a 3D plane with ray-mapped pointer and keyboard
+            input.</span>
         </span>
       </a>
       <a href="./texture/">
@@ -540,7 +558,8 @@
         </picture>
         <span class="content">
           <strong>occlusion queries</strong>
-          <span>Teapot and sphere visibility test with native occlusion-query readback and a browser-safe WASM fallback.</span>
+          <span>Teapot and sphere visibility test with native occlusion-query readback and a browser-safe WASM
+            fallback.</span>
         </span>
       </a>
       <a href="./radialblur/">
@@ -560,7 +579,8 @@
         </picture>
         <span class="content">
           <strong>bloom</strong>
-          <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit scene.</span>
+          <span>Offscreen glow color pass blurred vertically and horizontally, then additively composited over the lit
+            scene.</span>
         </span>
       </a>
       <a href="./deferred/">
@@ -570,7 +590,8 @@
         </picture>
         <span class="content">
           <strong>deferred shading</strong>
-          <span>Position, normal, and albedo attachments filled in an MRT pass, then composed with six animated lights.</span>
+          <span>Position, normal, and albedo attachments filled in an MRT pass, then composed with six animated
+            lights.</span>
         </span>
       </a>
       <a href="./deferredmultisampling/">
@@ -590,7 +611,8 @@
         </picture>
         <span class="content">
           <strong>deferred shadows</strong>
-          <span>Three shadow-map layers rendered with vertex-only depth passes and sampled during deferred composition.</span>
+          <span>Three shadow-map layers rendered with vertex-only depth passes and sampled during deferred
+            composition.</span>
         </span>
       </a>
       <a href="./ssao/">
@@ -626,7 +648,8 @@
       <a href="./multisamplingalphatocoverage/">
         <picture>
           <source srcset="./screenshots/multisamplingalphatocoverage.webp" type="image/webp" />
-          <img src="./screenshots/multisamplingalphatocoverage.jpg" alt="Multisampling alpha-to-coverage oak trees screenshot" />
+          <img src="./screenshots/multisamplingalphatocoverage.jpg"
+            alt="Multisampling alpha-to-coverage oak trees screenshot" />
         </picture>
         <span class="content">
           <strong>multisampling alpha to coverage</strong>
@@ -680,7 +703,8 @@
         </picture>
         <span class="content">
           <strong>shadow mapping cascade</strong>
-          <span>Four frustum splits rendered into a layered depth texture, with the fragment shader sampling the matching cascade.</span>
+          <span>Four frustum splits rendered into a layered depth texture, with the fragment shader sampling the
+            matching cascade.</span>
         </span>
       </a>
       <a href="./shadowmappingomni/">
@@ -690,7 +714,8 @@
         </picture>
         <span class="content">
           <strong>omni directional shadow mapping</strong>
-          <span>Six cube-map light passes store point-light distance, then the scene shader samples the cube map for omni-directional shadows.</span>
+          <span>Six cube-map light passes store point-light distance, then the scene shader samples the cube map for
+            omni-directional shadows.</span>
         </span>
       </a>
     </div>

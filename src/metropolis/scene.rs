@@ -12,14 +12,17 @@ pub struct StaticVertex {
     pub uv: [f32; 2],
     /// Material index carried per-vertex (flat across the triangle).
     pub material: f32,
+    /// Tangent xyz plus bitangent handedness in w.
+    pub tangent: [f32; 4],
 }
 
 impl StaticVertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
         0 => Float32x3,
         1 => Float32x3,
         2 => Float32x2,
         3 => Float32,
+        4 => Float32x4,
     ];
 
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -39,33 +42,77 @@ pub fn expand_static_mesh(triangles: &[GpuTriangle]) -> Vec<StaticVertex> {
         let uv0 = [triangle.uv0_uv1[0], triangle.uv0_uv1[1]];
         let uv1 = [triangle.uv0_uv1[2], triangle.uv0_uv1[3]];
         let uv2 = [triangle.uv2_material[0], triangle.uv2_material[1]];
+        let p0 = glam::Vec3::from_array([triangle.p0[0], triangle.p0[1], triangle.p0[2]]);
+        let p1 = glam::Vec3::from_array([triangle.p1[0], triangle.p1[1], triangle.p1[2]]);
+        let p2 = glam::Vec3::from_array([triangle.p2[0], triangle.p2[1], triangle.p2[2]]);
+        let uv0_vec = glam::Vec2::from_array(uv0);
+        let uv1_vec = glam::Vec2::from_array(uv1);
+        let uv2_vec = glam::Vec2::from_array(uv2);
+        let edge1 = p1 - p0;
+        let edge2 = p2 - p0;
+        let delta1 = uv1_vec - uv0_vec;
+        let delta2 = uv2_vec - uv0_vec;
+        let determinant = delta1.x * delta2.y - delta1.y * delta2.x;
+        let (raw_tangent, raw_bitangent) = if determinant.abs() > 1e-6 {
+            let inverse = determinant.recip();
+            (
+                (edge1 * delta2.y - edge2 * delta1.y) * inverse,
+                (edge2 * delta1.x - edge1 * delta2.x) * inverse,
+            )
+        } else {
+            (edge1.normalize_or_zero(), edge2.normalize_or_zero())
+        };
+
+        let tangent_for = |normal: [f32; 3]| {
+            let normal = glam::Vec3::from_array(normal).normalize_or_zero();
+            let projected = raw_tangent - normal * normal.dot(raw_tangent);
+            let tangent = if projected.length_squared() > 1e-8 {
+                projected.normalize()
+            } else {
+                let helper = if normal.y.abs() > 0.95 {
+                    glam::Vec3::X
+                } else {
+                    glam::Vec3::Y
+                };
+                helper.cross(normal).normalize_or_zero()
+            };
+            let handedness = if normal.cross(tangent).dot(raw_bitangent) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            [tangent.x, tangent.y, tangent.z, handedness]
+        };
+        let n0 = [triangle.n0[0], triangle.n0[1], triangle.n0[2]];
+        let n1 = [triangle.n1[0], triangle.n1[1], triangle.n1[2]];
+        let n2 = [triangle.n2[0], triangle.n2[1], triangle.n2[2]];
         vertices.push(StaticVertex {
-            position: [triangle.p0[0], triangle.p0[1], triangle.p0[2]],
-            normal: [triangle.n0[0], triangle.n0[1], triangle.n0[2]],
+            position: p0.to_array(),
+            normal: n0,
             uv: uv0,
             material,
+            tangent: tangent_for(n0),
         });
         vertices.push(StaticVertex {
-            position: [triangle.p1[0], triangle.p1[1], triangle.p1[2]],
-            normal: [triangle.n1[0], triangle.n1[1], triangle.n1[2]],
+            position: p1.to_array(),
+            normal: n1,
             uv: uv1,
             material,
+            tangent: tangent_for(n1),
         });
         vertices.push(StaticVertex {
-            position: [triangle.p2[0], triangle.p2[1], triangle.p2[2]],
-            normal: [triangle.n2[0], triangle.n2[1], triangle.n2[2]],
+            position: p2.to_array(),
+            normal: n2,
             uv: uv2,
             material,
+            tangent: tangent_for(n2),
         });
     }
     vertices
 }
 
-/// How a material texture array's mips should be downsampled. `Normal` and
-/// `Linear` are used once the normal / metallic-roughness arrays come online in
-/// a later phase.
+/// How a material texture array's mips should be downsampled.
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum TextureKind {
     /// sRGB-encoded color: average in linear space.
     Color,
@@ -86,6 +133,8 @@ pub struct GpuStatic {
     pub vertex_count: u32,
     pub material_buffer: wgpu::Buffer,
     pub base_color: MaterialTextureArray,
+    pub normal: MaterialTextureArray,
+    pub metallic_roughness: MaterialTextureArray,
     pub sampler: wgpu::Sampler,
     pub center: glam::Vec3,
     pub floor_height: f32,
@@ -119,6 +168,22 @@ impl GpuStatic {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             TextureKind::Color,
         )?;
+        let normal = create_material_texture_array(
+            device,
+            queue,
+            "metropolis static normal",
+            &sponza.normal_layers,
+            wgpu::TextureFormat::Rgba8Unorm,
+            TextureKind::Normal,
+        )?;
+        let metallic_roughness = create_material_texture_array(
+            device,
+            queue,
+            "metropolis static metallic roughness",
+            &sponza.metallic_roughness_layers,
+            wgpu::TextureFormat::Rgba8Unorm,
+            TextureKind::Linear,
+        )?;
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("metropolis sponza sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -141,6 +206,8 @@ impl GpuStatic {
             vertex_count,
             material_buffer,
             base_color,
+            normal,
+            metallic_roughness,
             sampler,
             center,
             floor_height,

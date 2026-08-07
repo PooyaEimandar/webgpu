@@ -98,12 +98,14 @@ fn aces_film(color: vec3<f32>) -> vec3<f32> {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let max_uv = present.uv_scale.xy - 0.5 / present.dims.xy;
     let uv = min(input.uv * present.uv_scale.xy, max_uv);
+    let source = textureSampleLevel(hdr_texture, hdr_sampler, uv, 0.0).rgb;
+
     // Lit colour plus reflections (half-res, upsampled depth-aware).
     let reflection = upsample_reflection(uv);
     // Bloom targets cover the whole frame, so they sample at plain uv.
     let bloom = textureSampleLevel(bloom_texture, hdr_sampler, input.uv, 0.0).rgb
         * present.uv_scale.w;
-    var hdr = textureSampleLevel(hdr_texture, hdr_sampler, uv, 0.0).rgb + reflection + bloom;
+    var hdr = source + reflection + bloom;
     if present.dims.z > 0.5 {
         let pixel = clamp(
             vec2<i32>(uv * present.dims.xy),

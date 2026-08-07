@@ -20,6 +20,7 @@ struct VertexInput {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) material: f32,
+    @location(4) tangent: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -28,6 +29,7 @@ struct VertexOutput {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) @interpolate(flat) material: u32,
+    @location(4) tangent: vec4<f32>,
 }
 
 struct GpuLight {
@@ -75,6 +77,8 @@ struct GiParams {
 @group(0) @binding(11) var<uniform> spot_shadows: SpotShadows;
 @group(0) @binding(12) var<storage, read> gi_probes: array<vec4<f32>>;
 @group(0) @binding(13) var<uniform> gi: GiParams;
+@group(0) @binding(14) var normal_textures: texture_2d_array<f32>;
+@group(0) @binding(15) var metallic_roughness_textures: texture_2d_array<f32>;
 
 // Evaluate a probe's SH-L1 irradiance along `n` (cosine-lobe convolved).
 fn sh_irradiance(base: u32, n: vec3<f32>) -> vec3<f32> {
@@ -164,6 +168,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.normal = normalize(input.normal);
     output.uv = input.uv;
     output.material = u32(max(0.0, input.material));
+    output.tangent = input.tangent;
     return output;
 }
 
@@ -302,13 +307,56 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let albedo = texel.rgb * material.base_color.rgb;
-    let metallic = clamp(material.params.x, 0.0, 1.0);
-    let roughness = clamp(material.emission_roughness.w, 0.05, 1.0);
+    var metallic = clamp(material.params.x, 0.0, 1.0);
+    var roughness = clamp(material.emission_roughness.w, 0.045, 1.0);
+    if material.texture_settings.z > 0.5 {
+        let metallic_roughness = textureSampleLevel(
+            metallic_roughness_textures,
+            base_color_sampler,
+            input.uv,
+            layer,
+            0.0,
+        );
+        roughness = clamp(roughness * metallic_roughness.g, 0.045, 1.0);
+        metallic = clamp(metallic * metallic_roughness.b, 0.0, 1.0);
+    }
 
     var normal = normalize(input.normal);
     let view_dir = normalize(frame.camera_position.xyz - input.world_position);
     if dot(normal, view_dir) < 0.0 {
         normal = -normal;
+    }
+    if material.texture_settings.y > 0.5 {
+        var tangent_normal = textureSampleLevel(
+            normal_textures,
+            base_color_sampler,
+            input.uv,
+            layer,
+            0.0,
+        ).xyz * 2.0 - 1.0;
+        tangent_normal = vec3<f32>(
+            tangent_normal.xy * material.texture_settings.xx,
+            tangent_normal.z,
+        );
+        tangent_normal = normalize(tangent_normal);
+        var tangent = normalize(input.tangent.xyz - normal * dot(normal, input.tangent.xyz));
+        if dot(tangent, tangent) < 0.001 {
+            let helper = select(
+                vec3<f32>(0.0, 1.0, 0.0),
+                vec3<f32>(1.0, 0.0, 0.0),
+                abs(normal.y) > 0.95,
+            );
+            tangent = normalize(cross(helper, normal));
+        }
+        let bitangent = normalize(cross(normal, tangent)) * input.tangent.w;
+        normal = normalize(
+            tangent * tangent_normal.x
+                + bitangent * tangent_normal.y
+                + normal * tangent_normal.z,
+        );
+        if dot(normal, view_dir) < 0.0 {
+            normal = -normal;
+        }
     }
     let light_dir = normalize(-frame.sun_direction.xyz);
     let half_dir = normalize(view_dir + light_dir);

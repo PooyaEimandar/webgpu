@@ -29,7 +29,6 @@ const SPONZA_BVH_URL: &str = "../assets/models/sponza.bvh";
 const JAX_URL: &str = "assets/models/jax.gltf";
 #[cfg(target_arch = "wasm32")]
 const JAX_URL: &str = "../assets/models/jax.gltf";
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct GpuTriangle {
@@ -121,8 +120,8 @@ pub struct StaticScene {
 #[derive(Clone, Debug)]
 pub struct RestirAssets {
     pub sponza: StaticScene,
-    pub jax: SkinnedGltfScene,
-    pub jax_material_index: u32,
+    pub jax: Option<SkinnedGltfScene>,
+    pub jax_material_index: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -133,6 +132,16 @@ struct Resource {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_restir_assets() -> RenderResult<RestirAssets> {
+    load_restir_assets_impl(true)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_restir_static_assets() -> RenderResult<RestirAssets> {
+    load_restir_assets_impl(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_restir_assets_impl(include_jax: bool) -> RenderResult<RestirAssets> {
     let loader = AssetLoader::new();
     let gltf_bytes = loader.fetch_url_bytes(SPONZA_URL)?;
     let gltf = gltf::Gltf::from_slice(&gltf_bytes).map_err(RenderError::source)?;
@@ -146,8 +155,13 @@ pub fn load_restir_assets() -> RenderResult<RestirAssets> {
         .collect::<Vec<_>>();
     let fetched = loader.fetch_url_bytes_batch(&requests)?;
     let mut sponza = build_static_scene(&loader, &gltf, &resources, &fetched, true)?;
-    let jax = crate::gltf_skin::load_skinned_gltf_scene(JAX_URL)?;
-    let jax_material_index = append_jax_material(&mut sponza, &jax)?;
+    let (jax, jax_material_index) = if include_jax {
+        let jax = crate::gltf_skin::load_skinned_gltf_scene(JAX_URL)?;
+        let material_index = append_jax_material(&mut sponza, &jax)?;
+        (Some(jax), Some(material_index))
+    } else {
+        (None, None)
+    };
     Ok(RestirAssets {
         sponza,
         jax,
@@ -157,6 +171,16 @@ pub fn load_restir_assets() -> RenderResult<RestirAssets> {
 
 #[cfg(target_arch = "wasm32")]
 pub async fn load_restir_assets() -> RenderResult<RestirAssets> {
+    load_restir_assets_impl(true).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn load_restir_static_assets() -> RenderResult<RestirAssets> {
+    load_restir_assets_impl(false).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn load_restir_assets_impl(include_jax: bool) -> RenderResult<RestirAssets> {
     let loader = AssetLoader::new();
     let gltf_bytes = loader.fetch_url_bytes(SPONZA_URL).await?;
     let gltf = gltf::Gltf::from_slice(&gltf_bytes).map_err(RenderError::source)?;
@@ -170,8 +194,13 @@ pub async fn load_restir_assets() -> RenderResult<RestirAssets> {
         .collect::<Vec<_>>();
     let fetched = loader.fetch_url_bytes_batch(&requests).await?;
     let mut sponza = build_static_scene(&loader, &gltf, &resources, &fetched, true)?;
-    let jax = crate::gltf_skin::load_skinned_gltf_scene(JAX_URL).await?;
-    let jax_material_index = append_jax_material(&mut sponza, &jax)?;
+    let (jax, jax_material_index) = if include_jax {
+        let jax = crate::gltf_skin::load_skinned_gltf_scene(JAX_URL).await?;
+        let material_index = append_jax_material(&mut sponza, &jax)?;
+        (Some(jax), Some(material_index))
+    } else {
+        (None, None)
+    };
     Ok(RestirAssets {
         sponza,
         jax,

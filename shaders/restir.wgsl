@@ -1859,11 +1859,12 @@ fn stable_direct(surface: Surface, index: u32) -> vec3<f32> {
     // stable_sun_lighting disk in both modes, so sampling it here would
     // double-count it and waste strata on a light with its own estimator.
     let first_light = select(0u, 1u, u32(uniforms.settings1.z) > 1u);
+    let sample_count = 4u;
     var radiance = vec3<f32>(0.0);
-    for (var sample_index = 0u; sample_index < 4u; sample_index += 1u) {
+    for (var sample_index = 0u; sample_index < sample_count; sample_index += 1u) {
         radiance += resampled_direct(surface, &seed, 8u, first_light);
     }
-    return radiance * 0.25;
+    return radiance / f32(sample_count);
 }
 
 fn shadow_guide_dynamic(guide: f32) -> f32 {
@@ -1990,13 +1991,16 @@ fn accumulate_radiance(
     if uniforms.settings2.x > 0.5 {
         reactive = max(reactive, select(0.28, 0.36, gi));
     }
-    if gbuffer_dynamic(gbuffer) {
+    // A skinned object is not necessarily moving. When animation is paused,
+    // keep the longer static history so the character can fully converge.
+    let dynamic_motion = gbuffer_dynamic(gbuffer) && uniforms.settings2.w > 0.5;
+    if dynamic_motion {
         reactive = max(reactive, 0.18);
     }
-    let history_cap = select(
+    var history_cap = select(
         select(0.90, 0.95, gi),
         select(0.80, 0.88, gi),
-        gbuffer_dynamic(gbuffer),
+        dynamic_motion,
     );
     let base_history_weight = min(history_count / (history_count + 1.0), history_cap);
     let history_weight = base_history_weight * (1.0 - reactive * 0.92);

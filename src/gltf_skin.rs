@@ -258,11 +258,20 @@ impl AnimationChannel {
 }
 
 #[derive(Clone, Debug)]
+pub struct SkinnedPrimitive {
+    pub index_range: std::ops::Range<u32>,
+    pub material: SkinnedMaterial,
+    pub base_color_image: texture::ImageRgba8,
+    pub sampler_options: texture::TextureSamplerOptions,
+}
+
+#[derive(Clone, Debug)]
 pub struct SkinnedGltfScene {
     pub mesh: SkinnedMesh,
     pub material: SkinnedMaterial,
     pub base_color_image: texture::ImageRgba8,
     pub sampler_options: texture::TextureSamplerOptions,
+    pub primitives: Vec<SkinnedPrimitive>,
     nodes: Vec<SkinNode>,
     mesh_node: usize,
     mesh_skin: usize,
@@ -425,6 +434,7 @@ fn skinned_scene_from_gltf(
     let mut material = None;
     let mut sampler_options = texture::TextureSamplerOptions::default();
     let mut base_color_image = None;
+    let mut primitives = Vec::new();
 
     for node in gltf.nodes() {
         let parent = node.index();
@@ -448,6 +458,7 @@ fn skinned_scene_from_gltf(
             &mut material,
             &mut sampler_options,
             &mut base_color_image,
+            &mut primitives,
             &mut mesh_node,
             &mut mesh_skin,
             0,
@@ -468,12 +479,19 @@ fn skinned_scene_from_gltf(
         Some(image) => image,
         None => white_image()?,
     };
+    let fallback_image = base_color_image.clone();
+    for primitive in &mut primitives {
+        if primitive.base_color_image.rgba.is_empty() {
+            primitive.base_color_image = fallback_image.clone();
+        }
+    }
 
     Ok(SkinnedGltfScene {
         mesh,
         material: material.unwrap_or_default(),
         base_color_image,
         sampler_options,
+        primitives,
         nodes,
         mesh_node: mesh_node
             .ok_or_else(|| RenderError::message("skinned glTF has no mesh node"))?,
@@ -494,6 +512,7 @@ fn collect_skinned_node(
     material: &mut Option<SkinnedMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
+    primitives: &mut Vec<SkinnedPrimitive>,
     mesh_node: &mut Option<usize>,
     mesh_skin: &mut Option<usize>,
     depth: u32,
@@ -528,6 +547,7 @@ fn collect_skinned_node(
                 material,
                 sampler_options,
                 base_color_image,
+                primitives,
             )?;
         }
     }
@@ -542,6 +562,7 @@ fn collect_skinned_node(
             material,
             sampler_options,
             base_color_image,
+            primitives,
             mesh_node,
             mesh_skin,
             depth + 1,
@@ -561,6 +582,7 @@ fn append_skinned_primitive(
     material: &mut Option<SkinnedMaterial>,
     sampler_options: &mut texture::TextureSamplerOptions,
     base_color_image: &mut Option<texture::ImageRgba8>,
+    primitives: &mut Vec<SkinnedPrimitive>,
 ) -> RenderResult<()> {
     let reader = primitive.reader(|buffer| {
         buffers
@@ -603,7 +625,20 @@ fn append_skinned_primitive(
         ));
     }
 
+    let primitive_material = primitive.material();
+    let metallic_roughness = primitive_material.pbr_metallic_roughness();
+    let (base_color_factor, texture_info) =
+        if let Some(spec_gloss) = primitive_material.pbr_specular_glossiness() {
+            (spec_gloss.diffuse_factor(), spec_gloss.diffuse_texture())
+        } else {
+            (
+                metallic_roughness.base_color_factor(),
+                metallic_roughness.base_color_texture(),
+            )
+        };
+
     let base_index = vertices.len() as u32;
+    let primitive_start = indices.len() as u32;
     for ((((position, normal), uv), color), (joints, weights)) in positions
         .iter()
         .zip(normals.iter())
@@ -615,7 +650,11 @@ fn append_skinned_primitive(
             position: *position,
             normal: *normal,
             uv: *uv,
-            color: *color,
+            color: [
+                color[0] * base_color_factor[0],
+                color[1] * base_color_factor[1],
+                color[2] * base_color_factor[2],
+            ],
             joints: [
                 joints[0] as f32,
                 joints[1] as f32,
@@ -632,20 +671,36 @@ fn append_skinned_primitive(
         indices.extend((0..positions.len() as u32).map(|index| base_index + index));
     }
 
-    // The merged mesh carries a single material, so the first primitive's
-    // material wins (and the first base-color texture found); overwriting
-    // per primitive would leave the whole mesh with the last one instead.
-    let primitive_material = primitive.material();
-    let pbr = primitive_material.pbr_metallic_roughness();
-    if material.is_none() {
-        *material = Some(SkinnedMaterial {
-            base_color_factor: pbr.base_color_factor(),
-            double_sided: primitive_material.double_sided(),
+    let primitive_end = indices.len() as u32;
+    let primitive_sampler = texture_info
+        .as_ref()
+        .map(|info| sampler_options_from_gltf(info.texture().sampler()))
+        .unwrap_or_default();
+    let primitive_image = texture_info
+        .as_ref()
+        .and_then(|info| images.get(info.texture().source().index()).cloned())
+        .unwrap_or(texture::ImageRgba8 {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
         });
+    let skinned_material = SkinnedMaterial {
+        base_color_factor,
+        double_sided: primitive_material.double_sided(),
+    };
+    primitives.push(SkinnedPrimitive {
+        index_range: primitive_start..primitive_end,
+        material: skinned_material,
+        base_color_image: primitive_image,
+        sampler_options: primitive_sampler,
+    });
+
+    if material.is_none() {
+        *material = Some(skinned_material);
     }
 
     if base_color_image.is_none()
-        && let Some(texture_info) = pbr.base_color_texture()
+        && let Some(texture_info) = texture_info
     {
         let base_color_texture = texture_info.texture();
         let source_index = base_color_texture.source().index();

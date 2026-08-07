@@ -6,7 +6,7 @@ struct GBuffer {
 }
 
 struct AtrousParams {
-    // x: stride, y: 1 when denoising the GI signal.
+    // x: stride, y: 0 = DI, 1 = GI.
     stride: vec4<u32>,
 }
 
@@ -60,6 +60,7 @@ fn cs_atrous(@builtin(global_invocation_id) id: vec3<u32>) {
     let center_dynamic_visibility = shadow_guide_dynamic(center_moments.w);
     let center_filter_visibility = shadow_guide_filter(center_moments.w);
     let stride = i32(params.stride.x);
+    let gi_signal = params.stride.y >= 1u;
     var center_color = center.rgb;
     var center_luminance = luminance(center_color);
     // The first pass combines temporally accumulated luminance moments with
@@ -209,24 +210,31 @@ fn cs_atrous(@builtin(global_invocation_id) id: vec3<u32>) {
             let shadow_weight = exp2(-filter_visibility_delta * shadow_sharpness);
             let sample = textureLoad(source_texture, sample_pixel, 0);
             let kernel_weight = kernel[abs(x)] * kernel[abs(y)];
-            let depth_scale = max(0.03, center_depth * 0.02) * f32(stride);
+            let depth_scale = max(0.03, center_depth * 0.02)
+                * f32(stride);
             let depth_weight = exp2(
                 -abs(center_depth - sample_gbuffer.position_depth.w) / depth_scale,
             );
+            // Curved skinned surfaces change normals rapidly even within one
+            // smooth patch. The generic exponent rejects nearly every neck
+            // and arm tap, leaving the raw Monte Carlo stipple untouched.
+            // Dynamic/static separation and the depth stop still protect the
+            // silhouette.
+            let normal_exponent = 32.0;
             let normal_weight = pow(
                 max(dot(center_normal, sample_gbuffer.normal_roughness.xyz), 0.0),
-                32.0,
+                normal_exponent,
             );
             let sample_luminance = luminance(sample.rgb);
             // GI needs a wider luminance stop: its residual noise sits in
             // bright pools where a tight stop preserves it as flicker.
-            let base_luminance_sigma = select(0.45, 0.55, params.stride.y == 1u);
+            let base_luminance_sigma = select(0.45, 0.55, gi_signal);
             // Widening the luminance stop with variance is right for GI noise,
             // but a moving shadow edge is *also* a variance spike — so for DI
             // this opened the stop to ~4.5x sigma exactly where the shadow
             // needed holding, removing the last edge stop and smearing it.
             // Keep GI wide; keep DI mostly closed.
-            let variance_gain = select(0.6, 1.75, params.stride.y == 1u);
+            let variance_gain = select(0.6, 1.75, gi_signal);
             let variance_scale = 1.0
                 + min(sqrt(max(adaptive_variance, 0.0)), 2.0) * variance_gain;
             let luminance_sigma = base_luminance_sigma * variance_scale;

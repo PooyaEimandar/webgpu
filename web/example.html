@@ -192,9 +192,9 @@
 
         // Dynamic import so unsupported browsers never download the module.
         const { default: init } = await import(
-          "./__EXAMPLE__.js?example=__EXAMPLE__"
+          "./__EXAMPLE__.js?build=__BUILD_ID__"
         );
-        await init();
+        await init(new URL("./__EXAMPLE___bg.wasm?build=__BUILD_ID__", import.meta.url));
         setLoadingLabel("Loading scene data...");
         resizeCanvasToViewport();
         hideLoadingWhenCanvasExists();

@@ -18,11 +18,12 @@ egui = { version = "0.35.0", default-features = false }
 egui-wgpu = { version = "0.35.0", default-features = false }
 egui-winit = { version = "0.35.0", default-features = false }
 gltf = { version = "1.4.1", default-features = false, features = [
+    "KHR_materials_pbrSpecularGlossiness",
     "names",
     "utils",
 ] }
 http = { version = "1.4.2" }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
 # bvh 0.12 links nalgebra 0.34; accel.rs needs that exact version for
 nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = false, features = [

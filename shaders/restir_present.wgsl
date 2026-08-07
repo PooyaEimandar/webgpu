@@ -292,9 +292,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         local_weight > 0.001,
     );
     let local_contrast = abs(luminance(resolved) - luminance(local_average));
-    let sharpening = 0.07
+    // Sharpen only converged lighting. An unsharp mask over a noisy estimate
+    // turns tiny frame-to-frame changes into the visible "dancing pixels".
+    let variance_stability = 1.0 - smoothstep(0.008, 0.12, variance);
+    let sharpening = 0.05
         * (1.0 - clamp(local_contrast * 0.4, 0.0, 0.8))
-        * (1.0 - edge);
+        * (1.0 - edge)
+        * variance_stability;
     var hdr = max(resolved + (resolved - local_average) * sharpening, vec3<f32>(0.0));
     if gbuffer_valid(center_gbuffer) {
         hdr *= demodulation_albedo(bilinear_albedo(uv, dimensions, center_gbuffer));

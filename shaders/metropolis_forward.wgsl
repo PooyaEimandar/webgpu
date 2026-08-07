@@ -204,6 +204,12 @@ fn rotate_y(value: vec3<f32>, angle: f32) -> vec3<f32> {
     return vec3<f32>(value.x * c + value.z * s, value.y, -value.x * s + value.z * c);
 }
 
+fn rotate_x(value: vec3<f32>, angle: f32) -> vec3<f32> {
+    let c = cos(angle);
+    let s = sin(angle);
+    return vec3<f32>(value.x, value.y * c - value.z * s, value.y * s + value.z * c);
+}
+
 fn skin_matrix(joints: vec4<f32>, weights: vec4<f32>) -> mat4x4<f32> {
     let ids = vec4<u32>(joints);
     return joint_matrices[ids.x] * weights.x
@@ -222,9 +228,11 @@ fn vs_main(vertex: SkinnedVertexInput, instance: InstanceInput) -> VertexOutput 
         local_normal = normalize((skin * vec4<f32>(local_normal, 0.0)).xyz);
     }
 
-    let scaled = local_position * instance.position_scale.w;
+    let oriented_position = rotate_x(local_position, instance.rotation.y);
+    let oriented_normal = rotate_x(local_normal, instance.rotation.y);
+    let scaled = oriented_position * instance.position_scale.w;
     let world_position = rotate_y(scaled, instance.rotation.x) + instance.position_scale.xyz;
-    let world_normal = normalize(rotate_y(local_normal, instance.rotation.x));
+    let world_normal = normalize(rotate_y(oriented_normal, instance.rotation.x));
 
     var output: VertexOutput;
     output.clip_position = frame.view_projection * vec4<f32>(world_position, 1.0);
