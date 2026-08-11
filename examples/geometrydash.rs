@@ -304,7 +304,7 @@ impl Game {
             State::Complete => "LEVEL COMPLETE - TAP TO REPLAY",
         };
         let value = format!(
-            "GEOMETRY DASH\nAttempt {}    {:03}%\n{}",
+            "GEOMETRY DASH\nDesigned by Ryan Eimandar\nAttempt {}    {:03}%\n{}",
             self.attempts,
             (self.scroll / END * 100.).clamp(0., 100.) as u32,
             message
