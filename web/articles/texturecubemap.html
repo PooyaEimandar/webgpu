@@ -1,0 +1,137 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 04</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">A cubemap stores an environment in six square images. This Rust and wgpu example samples one cubemap to draw both a skybox and a reflective sphere. It brings together cube texture views, WGSL reflection vectors, and the depth settings that keep the background behind the scene.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Texture cubemap demo at a glance">
+      <div><dt>Cubemap faces</dt><dd>6</dd></div>
+      <div><dt>Sphere vertices</dt><dd>2,145</dd></div>
+      <div><dt>Draw calls</dt><dd>2</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#skybox-and-reflections">One environment, two uses</a></li>
+        <li><a href="#cubemap-faces">Six faces and their loading order</a></li>
+        <li><a href="#cube-texture-view">Create and bind a cube texture view</a></li>
+        <li><a href="#skybox-depth">Keep the skybox at the far plane</a></li>
+        <li><a href="#environment-reflections">Reflect the environment in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="skybox-and-reflections" tabindex="-1">One environment, two uses</h2>
+    <p>In the <a href="../texture/#about">2D texture example</a>, UV coordinates selected a point in an image. Here I use a 3D direction to select a point in an environment. The cubemap lookup chooses the appropriate face and the position within it.</p>
+    <p>The demo draws a skybox around the camera, then a sphere that reflects the same bridge and river scene. Both are visible together and share one cubemap. The camera is fixed at <code>(0, 0, 3.6)</code>; there are no camera controls or automatic animation. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/texturecubemap.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The background and the sphere sample the same cubemap with different directions. The sphere&rsquo;s curved normals bend the reflected view of the bridge.</figcaption>
+    </figure>
+
+    <p>The skybox uses 36 vertices that each store only a position. The sphere is generated with 64 segments and 32 rings, producing 2,145 vertices and 12,288 indices. Its vertices contain position and normal, with a stride of 24 bytes. No UV attribute is needed for this reflection lookup.</p>
+
+    <h2 id="cubemap-faces" tabindex="-1">Six faces and their loading order</h2>
+    <p>A cubemap covers the positive and negative directions of the X, Y, and Z axes. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/skybox.rs">skybox loader</a> reads six bundled Bridge2 textures from <code>assets/textures/skybox/bridge2</code>. Each is a 1024 &times; 1024 image stored in an uncompressed RGBA8 KTX1 file.</p>
+    <p>The order is part of the data contract. Each image becomes the corresponding array layer of the GPU texture:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="cubemap-faces-caption" tabindex="0">
+      <table>
+        <caption id="cubemap-faces-caption">Cubemap face order in the texture array</caption>
+        <thead>
+          <tr><th scope="col">Array layer</th><th scope="col">Direction</th><th scope="col">Asset</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Positive X (+X)</td><td><code>posx.ktx</code></td></tr>
+          <tr><th scope="row">1</th><td>Negative X (&minus;X)</td><td><code>negx.ktx</code></td></tr>
+          <tr><th scope="row">2</th><td>Positive Y (+Y)</td><td><code>posy.ktx</code></td></tr>
+          <tr><th scope="row">3</th><td>Negative Y (&minus;Y)</td><td><code>negy.ktx</code></td></tr>
+          <tr><th scope="row">4</th><td>Positive Z (+Z)</td><td><code>posz.ktx</code></td></tr>
+          <tr><th scope="row">5</th><td>Negative Z (&minus;Z)</td><td><code>negz.ktx</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The native example reads the files from the checkout. The browser fetches them from the site&rsquo;s shared assets directory. All six faces are loaded and decoded before the renderer starts. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/ktx.rs">KTX decoder</a> extracts the base image into RGBA8 pixels; this path is not a general compressed KTX2 loader.</p>
+    <p>When replacing the environment, use six square faces with matching dimensions and compatible orientations. A swapped or rotated face creates a discontinuity in the environment even when the texture upload succeeds.</p>
+
+    <h2 id="cube-texture-view" tabindex="-1">Create and bind a cube texture view</h2>
+    <p>Initialization in the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturecubemap.rs">Rust example</a> passes the decoded faces to the cubemap helper:</p>
+    <pre tabindex="0" aria-label="Create a cubemap from six decoded images in Rust"><code><span class="code-keyword">let</span> cubemap_texture = texture::Texture::from_rgba8_cube(
+    &amp;context.device,
+    &amp;context.queue,
+    Some("runtime skybox cubemap"),
+    &amp;cubemap_images,
+)?;</code></pre>
+    <p>The <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/texture.rs">helper used by this checkout</a> creates a <code>TextureDimension::D2</code> texture with six array layers in <code>Rgba8UnormSrgb</code> format. It uploads each face to a different layer, then exposes those layers through a <a href="https://docs.rs/wgpu/latest/wgpu/enum.TextureViewDimension.html#variant.Cube"><code>TextureViewDimension::Cube</code></a> view.</p>
+    <p>The cube view is what lets the shader sample by direction. The underlying storage is six 2D layers, not a volume texture. This helper creates one mip level and uses linear minification and magnification filters with <code>ClampToEdge</code> sampler addressing. It does not generate a mip chain or prefilter the environment for rough reflections.</p>
+    <p>Both pipelines share bind group <code>0</code>: binding <code>0</code> holds the uniforms, binding <code>1</code> the cube view, and binding <code>2</code> the sampler. The corresponding texture declarations in WGSL are:</p>
+    <pre tabindex="0" aria-label="WGSL cubemap and sampler bindings"><code>@group(0) @binding(1)
+<span class="code-keyword">var</span> cubemap_texture: texture_cube&lt;f32&gt;;
+
+@group(0) @binding(2)
+<span class="code-keyword">var</span> cubemap_sampler: sampler;</code></pre>
+    <p>The uniform buffer is visible to both vertex and fragment stages. Besides the transformation matrices used by the vertex shaders, it contains the camera position used by the sphere&rsquo;s fragment shader.</p>
+
+    <h2 id="skybox-depth" tabindex="-1">Keep the skybox at the far plane</h2>
+    <p>A skybox should feel distant as the camera moves. The example removes translation from the skybox view matrix while retaining its rotation. This keeps the environment centered on the camera, with no translation parallax.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturecubemap.wgsl">skybox vertex shader</a> then places its visible geometry at the far depth value:</p>
+    <pre tabindex="0" aria-label="Place skybox vertices at the far depth in WGSL"><code><span class="code-keyword">let</span> clip = uniforms.skybox_view_projection
+    * vec4&lt;f32&gt;(input.position, 1.0);
+
+output.clip_position = clip.xyww;
+output.direction = input.position;</code></pre>
+    <p>Writing <code>clip.xyww</code> sets clip space Z equal to W. After perspective division, depth is <code>1.0</code>. The pass clears depth to <code>1.0</code>, and the skybox uses <code>LessEqual</code> with depth writes disabled. It can therefore fill the background without blocking nearer geometry.</p>
+    <p>The skybox fragment shader samples the cubemap using <code>normalize(input.direction)</code>. The renderer draws it first, then switches to the sphere pipeline, which also uses <code>LessEqual</code> but enables depth writes. Both draws happen in one render pass.</p>
+
+    <h2 id="environment-reflections" tabindex="-1">Reflect the environment in WGSL</h2>
+    <p>For the sphere, the vertex shader passes world position and world normal to the fragment shader. The fragment shader normalizes the interpolated normal and computes a direction from the camera toward the surface:</p>
+    <pre tabindex="0" aria-label="Compute a reflection direction and sample the cubemap in WGSL"><code><span class="code-keyword">let</span> normal = normalize(input.world_normal);
+<span class="code-keyword">let</span> view_direction = normalize(
+    input.world_position - uniforms.camera_position.xyz
+);
+<span class="code-keyword">let</span> reflection_direction = reflect(view_direction, normal);
+<span class="code-keyword">let</span> environment = textureSample(
+    cubemap_texture, cubemap_sampler, reflection_direction
+).rgb;</code></pre>
+    <p><a href="https://www.w3.org/TR/WGSL/#reflect"><code>reflect</code></a> redirects that incident vector around the surface normal. The resulting vector selects a color from the environment. Keeping position, camera position, and normal in world space makes the calculation consistent.</p>
+    <p>The shader also brightens the reflection near grazing angles. It cubes a term derived from the view angle, blending a darker, tinted sample toward a brighter sample. This approximates the angle dependence of Fresnel reflection without a full physically based material model. The output alpha is opaque.</p>
+    <p>The reflection comes from a fixed set of images. It cannot include newly added scene objects or reproduce the parallax of nearby reflected geometry. Those effects need additional techniques such as updated reflection captures or ray tracing.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From the repository root with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native texture cubemap example"><code>cargo run --example texturecubemap</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU texture cubemap example"><code>scripts/build-wasm.sh --release texturecubemap
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/texturecubemap/</code>. Keep the bundled skybox assets in place; the build copies them into the web output. Live rendering needs WebGPU support, while the article and screenshot remain readable without it.</p>
+    <p>These changes are useful for exploring the example:</p>
+    <ul>
+      <li>Change <code>camera_position</code> in <code>Uniforms::new</code> to compare the skybox view with the sphere&rsquo;s reflection from another viewpoint.</li>
+      <li>Return <code>vec4&lt;f32&gt;(environment, 1.0)</code> after sampling to isolate the reflection from the tint and edge brightening.</li>
+      <li>Reduce <code>SPHERE_SEGMENTS</code> and <code>SPHERE_RINGS</code> to see how mesh resolution changes the silhouette.</li>
+    </ul>
+    <p>The current model uses uniform scale. If you introduce nonuniform scale, transform normals with an appropriate normal matrix so the reflection directions remain correct.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturecubemap.rs">Read the texture cubemap source &nearr;</a>
+      <a href="../texture/">&larr; Previous: WebGPU texture loading</a>
+      <a href="../texturearray/">Next: WebGPU texture array &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

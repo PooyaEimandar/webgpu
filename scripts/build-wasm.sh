@@ -34,7 +34,7 @@ done
 OUT_DIR="${WEBGPU_WEB_ROOT:-target/web}"
 BUILD_ID="$(date +%s)"
 if [ -z "$EXAMPLES" ]; then
-  EXAMPLES=" geometrydash triangle vertexattributes particlesystem computeparticles computecloth computecullandlod nanite metropolis computenbody computeraytracing raytracingshadows raytracingreflections raytracinggltf restirdi restirgi htmlmesh texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom deferred deferredmultisampling deferredshadows ssao parallaxmapping multisampling multisamplingalphatocoverage pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
+  EXAMPLES=" residentevil2 geometrydash triangle vertexattributes particlesystem computeparticles computecloth computecullandlod nanite metropolis computenbody computeraytracing raytracingshadows raytracingreflections raytracinggltf restirdi restirgi htmlmesh texture texturemipmapgen texturecubemap texturearray textoverlay textmesh gltf gltfskinning instancing indirectdraw pipelines gears stencilbuffer occlusionquery radialblur bloom deferred deferredmultisampling deferredshadows ssao parallaxmapping multisampling multisamplingalphatocoverage pbr pbribl pbrtexture shadowmapping shadowmappingcascade shadowmappingomni"
 fi
 
 mkdir -p "$OUT_DIR"
@@ -49,10 +49,7 @@ for EXAMPLE in $EXAMPLES; do
     --out-dir "$EXAMPLE_OUT_DIR" \
     --out-name "$EXAMPLE" \
     "target/wasm32-unknown-unknown/$PROFILE/examples/$EXAMPLE.wasm"
-  sed \
-    -e "s/__EXAMPLE__/$EXAMPLE/g" \
-    -e "s/__BUILD_ID__/$BUILD_ID/g" \
-    web/example.html > "$EXAMPLE_OUT_DIR/index.html"
+  python3 scripts/render-example.py "$EXAMPLE" "$BUILD_ID" > "$EXAMPLE_OUT_DIR/index.html"
 done
 
 cp web/index.html "$OUT_DIR/index.html"
@@ -73,3 +70,4 @@ if [ -d assets ]; then
   fi
 fi
 touch "$OUT_DIR/.nojekyll"
+python3 scripts/render-sitemap.py "$OUT_DIR" > "$OUT_DIR/sitemap.xml"

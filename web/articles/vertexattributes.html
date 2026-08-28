@@ -1,0 +1,133 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 02</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">A vertex can carry a position, a normal, texture coordinates, and a tangent. This Rust and wgpu example renders the same mesh with interleaved and separate vertex buffers, showing how strides, offsets, and WGSL shader locations connect that data to the GPU.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Vertex attributes demo at a glance">
+      <div><dt>Buffer layouts</dt><dd>2</dd></div>
+      <div><dt>Attributes / vertex</dt><dd>4</dd></div>
+      <div><dt>Bytes / vertex</dt><dd>48</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#two-buffer-layouts">One mesh, two buffer layouts</a></li>
+        <li><a href="#interleaved-vertex-buffer">The interleaved vertex buffer</a></li>
+        <li><a href="#separate-attribute-buffers">Separate attribute buffers</a></li>
+        <li><a href="#wgsl-vertex-inputs">WGSL inputs and normal mapping</a></li>
+        <li><a href="#choosing-a-layout">Choosing a vertex layout</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="two-buffer-layouts" tabindex="-1">One mesh, two buffer layouts</h2>
+    <p>After the <a href="../triangle/#about">WebGPU triangle example</a>, the next question is how to feed more than positions and colors into a shader. Here I use the same geometry, textures, and lighting in both panels so you can follow what changes in the buffer setup.</p>
+    <p>In a wide viewport, the left panel uses an <strong>interleaved vertex buffer</strong> and the right panel uses <strong>separate attribute buffers</strong>. In a tall viewport, they stack in the same order. Both surfaces rotate automatically; there are no camera or input controls.</p>
+    <p>The wavy mesh is generated once from a grid with 72 cells per side: 5,329 vertices and 31,104 indices. A model matrix rotates it each frame. The two pipelines share the same index buffer, uniforms, textures, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/vertexattributes.wgsl">WGSL shader</a>. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>, just like the triangle.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/vertexattributes.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Both panels draw the same checkerboard surface. The difference is how position, normal, UV, and tangent data are stored and bound. The live demo rotates the mesh; the surface geometry stays unchanged.</figcaption>
+    </figure>
+
+    <h2 id="interleaved-vertex-buffer" tabindex="-1">The interleaved vertex buffer</h2>
+    <p>In the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/vertexattributes.rs">Rust source</a>, one structure holds every attribute of a vertex:</p>
+    <pre tabindex="0" aria-label="Rust interleaved vertex structure"><code>#[repr(C)]
+<span class="code-keyword">struct</span> InterleavedVertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+    uv: [f32; 2],
+    tangent: [f32; 4],
+}</code></pre>
+    <p>Those arrays occupy 12, 12, 8, and 16 bytes. Each vertex therefore uses <strong>48 bytes</strong>, and the next vertex starts 48 bytes later. That distance is the <code>array_stride</code> in <a href="https://docs.rs/wgpu/latest/wgpu/struct.VertexBufferLayout.html"><code>wgpu::VertexBufferLayout</code></a>. The buffer uses <code>VertexStepMode::Vertex</code>, so its attributes advance for each vertex rather than each instance.</p>
+    <p>Each attribute also needs a format, a byte offset within the vertex, and a shader location. The table shows the exact layout in this example:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="attribute-layout-caption" tabindex="0">
+      <table>
+        <caption id="attribute-layout-caption">Vertex attribute formats and byte layout</caption>
+        <thead>
+          <tr>
+            <th scope="col">Attribute</th>
+            <th scope="col">Shader location</th>
+            <th scope="col">Format</th>
+            <th scope="col">Interleaved offset (bytes)</th>
+            <th scope="col">Separate stride (bytes)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Position</th><td>0</td><td><code>Float32x3</code></td><td>0</td><td>12</td></tr>
+          <tr><th scope="row">Normal</th><td>1</td><td><code>Float32x3</code></td><td>12</td><td>12</td></tr>
+          <tr><th scope="row">UV</th><td>2</td><td><code>Float32x2</code></td><td>24</td><td>8</td></tr>
+          <tr><th scope="row">Tangent</th><td>3</td><td><code>Float32x4</code></td><td>32</td><td>16</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>All four interleaved attributes come from buffer slot <code>0</code>. The <a href="https://docs.rs/wgpu/latest/wgpu/macro.vertex_attr_array.html"><code>vertex_attr_array!</code> macro</a> calculates their offsets from the formats. Its packed sequence matches this structure&rsquo;s layout; if you change field types or introduce padding, check the offsets again.</p>
+
+    <h2 id="separate-attribute-buffers" tabindex="-1">Separate attribute buffers</h2>
+    <p>The second representation stores all positions together, all normals together, and so on. Its four buffers have strides of <code>12</code>, <code>12</code>, <code>8</code>, and <code>16</code> bytes. Each contains one attribute at offset <code>0</code>, and all use the same vertex order as the shared index buffer.</p>
+    <p>The separate pipeline receives four vertex buffer layouts. Before its draw, the example binds the matching buffers:</p>
+    <pre tabindex="0" aria-label="Binding separate vertex attribute buffers in Rust"><code>render_pass.set_pipeline(&amp;pipelines.separate);
+render_pass.set_vertex_buffer(0, gpu_mesh.position_buffer.slice(..));
+render_pass.set_vertex_buffer(1, gpu_mesh.normal_buffer.slice(..));
+render_pass.set_vertex_buffer(2, gpu_mesh.uv_buffer.slice(..));
+render_pass.set_vertex_buffer(3, gpu_mesh.tangent_buffer.slice(..));
+render_pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);</code></pre>
+    <p><strong>Buffer slots and shader locations are different concepts.</strong> A slot selects a bound buffer; the <a href="https://docs.rs/wgpu/latest/wgpu/struct.VertexAttribute.html"><code>VertexAttribute</code> descriptors</a> say which values from that buffer feed each shader location. Their numbers happen to match in the separate layout here. In the interleaved layout, slot <code>0</code> supplies all four locations.</p>
+    <p>The renderer makes one mesh draw per panel, followed by a text overlay pass for the labels and FPS. Each panel uses its own viewport and scissor rectangle, keeping the two results in their assigned areas.</p>
+
+    <h2 id="wgsl-vertex-inputs" tabindex="-1">WGSL inputs and normal mapping</h2>
+    <p>The GPU presents both layouts to the same vertex shader interface:</p>
+    <pre tabindex="0" aria-label="WGSL vertex input locations"><code><span class="code-keyword">struct</span> VertexInput {
+    @location(0) position: vec3&lt;f32&gt;,
+    @location(1) normal: vec3&lt;f32&gt;,
+    @location(2) uv: vec2&lt;f32&gt;,
+    @location(3) tangent: vec4&lt;f32&gt;,
+};</code></pre>
+    <p>The pipeline describes where to fetch the attributes, so the WGSL code does not need a separate version for each buffer arrangement. The vertex shader transforms positions into clip space and passes world position, UVs, normals, and tangents to the fragment shader.</p>
+    <p>These extra attributes have visible jobs. UVs repeat the procedural checkerboard color texture across the surface. The mesh normals describe its smooth slopes. A normal map adds finer lighting detail, with the tangent providing a direction along the surface.</p>
+    <p>The fragment shader reconstructs the bitangent with <code>normalize(cross(normal, tangent) * input.tangent.w)</code>, then uses the tangent, bitangent, and normal as a basis for the sampled normal. In this mesh, <code>tangent.w</code> is <code>1.0</code>. The resulting normal drives diffuse, specular, and rim lighting. Both procedural textures are 256 &times; 256 pixels and are shared by the two panels.</p>
+
+    <h2 id="choosing-a-layout" tabindex="-1">Choosing a vertex layout</h2>
+    <p>Interleaving keeps a vertex&rsquo;s attributes together and lets this example bind them with one buffer call. Separate buffers make it convenient to update or bind an individual attribute stream. For example, a pass that only needs positions can use a position stream without requiring the normal, UV, and tangent streams in its vertex layout.</p>
+    <p>Both representations here contain 48 bytes of attribute data per vertex, excluding indices and uniforms. The demo keeps both representations allocated so it can display them together. It does not demonstrate a reduction in total memory use.</p>
+    <p>The FPS display measures the combined frame, including both panels and the text overlay. It cannot tell you which layout is faster. That needs separate measurements of the actual passes and workloads you care about on your target GPUs.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native vertex attributes example"><code>cargo run --example vertexattributes</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU vertex attributes example"><code>scripts/build-wasm.sh --release vertexattributes
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/vertexattributes/</code>. The live rendering needs WebGPU support; the article and screenshot remain readable without it.</p>
+    <p>Three small changes are useful for exploring the source:</p>
+    <ul>
+      <li>Change <code>repeat</code> in <code>build_attribute_mesh</code> to see how UVs control the checkerboard scale.</li>
+      <li>Reduce the grid resolution from <code>72</code> to see how vertex density changes the wave silhouette.</li>
+      <li>Use the interpolated mesh normal instead of <code>mapped_normal</code> in the lighting calculation to isolate the normal map&rsquo;s contribution.</li>
+    </ul>
+    <p>If you change the attribute layout itself, update the Rust data, pipeline descriptors, and WGSL input types together. Keeping those three descriptions in agreement is the central lesson of this example.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/vertexattributes.rs">Read the vertex attributes source &nearr;</a>
+      <a href="../triangle/">&larr; Previous: WebGPU triangle</a>
+      <a href="../texture/">Next: WebGPU texture loading &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

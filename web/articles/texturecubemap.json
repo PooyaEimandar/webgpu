@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Cubemaps in Rust: Skyboxes and Reflections",
+  "description": "Render a skybox and reflective sphere with Rust, wgpu, and WGSL. Learn cubemap face order, KTX texture loading, cube views, depth settings, and environment mapping.",
+  "breadcrumbName": "Texture cubemap",
+  "image": "texturecubemap.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A reflective sphere mirrors a suspension bridge, river, and blue evening sky, surrounded by the same cubemap skybox."
+}

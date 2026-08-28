@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Texture Arrays in Rust and wgpu",
+  "description": "Draw seven textured quads with one WebGPU draw call. Learn Rust wgpu texture arrays, image resizing, instancing, WGSL layer selection, and texture filtering.",
+  "breadcrumbName": "Texture array",
+  "image": "texturearray.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Seven tilted quads stacked on a dark background: a husky image, a bridge sky image, red, green, blue, and two colorful procedural patterns."
+}

@@ -1,9 +1,12 @@
-use rapier3d::control::{CharacterLength, KinematicCharacterController};
+#[cfg(not(target_arch = "wasm32"))]
+use rapier3d::control::CharacterLength;
+use rapier3d::control::KinematicCharacterController;
 use rapier3d::math::{Pose, Vector};
 use rapier3d::parry::query::DefaultQueryDispatcher;
 use rapier3d::prelude::*;
 
 use super::InstanceData;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::restir::GpuTriangle;
 
 /// Per-agent walk state layered on top of a kinematic rigid body.
@@ -104,6 +107,7 @@ pub struct PhysicsWorld {
 }
 
 impl PhysicsWorld {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         triangles: &[GpuTriangle],
         instances: &[InstanceData],

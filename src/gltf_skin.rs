@@ -108,6 +108,7 @@ impl SkinnedMesh {
 
 #[derive(Clone, Debug)]
 struct SkinNode {
+    name: String,
     parent: Option<usize>,
     children: Vec<usize>,
     translation: glam::Vec3,
@@ -118,8 +119,10 @@ struct SkinNode {
 
 impl SkinNode {
     fn from_gltf(node: gltf::Node<'_>) -> Self {
+        let name = node.name().map_or_else(String::new, str::to_owned);
         match node.transform() {
             gltf::scene::Transform::Matrix { matrix } => Self {
+                name,
                 parent: None,
                 children: Vec::new(),
                 translation: glam::Vec3::ZERO,
@@ -132,6 +135,7 @@ impl SkinNode {
                 rotation,
                 scale,
             } => Self {
+                name,
                 parent: None,
                 children: Vec::new(),
                 translation: glam::Vec3::from_array(translation),
@@ -174,6 +178,7 @@ struct AnimationChannel {
 
 #[derive(Clone, Debug)]
 struct Animation {
+    name: String,
     channels: Vec<AnimationChannel>,
     start: f32,
     end: f32,
@@ -181,6 +186,13 @@ struct Animation {
 }
 
 impl Animation {
+    fn restart(&mut self, nodes: &mut [SkinNode]) {
+        self.time = self.start;
+        for channel in &self.channels {
+            channel.apply(nodes, self.time);
+        }
+    }
+
     fn advance(&mut self, nodes: &mut [SkinNode], delta_seconds: f32) {
         if self.channels.is_empty() || self.end <= self.start {
             return;
@@ -273,17 +285,98 @@ pub struct SkinnedGltfScene {
     pub sampler_options: texture::TextureSamplerOptions,
     pub primitives: Vec<SkinnedPrimitive>,
     nodes: Vec<SkinNode>,
+    bind_nodes: Vec<SkinNode>,
     mesh_node: usize,
     mesh_skin: usize,
     skins: Vec<Skin>,
-    animation: Option<Animation>,
+    animations: Vec<Animation>,
+    active_animation: Option<usize>,
 }
 
 impl SkinnedGltfScene {
     pub fn advance(&mut self, delta_seconds: f32) {
-        if let Some(animation) = &mut self.animation {
+        if let Some(animation) = self
+            .active_animation
+            .and_then(|index| self.animations.get_mut(index))
+        {
             animation.advance(&mut self.nodes, delta_seconds);
         }
+    }
+
+    pub fn reset_pose(&mut self) {
+        self.nodes.clone_from(&self.bind_nodes);
+    }
+
+    pub fn restart_animation(&mut self) -> bool {
+        let Some(animation) = self
+            .active_animation
+            .and_then(|index| self.animations.get_mut(index))
+        else {
+            return false;
+        };
+
+        self.nodes.clone_from(&self.bind_nodes);
+        animation.restart(&mut self.nodes);
+        true
+    }
+
+    pub fn play_animation(&mut self, name: &str) -> bool {
+        let Some(index) = self
+            .animations
+            .iter()
+            .position(|animation| animation.name == name)
+        else {
+            return false;
+        };
+
+        self.active_animation = Some(index);
+        self.restart_animation()
+    }
+
+    pub fn has_animation_named(&self, name: &str) -> bool {
+        self.animations
+            .iter()
+            .any(|animation| animation.name == name)
+    }
+
+    pub fn active_animation_name(&self) -> Option<&str> {
+        self.active_animation
+            .and_then(|index| self.animations.get(index))
+            .map(|animation| animation.name.as_str())
+    }
+
+    pub fn apply_node_rotation_delta(&mut self, name: &str, delta: glam::Quat) -> bool {
+        let Some(index) = self.bind_nodes.iter().position(|node| node.name == name) else {
+            return false;
+        };
+        let Some(bind_node) = self.bind_nodes.get(index) else {
+            return false;
+        };
+        let Some(node) = self.nodes.get_mut(index) else {
+            return false;
+        };
+
+        node.rotation = (bind_node.rotation * delta).normalize();
+        true
+    }
+
+    pub fn apply_node_parent_rotation_delta(&mut self, name: &str, delta: glam::Quat) -> bool {
+        let Some(index) = self.bind_nodes.iter().position(|node| node.name == name) else {
+            return false;
+        };
+        let Some(bind_node) = self.bind_nodes.get(index) else {
+            return false;
+        };
+        let Some(node) = self.nodes.get_mut(index) else {
+            return false;
+        };
+
+        node.rotation = (delta * bind_node.rotation).normalize();
+        true
+    }
+
+    pub fn has_animation(&self) -> bool {
+        !self.animations.is_empty()
     }
 
     pub fn joint_matrices(&self) -> JointMatrices {
@@ -470,11 +563,11 @@ fn skinned_scene_from_gltf(
         .map(|skin| skin_from_gltf(skin, buffers))
         .collect::<RenderResult<Vec<_>>>()?;
     let mesh = SkinnedMesh::new(vertices, indices)?;
-    let animation = gltf
+    let animations = gltf
         .animations()
-        .next()
         .map(|animation| animation_from_gltf(animation, buffers))
-        .transpose()?;
+        .collect::<RenderResult<Vec<_>>>()?;
+    let active_animation = (!animations.is_empty()).then_some(0);
     let base_color_image = match base_color_image {
         Some(image) => image,
         None => white_image()?,
@@ -486,6 +579,8 @@ fn skinned_scene_from_gltf(
         }
     }
 
+    let bind_nodes = nodes.clone();
+
     Ok(SkinnedGltfScene {
         mesh,
         material: material.unwrap_or_default(),
@@ -493,12 +588,14 @@ fn skinned_scene_from_gltf(
         sampler_options,
         primitives,
         nodes,
+        bind_nodes,
         mesh_node: mesh_node
             .ok_or_else(|| RenderError::message("skinned glTF has no mesh node"))?,
         mesh_skin: mesh_skin
             .ok_or_else(|| RenderError::message("skinned glTF mesh has no skin"))?,
         skins,
-        animation,
+        animations,
+        active_animation,
     })
 }
 
@@ -743,6 +840,7 @@ fn animation_from_gltf(
     animation: gltf::Animation<'_>,
     buffers: &[AssetBytes],
 ) -> RenderResult<Animation> {
+    let name = animation.name().map_or_else(String::new, str::to_owned);
     let mut channels = Vec::new();
     let mut start = f32::INFINITY;
     let mut end = f32::NEG_INFINITY;
@@ -808,6 +906,7 @@ fn animation_from_gltf(
     }
 
     Ok(Animation {
+        name,
         channels,
         start,
         end,

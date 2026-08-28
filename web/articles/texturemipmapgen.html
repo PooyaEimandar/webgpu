@@ -1,0 +1,130 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 06</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">A detailed texture can shimmer when it shrinks into the distance. This Rust and wgpu example generates a complete mipmap chain on the GPU, then samples it on a rotating metal tunnel to explore texture minification, level of detail, and anisotropic filtering.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Mipmap generation demo at a glance">
+      <div><dt>Base size</dt><dd aria-label="1024 by 1024 pixels">1024&sup2;</dd></div>
+      <div><dt>Mip levels</dt><dd>11</dd></div>
+      <div><dt>Generation passes</dt><dd>10</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#why-mipmaps">Why a distant texture needs mipmaps</a></li>
+        <li><a href="#allocate-mip-chain">Allocate the mip chain in wgpu</a></li>
+        <li><a href="#generate-mipmaps">Generate each level with a render pass</a></li>
+        <li><a href="#mipmap-filtering">Compare the sampler configurations</a></li>
+        <li><a href="#sample-the-tunnel">Sample the rotating tunnel in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="why-mipmaps" tabindex="-1">Why a distant texture needs mipmaps</h2>
+    <p>Near the camera, the tunnel&rsquo;s seams and rivets cover many screen pixels. Farther away, many texture pixels, or texels, must fit into a single screen pixel. Sampling only the original image can make fine details flicker or form distracting patterns as the surface moves.</p>
+    <p>A mipmap chain stores progressively smaller, filtered versions of the same image. The GPU can sample a resolution suited to the area covered by each screen pixel, reducing aliasing. Unlike the independent images in the <a href="../texturearray/#about">texture array example</a>, these levels all describe one surface at different resolutions.</p>
+    <p>Here the camera stays in place while the tunnel rotates around its lengthwise axis. There are no mouse or keyboard controls. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>, with the current sampler configuration shown in the overlay.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/texturemipmapgen.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The metal pattern repeats around and along the tunnel. Its receding walls show texture minification at oblique angles; the default sampler uses mipmaps with anisotropic filtering.</figcaption>
+    </figure>
+
+    <h2 id="allocate-mip-chain" tabindex="-1">Allocate the mip chain in wgpu</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturemipmapgen.rs">Rust example</a> first creates a <strong>1024 &times; 1024 RGBA8 image on the CPU</strong>. Its procedural pattern combines metal plates, seams, rivets, scratches, and deterministic noise. No texture image is downloaded.</p>
+    <p>The helper below calculates the number of levels, including the original image:</p>
+    <pre tabindex="0" aria-label="Calculate the full mip level count in Rust"><code><span class="code-keyword">fn</span> mip_level_count(width: u32, height: u32) -&gt; u32 {
+    width.max(height).max(1).ilog2() + 1
+}</code></pre>
+    <p>For this square texture, level 0 is 1024 &times; 1024, level 1 is 512 &times; 512, and each following level halves both dimensions until level 10 reaches 1 &times; 1. That gives <strong>11 mip levels</strong> in one <code>TextureDimension::D2</code> allocation with one array layer.</p>
+    <p>The format is <code>Rgba8Unorm</code>, not an sRGB format. The texture combines three usage flags:</p>
+    <ul>
+      <li><code>COPY_DST</code> allows the CPU image to be uploaded into level 0.</li>
+      <li><code>RENDER_ATTACHMENT</code> allows render passes to write the smaller levels.</li>
+      <li><code>TEXTURE_BINDING</code> allows shaders to sample the texture during generation and tunnel rendering.</li>
+    </ul>
+    <p>Allocating those levels does not generate their image content. <code>queue.write_texture</code> uploads only the base level, and <code>generate_mipmaps</code> fills the remaining ten.</p>
+
+    <h2 id="generate-mipmaps" tabindex="-1">Generate each level with a render pass</h2>
+    <p>This example uses render passes for downsampling. For each level <code>n</code> from 1 through 10, it performs these steps:</p>
+    <ol>
+      <li>Create a source texture view with <code>base_mip_level: n - 1</code> and <code>mip_level_count: Some(1)</code>.</li>
+      <li>Create a destination view exposing only level <code>n</code>, and attach it as the render pass&rsquo;s color target.</li>
+      <li>Bind the source view and a sampler with linear minification and magnification filters.</li>
+      <li>Draw a triangle covering the destination, then store the result for the next pass.</li>
+    </ol>
+    <p>The views refer to separate mip subresources of the same texture. Restricting the source view to one level keeps the shader from sampling the level currently being written. The downsampling pipeline has its own bind group: source texture at binding 0 and sampler at binding 1.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen_mipmap.wgsl">mipmap WGSL shader</a> creates the fullscreen triangle from <code>@builtin(vertex_index)</code>, without a vertex buffer. Its fragment stage is small:</p>
+    <pre tabindex="0" aria-label="Downsample the previous mip level in a WGSL fragment shader"><code>@fragment
+<span class="code-keyword">fn</span> fs_main(input: VertexOutput) -&gt; @location(0) vec4&lt;f32&gt; {
+    <span class="code-keyword">return</span> textureSample(source_texture, source_sampler, input.uv);
+}</code></pre>
+    <p>Only the previous mip is visible through <code>source_texture</code>, so this sample cannot choose another level of the underlying texture. Linear filtering combines neighboring texels while rendering into the smaller target.</p>
+    <p>There is also a coordinate detail in the vertex shader: <code>1.0 - uv.y * 2.0</code> converts UV Y, which points down, to Y in clip space, which points up. Omitting that flip would vertically mirror each generated level relative to its parent.</p>
+    <p>All ten passes are recorded in one command buffer and submitted once during initialization. A final texture view exposes the complete chain to the tunnel shader. The chain is reused each frame; rotating the tunnel or resizing the window does not regenerate it.</p>
+
+    <h2 id="mipmap-filtering" tabindex="-1">Compare the sampler configurations</h2>
+    <p>The source creates three samplers sharing the same texture. All use <code>Repeat</code> addressing and linear minification and magnification filters. <code>DEFAULT_SAMPLER_INDEX</code> selects one at startup; there is no live mode selector in this demo.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="mipmap-samplers-caption" tabindex="0">
+      <table>
+        <caption id="mipmap-samplers-caption">Sampler configurations in the Rust source</caption>
+        <thead>
+          <tr><th scope="col">Index and overlay label</th><th scope="col">Mip filter</th><th scope="col">LOD range</th><th scope="col">Anisotropy clamp</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0: No mip maps</th><td>Nearest</td><td>0 only</td><td>1</td></tr>
+          <tr><th scope="row">1: Mip maps (bilinear)</th><td>Linear</td><td>0&ndash;10</td><td>1</td></tr>
+          <tr><th scope="row">2: Mip maps (anisotropic)</th><td>Linear</td><td>0&ndash;10</td><td>16</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Mode 0 clamps the maximum LOD to zero, so it samples only the original image. It still allocates and generates the entire mip chain; this mode changes sampling, not generation cost.</p>
+    <p>The overlay calls mode 1 &ldquo;bilinear,&rdquo; but its configuration is <strong>trilinear filtering</strong>: linear filtering within each 2D mip, plus linear blending between mip levels. The <a href="https://gpuweb.github.io/types/interfaces/GPUSamplerDescriptor.html#mipmapFilter">mipmap filter</a> controls that second step.</p>
+    <p>Mode 2 is the default. It also sets <code>anisotropy_clamp</code> to 16, which helps preserve detail on surfaces viewed at oblique angles, such as the tunnel walls. This is an anisotropy limit, not a promise of exactly sixteen texture samples; the precise filtering behavior depends on the implementation. See the <a href="https://gpuweb.github.io/types/interfaces/GPUSamplerDescriptor.html#maxAnisotropy">WebGPU sampler reference</a>.</p>
+
+    <h2 id="sample-the-tunnel" tabindex="-1">Sample the rotating tunnel in WGSL</h2>
+    <p>The tunnel mesh repeats the texture six times around its circumference and about forty times along its length. Its normals point inward to support lighting from inside. The renderer makes one indexed draw for the tunnel each frame, followed by a separate text overlay pass.</p>
+    <p>For this draw, bind group 0 contains the uniform buffer at binding 0, the view of all mip levels at binding 1, and the selected sampler at binding 2. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen.wgsl">tunnel WGSL shader</a> samples it with:</p>
+    <pre tabindex="0" aria-label="Sample the mipmapped tunnel texture with an LOD bias in WGSL"><code><span class="code-keyword">let</span> color = textureSampleBias(
+    texture_color, sampler_color, input.uv, input.lod_bias
+);</code></pre>
+    <p><a href="https://www.w3.org/TR/WGSL/#texturesamplebias"><code>textureSampleBias</code></a> adjusts the automatically selected level of detail. The uniform bias is zero here, so it leaves that selection unchanged; zero bias does not force level 0. The sampler&rsquo;s LOD clamps and filtering settings still apply.</p>
+    <p>The shader adds diffuse and specular lighting and an explicit <code>distance_fade</code>. The darkness toward the center therefore comes partly from shading, not just texture filtering. It outputs opaque alpha. The displayed FPS measures the whole demo, not the initial mipmap generation work.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native mipmap generation example"><code>cargo run --example texturemipmapgen</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU mipmap generation example"><code>scripts/build-wasm.sh --release texturemipmapgen
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/texturemipmapgen/</code>. The browser needs WebGPU support for live rendering; the article and screenshot remain readable without it. The texture is generated locally, so no runtime texture download is needed.</p>
+    <p>Try these source changes and rebuild:</p>
+    <ul>
+      <li>Set <code>DEFAULT_SAMPLER_INDEX</code> to 0, 1, or 2 and compare distant detail while the tunnel rotates.</li>
+      <li>Change <code>TEXTURE_SIZE</code> to 512. The mip count is recalculated automatically, giving ten levels instead of eleven.</li>
+      <li>Change the first value of the <code>lod_bias</code> uniform to explore coarser sampling with a positive bias or finer sampling with a negative bias.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturemipmapgen.rs">Read the mipmap generation source &nearr;</a>
+      <a href="../texturearray/">&larr; Previous: WebGPU texture array</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

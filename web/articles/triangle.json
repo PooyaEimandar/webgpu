@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Triangle in Rust: wgpu and WGSL",
+  "description": "Render a colored WebGPU triangle with Rust, wgpu, and WGSL. Explore the live demo, vertex and index buffers, shaders, and the GPU render pipeline.",
+  "breadcrumbName": "Triangle",
+  "image": "triangle.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 732,
+  "imageAlt": "A WebGPU triangle with a blue top, green bottom left, red bottom right, and smoothly interpolated colors on a black background."
+}

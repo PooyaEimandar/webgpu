@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Textures in Rust: Loading Images with wgpu",
+  "description": "Load a PNG onto a textured quad in this live WebGPU demo. Learn Rust wgpu texture uploads, UV coordinates, samplers, bind groups, and WGSL texture sampling.",
+  "breadcrumbName": "Texture loading",
+  "image": "texture.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A black and white husky illustration with a blue eye mapped onto a lit quad, angled against a dark background."
+}

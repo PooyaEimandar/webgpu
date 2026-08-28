@@ -1,0 +1,135 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 05</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">A texture array keeps images in separate layers of one GPU texture. This Rust and wgpu example draws seven stacked quads in a single instanced draw call, using a layer index to choose a different image for each quad.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Texture array demo at a glance">
+      <div><dt>Texture layers</dt><dd>7</dd></div>
+      <div><dt>Instances</dt><dd>7</dd></div>
+      <div><dt>Draw calls</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#seven-layers-one-draw">Seven layers in one draw</a></li>
+        <li><a href="#preparing-array-layers">Prepare the image layers</a></li>
+        <li><a href="#texture-array-view">Create a 2D texture array</a></li>
+        <li><a href="#instanced-quads">Position the quads with instance data</a></li>
+        <li><a href="#wgsl-layer-selection">Select a texture layer in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="seven-layers-one-draw" tabindex="-1">Seven layers in one draw</h2>
+    <p>The <a href="../texturecubemap/#about">cubemap example</a> used a direction to select a face of an environment. A 2D texture array instead uses familiar UV coordinates plus an explicit layer index. Here I use that index to choose among seven images while keeping the same texture bound.</p>
+    <p>The stack makes the layers easy to see. Each quad is a separate instance of the same four vertices and six indices. Model matrices create the spacing and tilt; the texture layers themselves contain image data, with no positions in the 3D scene.</p>
+    <p>This is a fixed scene with no input controls or automatic animation. The camera position and plane scale adapt to wide and portrait viewports. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/texturearray.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>From top to bottom, the quads display array layers 0 through 6. All seven share the same geometry, texture array, sampler, and render pipeline.</figcaption>
+    </figure>
+
+    <h2 id="preparing-array-layers" tabindex="-1">Prepare the image layers</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturearray.rs">Rust example</a> builds the array from two downloaded images, three solid colors, and two procedural patterns. Every layer is <strong>256 &times; 256 pixels</strong>, controlled by <code>LAYER_SIZE</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="texture-array-layers-caption" tabindex="0">
+      <table>
+        <caption id="texture-array-layers-caption">Texture array layers in display order</caption>
+        <thead>
+          <tr><th scope="col">Layer</th><th scope="col">Image content</th><th scope="col">Source</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td><a href="https://raw.githubusercontent.com/PooyaEimandar/sib/main/sib.png">SIB husky PNG</a></td><td>Downloaded at startup</td></tr>
+          <tr><th scope="row">1</th><td><a href="https://cdn.apewebapps.com/threejs/160/examples/textures/cube/Bridge2/posy.jpg">Bridge2 sky JPEG</a></td><td>Downloaded at startup</td></tr>
+          <tr><th scope="row">2</th><td>Solid red</td><td>Generated on the CPU</td></tr>
+          <tr><th scope="row">3</th><td>Solid green</td><td>Generated on the CPU</td></tr>
+          <tr><th scope="row">4</th><td>Solid blue</td><td>Generated on the CPU</td></tr>
+          <tr><th scope="row">5</th><td>Wave, checkerboard, and radial gradient</td><td>Generated on the CPU</td></tr>
+          <tr><th scope="row">6</th><td>Checkerboard, rings, and inverse wave</td><td>Generated on the CPU</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><code>AssetLoader::fetch_images_rgba8_resized_batch</code> fetches the two remote images, decodes them to RGBA8, and resizes them to the common dimensions. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a> preserves request order when collecting the results, so the husky remains layer 0 and the bridge image layer 1.</p>
+    <p>This resize forces square dimensions rather than preserving an arbitrary source image&rsquo;s aspect ratio. The other five layers are generated directly at the target size. All preparation happens before the renderer starts; a failed remote download or decode prevents startup even though the remaining layers are generated locally.</p>
+
+    <h2 id="texture-array-view" tabindex="-1">Create a 2D texture array</h2>
+    <p>Once the images are ready, initialization uploads them together:</p>
+    <pre tabindex="0" aria-label="Create a texture array from prepared RGBA images in Rust"><code><span class="code-keyword">let</span> texture_array = texture::Texture::from_rgba8_array(
+    &amp;context.device,
+    &amp;context.queue,
+    Some("runtime texture array"),
+    &amp;images.layers,
+)?;</code></pre>
+    <p>The <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/texture.rs">texture helper used by this checkout</a> validates matching dimensions and creates one <code>TextureDimension::D2</code> allocation with seven array layers. Its format is <code>Rgba8UnormSrgb</code>, and its usage includes <code>TEXTURE_BINDING | COPY_DST</code>. Each image is uploaded to its own layer.</p>
+    <p>A <a href="https://docs.rs/wgpu/latest/wgpu/enum.TextureViewDimension.html#variant.D2Array"><code>TextureViewDimension::D2Array</code></a> view exposes all seven layers to the shader. They share dimensions, format, and mip count because they belong to one texture. This differs from an array of bindings to separate texture resources.</p>
+    <p>The helper creates just one mip level. Its shared sampler uses <code>ClampToEdge</code> addressing and linear minification and magnification filters. No mipmap generation takes place in this example.</p>
+    <p>Bind group <code>0</code> contains the uniform buffer at binding <code>0</code>, the array view at binding <code>1</code>, and the sampler at binding <code>2</code>. The uniforms are read by the vertex shader; the texture and sampler are read by the fragment shader.</p>
+
+    <h2 id="instanced-quads" tabindex="-1">Position the quads with instance data</h2>
+    <p>The quad&rsquo;s vertex buffer has a stride of 32 bytes: position, UV, and normal occupy 12, 8, and 12 bytes. That geometry is reused for every plane. Each instance has its own model matrix and texture layer selection stored in the uniform buffer:</p>
+    <pre tabindex="0" aria-label="Rust uniform record for each textured quad instance"><code>#[repr(C)]
+<span class="code-keyword">struct</span> InstanceData {
+    model: [[f32; 4]; 4],
+    array_index: [f32; 4],
+}</code></pre>
+    <p><code>Uniforms</code> contains the combined view and projection matrix and seven of these records. Only <code>array_index.x</code> carries the layer number. There is no separate vertex buffer for instance data in this example.</p>
+    <p>The vertex shader receives <code>@builtin(instance_index)</code> and uses it to read the corresponding uniform record:</p>
+    <pre tabindex="0" aria-label="Select instance data in the WGSL vertex shader"><code><span class="code-keyword">let</span> instance_id = min(instance_index, 6u);
+<span class="code-keyword">let</span> instance = uniforms.instances[instance_id];
+<span class="code-comment">// The model transforms this quad; the layer selects its image.</span>
+output.layer = instance.array_index.x;</code></pre>
+    <p>The model matrices tilt the planes by &minus;58&deg; around X and separate them through the scene. After binding the pipeline, resources, vertex buffer, and index buffer, one call draws the seven instances:</p>
+    <pre tabindex="0" aria-label="Draw all seven textured quads in one indexed call"><code>render_pass.draw_indexed(
+    0..INDICES.len() as u32, 0, 0..MAX_LAYERS as u32
+);</code></pre>
+    <p>The last range is the instance range. Each instance draws the same six indices, giving fourteen triangles in total. Depth writes and <code>LessEqual</code> depth testing keep overlapping planes ordered correctly.</p>
+
+    <h2 id="wgsl-layer-selection" tabindex="-1">Select a texture layer in WGSL</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturearray.wgsl">WGSL shader</a> declares a <code>texture_2d_array&lt;f32&gt;</code>. Its fragment shader supplies UV coordinates and a separate integer layer index to <a href="https://www.w3.org/TR/WGSL/#texturesample"><code>textureSample</code></a>:</p>
+    <pre tabindex="0" aria-label="Sample a selected layer of a texture array in WGSL"><code><span class="code-keyword">let</span> layer = i32(input.layer + 0.5);
+<span class="code-keyword">let</span> color = textureSample(
+    texture_array, texture_array_sampler, input.uv, layer
+);</code></pre>
+    <p>The source passes the layer number as an <code>f32</code> vertex output, then rounds it to an integer here. Every vertex of an instance carries the same layer value, so it stays constant across that instance&rsquo;s triangles.</p>
+    <p>Linear filtering blends texels <strong>within the selected layer</strong>. It does not blend neighboring array layers. To blend two images, sample their layers separately and combine the results in the shader.</p>
+    <p>The sampled RGB is multiplied by a simple ambient and directional diffuse lighting factor, <code>0.24 + light * 0.76</code>. The shader passes through the sampled alpha, but this pipeline does not configure alpha blending. The example focuses on choosing images from an array, rather than transparent compositing.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native texture array example"><code>cargo run --example texturearray</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU texture array example"><code>scripts/build-wasm.sh --release texturearray
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/texturearray/</code>. Both versions need access to the two image URLs. In the browser, those hosts must allow the image fetches through CORS. Live rendering also needs WebGPU support; this article and screenshot remain readable without it.</p>
+    <p>Try these changes in the source:</p>
+    <ul>
+      <li>Edit <code>GENERATED_COLORS</code> to replace the red, green, and blue layers.</li>
+      <li>Change <code>LAYER_SIZE</code> to compare image detail at another resolution. Both downloaded and generated layers use this constant.</li>
+      <li>Change the values assigned to <code>instance.array_index</code> while leaving the model matrices alone, separating image selection from quad placement.</li>
+    </ul>
+    <p>Seven is this demo&rsquo;s chosen capacity, not WebGPU&rsquo;s maximum layer count. If you expand it, keep Rust&rsquo;s <code>MAX_LAYERS</code>, the WGSL <code>array&lt;Instance, 7&gt;</code>, the shader&rsquo;s <code>6u</code> clamp, and the draw&rsquo;s instance range consistent.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturearray.rs">Read the texture array source &nearr;</a>
+      <a href="../texturecubemap/">&larr; Previous: WebGPU texture cubemap</a>
+      <a href="../texturemipmapgen/">Next: WebGPU mipmap generation &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

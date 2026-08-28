@@ -4,7 +4,7 @@ Rust WebGPU examples porting [Sascha Willems' Vulkan samples](https://github.com
 
 ## Demo
 
-Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
+Try the WASM demos [here](https://pooya.ai/webgpu/)
 
 ## Examples
 
@@ -28,7 +28,7 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `htmlmesh` | Renders a simple inline HTML button page to an RGBA texture, uploads it to WebGPU, maps it onto a plane, and ray-maps pointer input back to the button. | <picture><source srcset="screenshots/htmlmesh.webp" type="image/webp"><img src="screenshots/htmlmesh.jpg" alt="HTML mesh"></picture> |
 | `texture` | Renders a textured indexed quad using a runtime-loaded PNG texture, a sampler, uniform buffer transforms, and fragment shader lighting. | <picture><source srcset="screenshots/texture.webp" type="image/webp"><img src="screenshots/texture.jpg" alt="Textured indexed quad"></picture> |
 | `texturemipmapgen` | Generates a full mip chain from a high-frequency texture using offscreen render passes, then samples the result on a textured tunnel. | <picture><source srcset="screenshots/texturemipmapgen.webp" type="image/webp"><img src="screenshots/texturemipmapgen.jpg" alt="Texture mipmap generation"></picture> |
-| `texturecubemap` | Renders a skybox and reflective sphere from a runtime-loaded cubemap using six JPEG faces, a cube texture view, and a cube sampler. | <picture><source srcset="screenshots/texturecubemap.webp" type="image/webp"><img src="screenshots/texturecubemap.jpg" alt="Runtime-loaded cubemap reflection"></picture> |
+| `texturecubemap` | Renders a skybox and reflective sphere from six bundled KTX1 faces loaded at runtime, a cube texture view, and a filtering sampler. | <picture><source srcset="screenshots/texturecubemap.webp" type="image/webp"><img src="screenshots/texturecubemap.jpg" alt="Runtime-loaded cubemap reflection"></picture> |
 | `texturearray` | Renders seven stacked squares sampling separate layers from a runtime-built 2D texture array with two async-loaded images, RGB layers, and procedural layers. | <picture><source srcset="screenshots/texturearray.webp" type="image/webp"><img src="screenshots/texturearray.jpg" alt="Runtime-built texture array"></picture> |
 | `textoverlay` | Renders glyph atlas text over a 3D scene using an overlay render pass, Unicode shaping, and RTL text. | <picture><source srcset="screenshots/textoverlay.webp" type="image/webp"><img src="screenshots/textoverlay.jpg" alt="Text overlay"></picture> |
 | `textmesh` | Converts shaped LTR and RTL font outlines into extruded indexed mesh geometry with vertex colors and lighting. | <picture><source srcset="screenshots/textmesh.webp" type="image/webp"><img src="screenshots/textmesh.jpg" alt="3D text mesh"></picture> |
@@ -56,6 +56,9 @@ Try the WASM demos [here](https://pooyaeimandar.github.io/webgpu/)
 | `shadowmappingcascade` | Splits the camera frustum into four cascades, renders each split into a depth texture array layer, and samples the selected layer for directional shadows. | <picture><source srcset="screenshots/shadowmappingcascade.webp" type="image/webp"><img src="screenshots/shadowmappingcascade.jpg" alt="Cascade shadow mapping"></picture> |
 | `shadowmappingomni` | Renders the scene into the six faces of a floating-point cube map, stores point-light distance, and samples it for omni-directional shadows. | <picture><source srcset="screenshots/shadowmappingomni.webp" type="image/webp"><img src="screenshots/shadowmappingomni.jpg" alt="Omni-directional shadow mapping"></picture> |
 | `geometrydash` | Runs an original one-button rhythm platformer with fixed-step physics, procedural GPU geometry, obstacle collisions, jump pads, progress tracking, and responsive mouse, keyboard, and touch controls. This game was created at the request of my son, Ryan, who designed the concept and gameplay inspired by the original Geometry Dash game. | <picture><source srcset="screenshots/geometrydash.webp" type="image/webp"><img src="screenshots/geometrydash.jpg" alt="Geometry dash WebGPU game"></picture> |
+| `residentevil2` | Runs Claire outside the R.P.D. with GPU skinning, imported glTF idle, forward-running, and backward-walking animations, persistent tank controls, projected contact shadows, and three classic fixed-camera zones. | <picture><source srcset="screenshots/residentevil2.webp" type="image/webp"><img src="screenshots/residentevil2.jpg" alt="Resident Evil 2 R.P.D. exterior fixed-camera scene"></picture> |
+
+The `residentevil2` example uses [Claire Redfield - The Darkside Chronicles](https://sketchfab.com/3d-models/claire-redfield-the-darkside-chronicles-8016829b88aa4cd089e7e2c0c93d898f) by many-bees under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## ReSTIR acceleration
 

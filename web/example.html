@@ -1,13 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="__PAGE_CLASS__">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>webgpu __EXAMPLE__</title>
+    __PAGE_HEAD__
     <style>
       :root {
         --viewport-width: 100vw;
         --viewport-height: 100vh;
+        color-scheme: dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
       }
 
       html,
@@ -33,6 +37,479 @@
 
       canvas:focus {
         outline: none;
+      }
+
+      #demo {
+        display: contents;
+      }
+
+      html.has-article,
+      .has-article body {
+        position: static;
+        height: auto;
+        min-height: 100%;
+        overflow: visible;
+        overscroll-behavior: auto;
+        touch-action: auto;
+      }
+
+      html.has-article {
+        scroll-behavior: smooth;
+      }
+
+      .has-article #demo {
+        display: block;
+        position: relative;
+        height: var(--viewport-height);
+        isolation: isolate;
+        background: #000;
+      }
+
+      .has-article #demo canvas {
+        position: absolute;
+        inset: 0;
+        max-width: 100%;
+      }
+
+      /* winit focuses a new canvas before our observer can move it. Keep that
+         temporary body child in the viewport so focus cannot scroll the page. */
+      .has-article body > canvas {
+        position: fixed;
+        inset: 0;
+      }
+
+      #demo:focus,
+      .example-article:focus {
+        outline: none;
+      }
+
+      .has-article #demo.is-static canvas {
+        pointer-events: none;
+      }
+
+      .has-article #loading-screen {
+        position: absolute;
+      }
+
+      .more-info {
+        position: absolute;
+        z-index: 20;
+        bottom: max(24px, env(safe-area-inset-bottom));
+        left: 50%;
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        min-width: 100px;
+        padding: 12px 18px;
+        border-radius: 8px;
+        background: rgb(0 0 0 / 70%);
+        color: #c7d0dd;
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-decoration: none;
+        text-transform: uppercase;
+        transform: translateX(-50%);
+        transition: color 180ms ease;
+      }
+
+      .more-info svg {
+        overflow: visible;
+        animation: info-nudge 2.4s ease-in-out 2;
+        transition: transform 220ms ease;
+      }
+
+      .more-info:hover,
+      .more-info:focus-visible {
+        color: #fff;
+      }
+
+      .more-info:hover svg,
+      .more-info:focus-visible svg {
+        animation: none;
+        transform: translateY(5px) scale(1.06);
+      }
+
+      @keyframes info-nudge {
+        0%, 100% {
+          transform: translateY(0) scale(1);
+        }
+        50% {
+          transform: translateY(5px) scale(0.96);
+        }
+      }
+
+      .more-info:focus-visible,
+      .example-article a:focus-visible,
+      .example-article pre:focus-visible,
+      .example-article .article-table:focus-visible {
+        outline: 2px solid #8db3ff;
+        outline-offset: 6px;
+      }
+
+      .example-article {
+        position: relative;
+        padding: 0 24px 80px;
+        border-top: 1px solid #222630;
+        background: #0b0c0f;
+        color: #b8c0cc;
+        font-size: 1.0625rem;
+        line-height: 1.8;
+      }
+
+      .article-inner {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+
+      .article-nav,
+      .article-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 28px 0;
+        font-size: 0.8125rem;
+      }
+
+      .article-nav {
+        border-bottom: 1px solid #222630;
+      }
+
+      .example-article .breadcrumbs ol {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .example-article .breadcrumbs li {
+        margin: 0;
+        padding: 0;
+      }
+
+      .breadcrumbs li + li::before {
+        content: "/";
+        margin-right: 8px;
+        color: #8c96a5;
+      }
+
+      .example-article a {
+        color: #a9c6ff;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 4px;
+      }
+
+      .example-article a:hover {
+        color: #fff;
+      }
+
+      .article-nav a,
+      .article-footer a {
+        padding: 8px 0;
+        text-decoration: none;
+      }
+
+      .article-header {
+        padding: 64px 0 32px;
+      }
+
+      .example-article .eyebrow {
+        margin: 0 0 20px;
+        color: #8db3ff;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .example-article h1 {
+        margin: 0 0 24px;
+        color: #f4f7fb;
+        font-size: clamp(2.25rem, 5.5vw, 3.75rem);
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        line-height: 1.1;
+        text-wrap: balance;
+      }
+
+      .example-article .article-lead {
+        margin-bottom: 24px;
+        color: #d2d8e2;
+        font-size: 1.1875rem;
+        line-height: 1.7;
+      }
+
+      .example-article .byline {
+        margin: 0;
+        color: #8c96a5;
+        font-size: 0.8125rem;
+      }
+
+      .byline span {
+        padding: 0 8px;
+      }
+
+      .demo-facts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin: 0 0 48px;
+        padding: 24px 0;
+        border-top: 1px solid #222630;
+        border-bottom: 1px solid #222630;
+      }
+
+      .demo-facts dt {
+        color: #8c96a5;
+        font-size: 0.75rem;
+      }
+
+      .demo-facts div {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .demo-facts dd {
+        margin: auto 0 0;
+        padding-top: 4px;
+        color: #f4f7fb;
+        font-size: 1.5rem;
+        line-height: 1.3;
+      }
+
+      .example-article h2 {
+        margin: 48px 0 16px;
+        color: #f4f7fb;
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        line-height: 1.3;
+        scroll-margin-top: 24px;
+      }
+
+      .example-article h2:focus {
+        outline: none;
+      }
+
+      .example-article p {
+        margin: 0 0 20px;
+      }
+
+      .example-article ul,
+      .example-article ol {
+        padding-left: 24px;
+      }
+
+      .example-article li {
+        margin: 10px 0;
+        padding-left: 4px;
+      }
+
+      .example-article .article-toc {
+        padding: 24px;
+        border: 1px solid #252a35;
+        border-radius: 8px;
+        background: #11141a;
+        font-size: 0.9375rem;
+      }
+
+      .article-toc #contents-title {
+        margin: 0 0 12px;
+        color: #e2e7ef;
+        font-weight: 600;
+      }
+
+      .article-toc ol {
+        margin: 0;
+      }
+
+      .article-toc li {
+        margin: 6px 0;
+      }
+
+      .article-toc a {
+        display: inline-block;
+        padding: 3px 0;
+      }
+
+      .article-figure {
+        margin: 32px 0;
+      }
+
+      .article-figure img {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        height: auto;
+        border: 1px solid #252a35;
+        border-radius: 8px;
+        background: #000;
+      }
+
+      .article-figure figcaption {
+        margin-top: 12px;
+        color: #8c96a5;
+        font-size: 0.8125rem;
+        line-height: 1.6;
+      }
+
+      .article-table {
+        overflow-x: auto;
+        margin: 24px 0;
+        border: 1px solid #252a35;
+        border-radius: 8px;
+      }
+
+      .example-article .table-scroll-hint {
+        display: none;
+        color: #8c96a5;
+        font-size: 0.8125rem;
+      }
+
+      .article-table table {
+        width: 100%;
+        min-width: 620px;
+        border-collapse: collapse;
+        font-size: 0.8125rem;
+        line-height: 1.6;
+      }
+
+      .article-table caption {
+        padding: 16px;
+        color: #d2d8e2;
+        text-align: left;
+      }
+
+      .article-table th,
+      .article-table td {
+        padding: 12px 16px;
+        border-top: 1px solid #252a35;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .article-table th {
+        color: #e2e7ef;
+        font-weight: 500;
+      }
+
+      .article-table thead {
+        background: #11141a;
+      }
+
+      .article-table code {
+        white-space: nowrap;
+      }
+
+      .example-article strong {
+        color: #e2e7ef;
+        font-weight: 600;
+      }
+
+      .example-article code {
+        padding: 2px 5px;
+        border-radius: 4px;
+        background: #191c23;
+        color: #d6e4ff;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.85em;
+        overflow-wrap: anywhere;
+      }
+
+      .example-article pre {
+        overflow-x: auto;
+        margin: 24px 0;
+        padding: 24px;
+        border: 1px solid #252a35;
+        border-radius: 8px;
+        background: #11141a;
+        font-size: 0.875rem;
+        line-height: 1.8;
+        tab-size: 4;
+      }
+
+      .example-article pre code {
+        padding: 0;
+        background: none;
+        font-size: inherit;
+        overflow-wrap: normal;
+      }
+
+      .code-keyword {
+        color: #c6a6f7;
+      }
+
+      .code-comment {
+        color: #97a4b8;
+      }
+
+      .article-footer {
+        margin-top: 56px;
+        border-top: 1px solid #222630;
+      }
+
+      .article-footer .copyright {
+        flex-basis: 100%;
+        margin: 8px 0 0;
+        color: #8c96a5;
+        font-size: 0.75rem;
+        text-align: center;
+      }
+
+      @media (max-width: 680px) {
+        .example-article .table-scroll-hint {
+          display: block;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .article-header {
+          padding-top: 40px;
+        }
+
+        .example-article pre {
+          padding: 16px;
+          font-size: 0.75rem;
+        }
+
+        .example-article {
+          padding-right: 20px;
+          padding-left: 20px;
+          font-size: 1rem;
+        }
+      }
+
+      @media (orientation: portrait) {
+        /* Keep the comparison demo's bottom panel label readable. */
+        #demo[data-example="vertexattributes"] .more-info {
+          bottom: max(64px, env(safe-area-inset-bottom));
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html.has-article {
+          scroll-behavior: auto;
+        }
+
+        .more-info,
+        .more-info svg,
+        .has-article #loading-screen {
+          animation: none;
+          transition: none;
+        }
+
+        .more-info:hover svg,
+        .more-info:focus-visible svg {
+          transform: none;
+        }
+
+        .has-article .loading-spinner {
+          animation: none;
+        }
       }
 
       #loading-screen {
@@ -96,18 +573,55 @@
         text-align: center;
       }
     </style>
+    <noscript>
+      <style>.loading-spinner, .loading-label { display: none; }</style>
+    </noscript>
   </head>
   <body>
-    <div id="loading-screen" role="status" aria-live="polite">
-      <div class="loading-content">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-label" id="loading-label">Loading WebGPU example...</div>
-      </div>
-    </div>
+    <main>
+      <section id="demo" data-example="__EXAMPLE__" aria-label="Live __EXAMPLE__ WebGPU demo" tabindex="-1">
+        <div id="loading-screen" role="status" aria-live="polite" data-nosnippet>
+          <div class="loading-content">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <div class="loading-label" id="loading-label">Loading WebGPU example...</div>
+            <noscript>
+              <p>Enable JavaScript to run this WebGPU example.</p>
+            </noscript>
+          </div>
+        </div>
+        __ARTICLE_NAV__
+      </section>
+      __ARTICLE__
+    </main>
     <script type="module">
       const root = document.documentElement;
+      const demo = document.getElementById("demo");
+      const article = document.getElementById("about");
       const loadingScreen = document.getElementById("loading-screen");
       const loadingLabel = document.getElementById("loading-label");
+      let readerFocus = null;
+
+      for (const year of document.querySelectorAll("[data-current-year]")) {
+        year.textContent = String(new Date().getFullYear());
+      }
+
+      const rememberReaderFocus = (event) => {
+        if (event.target instanceof HTMLCanvasElement &&
+            event.target.parentElement === document.body) {
+          readerFocus = event.relatedTarget;
+        }
+      };
+
+      if (article) {
+        // Preserve keyboard focus if someone starts reading before WASM boots.
+        document.addEventListener("focusin", rememberReaderFocus, true);
+      }
+
+      if (article?.hasAttribute("data-static-demo")) {
+        // Static examples need no canvas input. Let touch and wheel gestures
+        // reach the document instead of winit's canvas event handlers.
+        demo.classList.add("is-static");
+      }
 
       const setLoadingLabel = (value) => {
         loadingLabel.textContent = value;
@@ -124,7 +638,24 @@
       };
 
       const hideLoadingWhenCanvasExists = () => {
-        if (document.querySelector("canvas")) {
+        const canvas = document.querySelector("canvas");
+        if (canvas) {
+          // winit appends its canvas to body. Keep article-enabled canvases
+          // inside their viewport-sized demo, above the reading section.
+          if (article && canvas.parentElement !== demo) {
+            demo.prepend(canvas);
+            canvas.setAttribute("aria-label", "Live __EXAMPLE__ WebGPU rendering");
+            if (demo.classList.contains("is-static")) {
+              canvas.setAttribute("tabindex", "-1");
+              canvas.setAttribute("role", "img");
+            }
+            document.removeEventListener("focusin", rememberReaderFocus, true);
+            const hashTarget = document.getElementById(location.hash.slice(1));
+            const focusTarget = readerFocus ?? (article.contains(hashTarget) ? hashTarget : null);
+            if (focusTarget instanceof HTMLElement && focusTarget.isConnected) {
+              focusTarget.focus({ preventScroll: true });
+            }
+          }
           hideLoadingScreen();
           return true;
         }
@@ -134,12 +665,15 @@
 
       const viewportSize = () => {
         const viewport = window.visualViewport;
-        const width = Math.max(
+        let width = Math.max(
           1,
           Math.round(
             viewport?.width ?? window.innerWidth ?? root.clientWidth ?? 1,
           ),
         );
+        if (article) {
+          width = Math.min(width, root.clientWidth);
+        }
         const height = Math.max(
           1,
           Math.round(

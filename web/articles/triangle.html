@@ -1,0 +1,92 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 01</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">This WebGPU triangle example uses Rust, wgpu, and WGSL to draw three colored vertices. Follow the vertex buffer, index buffer, shaders, and draw call from source code to pixels in the live demo above.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Triangle demo at a glance">
+      <div><dt>Vertices</dt><dd>3</dd></div>
+      <div><dt>Draw calls / frame</dt><dd>1</dd></div>
+      <div><dt>Color textures</dt><dd>0</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#why-a-triangle">Why start with a triangle?</a></li>
+        <li><a href="#vertex-and-index-buffers">Vertex and index buffers in Rust</a></li>
+        <li><a href="#wgsl-shaders">WGSL shaders and color interpolation</a></li>
+        <li><a href="#render-pipeline">From the render pipeline to pixels</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="why-a-triangle" tabindex="-1">Why start with a triangle?</h2>
+    <p>A triangle is the graphics equivalent of &ldquo;Hello, world.&rdquo; The result is simple, but getting it onto the screen connects the essential parts of a renderer: data buffers, shaders, a render pipeline, and a draw call.</p>
+    <p>My aim with this example is to keep that path easy to follow. It is a static triangle on a black background, with blue at the top, green at the bottom left, and red at the bottom right. There is no camera to move or animation to control. The interesting part is how those three colors fill the shape.</p>
+    <p>The application is written in <strong>Rust</strong>, using <strong>wgpu</strong> through the shared <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> framework. In the browser, the Rust application runs as WebAssembly and uses WebGPU to render; the GPU runs the <strong>WGSL</strong> shaders.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/triangle.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="732" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The rendered triangle: blue, green, and red vertex colors blend across its surface through interpolation. This screenshot is also available when the live WebGPU demo cannot run.</figcaption>
+    </figure>
+
+    <h2 id="vertex-and-index-buffers" tabindex="-1">Vertex and index buffers in Rust</h2>
+    <p>Each vertex holds a position and an RGB color. In <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/triangle.rs">the Rust source</a>, those are two arrays of three floating-point values:</p>
+    <pre tabindex="0" aria-label="Rust vertex structure"><code><span class="code-keyword">struct</span> Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}</code></pre>
+    <p>The vertex buffer layout connects <code>position</code> to shader location <code>0</code> and <code>color</code> to location <code>1</code>. The vertices sit at <code>(-0.5, -0.5, 0)</code>, <code>(0.5, -0.5, 0)</code>, and <code>(0, 0.75, 0)</code>. These are coordinates passed directly to clip space with <code>w = 1</code>, not pixel positions.</p>
+    <p>A separate index buffer contains <code>[0, 1, 2]</code>: use the first, second, and third vertices to form one triangle. Indexing does not save any vertices here, but it introduces the same approach used to share vertices across larger meshes.</p>
+
+    <h2 id="wgsl-shaders" tabindex="-1">WGSL shaders and color interpolation</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/triangle.wgsl">WGSL shader</a> has two entry points. The vertex shader passes through the position and color. The fragment shader returns the color it receives, with an alpha of <code>1.0</code>:</p>
+    <pre tabindex="0" aria-label="WGSL vertex and fragment shader functions"><code><span class="code-keyword">@vertex
+fn</span> vs_main(input: VertexInput) -&gt; VertexOutput {
+    <span class="code-keyword">var</span> output: VertexOutput;
+    output.clip_position = vec4&lt;f32&gt;(input.position, 1.0);
+    output.color = input.color;
+    <span class="code-keyword">return</span> output;
+}
+
+<span class="code-keyword">@fragment
+fn</span> fs_main(input: VertexOutput) -&gt; @location(0) vec4&lt;f32&gt; {
+    <span class="code-keyword">return</span> vec4&lt;f32&gt;(input.color, 1.0);
+}</code></pre>
+    <p>Between those stages, the rasterizer determines which parts of the screen the triangle covers and interpolates the vertex colors. Fragments near the blue vertex receive more blue; fragments between vertices receive a mixture. That smooth gradient needs no color texture, lighting calculation, or hand-written gradient in the fragment shader. The <a href="https://www.w3.org/TR/WGSL/#interpolation">WGSL interpolation rules</a> describe how values pass between these stages.</p>
+
+    <h2 id="render-pipeline" tabindex="-1">From the render pipeline to pixels</h2>
+    <p>The pipeline ties the vertex layout and shader entry points to the render target. Each frame, the example clears the background to black, binds the pipeline and buffers, and issues one indexed draw:</p>
+    <pre tabindex="0" aria-label="Rust indexed draw call"><code><span class="code-comment">// Three indices, starting at vertex 0, one instance.</span>
+render_pass.draw_indexed(0..3, 0, 0..1);</code></pre>
+    <p>A depth attachment is also cleared and used with depth writes and a <code>LessEqual</code> comparison. It makes little visual difference for one flat triangle, but shows where depth testing belongs when more geometry is added. The depth texture is recreated when the canvas resizes.</p>
+    <p>If you want to get familiar with the GPU pipeline, you can <a href="https://youtu.be/VswCpKw4fc8?si=DQ5V61z_IxTkm_Q4">watch this GPU pipeline video</a>.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>Start by giving all three vertices the same color, then move a vertex. Those two edits make the relationship between the buffer data and the result easy to see. Next, add a fourth vertex and indices for a second triangle to explore vertex reuse.</p>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native triangle example"><code>cargo run --example triangle</code></pre>
+    <p>For the browser build, install the WebAssembly target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then run:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU triangle"><code>scripts/build-wasm.sh --release triangle
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/triangle/</code>. The live demo needs a browser and GPU configuration that support WebGPU; these notes are still readable without it. See <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility">MDN&rsquo;s WebGPU compatibility table</a> for current support.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/triangle.rs">Read the triangle source &nearr;</a>
+      <a href="../vertexattributes/">Next: WebGPU vertex attributes &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

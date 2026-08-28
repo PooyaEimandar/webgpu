@@ -1,0 +1,127 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 03</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">UV coordinates tell the GPU where to read an image. This Rust and wgpu example loads a PNG at runtime, uploads its pixels to a WebGPU texture, and samples it in WGSL to draw a lit quad. The geometry is simple enough to follow the whole path from image bytes to pixels on screen.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Texture loading demo at a glance">
+      <div><dt>Vertices</dt><dd>4</dd></div>
+      <div><dt>Triangles</dt><dd>2</dd></div>
+      <div><dt>Color textures</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#textured-quad">A PNG on a 3D quad</a></li>
+        <li><a href="#uv-coordinates">UV coordinates and vertex data</a></li>
+        <li><a href="#texture-upload">From PNG bytes to a GPU texture</a></li>
+        <li><a href="#texture-bind-group">Texture views, samplers, and bind groups</a></li>
+        <li><a href="#wgsl-texture-sampling">Texture sampling and lighting in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="textured-quad" tabindex="-1">A PNG on a 3D quad</h2>
+    <p>The <a href="../vertexattributes/#about">vertex attributes example</a> showed how positions, normals, and UVs reach a shader. Here I focus on what happens to an image: loading it, creating the GPU resources, and connecting those resources to the fragment shader.</p>
+    <p>The demo maps the <a href="https://raw.githubusercontent.com/PooyaEimandar/sib/main/sib.png">SIB husky PNG</a> onto a square made from two triangles. The model has a fixed 15&deg; rotation around the Y axis, viewed through a perspective camera. It does not rotate automatically and has no input controls. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/texture.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The husky image covers a single quad. Perspective gives it the angled outline, while diffuse and specular lighting change the sampled image&rsquo;s brightness.</figcaption>
+    </figure>
+
+    <h2 id="uv-coordinates" tabindex="-1">UV coordinates and vertex data</h2>
+    <p>Each vertex in the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texture.rs">Rust source</a> contains a position, a pair of texture coordinates, and a normal:</p>
+    <pre tabindex="0" aria-label="Rust vertex structure for the textured quad"><code>#[repr(C)]
+<span class="code-keyword">struct</span> Vertex {
+    position: [f32; 3],
+    uv: [f32; 2],
+    normal: [f32; 3],
+}</code></pre>
+    <p>This interleaved layout uses <strong>32 bytes per vertex</strong>. Position, UV, and normal start at byte offsets <code>0</code>, <code>12</code>, and <code>20</code>, and feed shader locations <code>0</code>, <code>1</code>, and <code>2</code>. Notice that this attribute order differs from the previous example; the vertex buffer layout and WGSL inputs must agree.</p>
+    <p>UVs are normalized image coordinates: <code>u</code> runs horizontally and <code>v</code> vertically. In this quad, the top-left corner uses <code>(0, 0)</code>, the top-right uses <code>(1, 0)</code>, the bottom-left uses <code>(0, 1)</code>, and the bottom-right uses <code>(1, 1)</code>. The vertex shader passes these values onward, and the rasterizer interpolates them across each triangle for the fragment shader.</p>
+    <p>The index list <code>[0, 1, 2, 2, 3, 0]</code> reuses the four vertices to form two triangles. All four normals point along positive Z before the model transform. One <code>draw_indexed</code> call draws the quad each frame.</p>
+
+    <h2 id="texture-upload" tabindex="-1">From PNG bytes to a GPU texture</h2>
+    <p>Loading has two stages. First, <code>AssetLoader::fetch_image_rgba8</code> downloads the PNG and decodes it into RGBA8 pixels in CPU memory. The browser uses an asynchronous fetch; the native example uses a synchronous HTTP request. Both finish loading the image before starting the renderer.</p>
+    <p>Once a device and queue are available, initialization uploads those decoded pixels:</p>
+    <pre tabindex="0" aria-label="Upload decoded RGBA pixels to a wgpu texture"><code><span class="code-keyword">let</span> sampled_texture = texture::Texture::from_rgba8_2d(
+    &amp;context.device,
+    &amp;context.queue,
+    Some("runtime sib texture"),
+    &amp;texture_image,
+)?;</code></pre>
+    <p>The <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/texture.rs">texture helper used by this checkout</a> creates a 2D <code>Rgba8UnormSrgb</code> texture with <code>TEXTURE_BINDING | COPY_DST</code> usage. Those flags allow shader sampling and copying pixels into the texture. It uploads the image with <code>queue.write_texture</code>, preserving the decoded width and height.</p>
+    <p>The texture has <strong>one mip level</strong>: the original image. This loading path does not generate smaller versions of the image. Both native and browser runs need access to the image URL; in the browser, its host must also allow the cross-origin fetch.</p>
+
+    <h2 id="texture-bind-group" tabindex="-1">Texture views, samplers, and bind groups</h2>
+    <p>A texture stores the image data. A <strong>texture view</strong> selects the part of that texture exposed to a shader. A <strong>sampler</strong> controls how sampling handles coordinates and filtering. The helper returns all three, and the bind group connects the view and sampler to WGSL alongside a uniform buffer.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="texture-bindings-caption" tabindex="0">
+      <table>
+        <caption id="texture-bindings-caption">Resources in bind group 0</caption>
+        <thead>
+          <tr><th scope="col">Binding</th><th scope="col">Resource</th><th scope="col">Shader stage</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Uniform buffer: transforms, camera position, LOD bias</td><td>Vertex</td></tr>
+          <tr><th scope="row">1</th><td>2D color texture view</td><td>Fragment</td></tr>
+          <tr><th scope="row">2</th><td>Filtering sampler</td><td>Fragment</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The sampler uses <code>ClampToEdge</code> addressing and linear minification and magnification filters. UVs beyond the image boundary therefore sample its edge instead of repeating it. Linear filtering blends neighboring texels, which are the pixels stored in the texture. The <a href="https://docs.rs/wgpu/latest/wgpu/type.SamplerDescriptor.html"><code>wgpu::SamplerDescriptor</code> reference</a> describes these settings.</p>
+    <p><code>@group</code> and <code>@binding</code> identify resources; <code>@location</code> identifies shader inputs and outputs. The vertex shader reads the uniforms and passes the needed values to the fragment shader, so the uniform binding only needs vertex-stage visibility here.</p>
+
+    <h2 id="wgsl-texture-sampling" tabindex="-1">Texture sampling and lighting in WGSL</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texture.wgsl">WGSL shader</a> declares the texture and sampler at the bindings from the table:</p>
+    <pre tabindex="0" aria-label="WGSL texture and sampler resource bindings"><code>@group(0) @binding(1)
+<span class="code-keyword">var</span> texture_color: texture_2d&lt;f32&gt;;
+
+@group(0) @binding(2)
+<span class="code-keyword">var</span> sampler_color: sampler;</code></pre>
+    <p>Inside <code>fs_main</code>, one sample retrieves the color at the interpolated UV:</p>
+    <pre tabindex="0" aria-label="Sample the texture in the WGSL fragment shader"><code><span class="code-keyword">let</span> color = textureSampleBias(
+    texture_color, sampler_color, input.uv, input.lod_bias
+);</code></pre>
+    <p><a href="https://www.w3.org/TR/WGSL/#texturesamplebias"><code>textureSampleBias</code></a> adjusts the automatically calculated level of detail before sampling. Here the bias is <code>0.0</code>, and only the original mip level exists. Changing the bias alone cannot create a mip chain; the separate <a href="../texturemipmapgen/">texture mipmap generation demo</a> covers mip chain generation.</p>
+    <p>The shader then combines the sampled RGB with ambient and diffuse lighting, plus a specular highlight. The light is at <code>(0, 0, 2.5)</code>, the same position as the camera. Unlike the previous demo, this one uses the quad&rsquo;s normal directly and has no normal map.</p>
+    <p>One detail matters when replacing the image: sampled alpha scales the specular highlight, but the fragment shader returns alpha <code>1.0</code>. This example does <strong>not</strong> demonstrate transparent PNG blending. A transparent material would also need an appropriate shader output and blend state.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native texture example"><code>cargo run --example texture</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU texture example"><code>scripts/build-wasm.sh --release texture
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/texture/</code>. Live rendering needs WebGPU support and a successful image download; this article and its screenshot remain readable without WebGPU.</p>
+    <p>Try these small changes in the source:</p>
+    <ul>
+      <li>Replace <code>TEXTURE_URL</code> with another reachable PNG to follow the same loading path with a different image.</li>
+      <li>Flip the V coordinates with <code>1.0 - v</code> to see how UVs control image orientation.</li>
+      <li>Return <code>vec4&lt;f32&gt;(color.rgb, 1.0)</code> after sampling to view the texture without the lighting calculation.</li>
+    </ul>
+    <p>To experiment with tiling, use <code>from_rgba8_2d_with_sampler</code> and set U and V addressing to <code>Repeat</code> before extending the UV range. Extending UVs with the current clamp sampler only stretches the image edges.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/texture.rs">Read the texture source &nearr;</a>
+      <a href="../vertexattributes/">&larr; Previous: WebGPU vertex attributes</a>
+      <a href="../texturecubemap/">Next: WebGPU texture cubemap &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

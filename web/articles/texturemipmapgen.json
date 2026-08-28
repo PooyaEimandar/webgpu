@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Mipmap Generation in Rust and wgpu",
+  "description": "Generate a full mipmap chain with WebGPU render passes in Rust and wgpu. Learn texture views, WGSL downsampling, LOD, and anisotropic filtering on a tunnel.",
+  "breadcrumbName": "Texture mipmap generation",
+  "image": "texturemipmapgen.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A cylindrical tunnel lined with metal plates and rivets receding toward a dark center, with large nearby tiles and fine distant detail."
+}

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Vertex Attributes in Rust and wgpu",
+  "description": "Compare interleaved and separate vertex buffers in a live WebGPU demo. Learn Rust wgpu strides, offsets, WGSL shader locations, and normal mapping.",
+  "breadcrumbName": "Vertex attributes",
+  "image": "vertexattributes.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Two matching blue and yellow checkerboard surfaces rendered with interleaved vertex data on the left and separate attribute buffers on the right."
+}

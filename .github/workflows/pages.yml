@@ -25,6 +25,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Validate demo metadata and sitemap
+        run: |
+          python3 scripts/test-render-example.py
+          python3 scripts/test-render-sitemap.py
+
       - name: Install Rust target
         run: rustup target add wasm32-unknown-unknown
 
