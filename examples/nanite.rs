@@ -2999,6 +2999,31 @@ fn normalize_plane(plane: glam::Vec4) -> [f32; 4] {
     (plane / length).to_array()
 }
 
+fn run_nanite(scene: SkinnedGltfScene) -> RenderResult<()> {
+    sib::render::run(NaniteExample::new(scene))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() -> RenderResult<()> {
+    run_nanite(load_skinned_gltf_scene(JAX_GLTF_URL)?)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub fn main() -> Result<(), wasm_bindgen::JsValue> {
+    wasm_bindgen_futures::spawn_local(async {
+        match load_skinned_gltf_scene(JAX_GLTF_URL).await {
+            Ok(scene) => {
+                if let Err(error) = run_nanite(scene) {
+                    webgpu::log_error(error);
+                }
+            }
+            Err(error) => webgpu::log_error(error),
+        }
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3094,29 +3119,4 @@ mod tests {
                 .all(|instance| instance.position_scale[3] == 0.0)
         );
     }
-}
-
-fn run_nanite(scene: SkinnedGltfScene) -> RenderResult<()> {
-    sib::render::run(NaniteExample::new(scene))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn main() -> RenderResult<()> {
-    run_nanite(load_skinned_gltf_scene(JAX_GLTF_URL)?)
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(start)]
-pub fn main() -> Result<(), wasm_bindgen::JsValue> {
-    wasm_bindgen_futures::spawn_local(async {
-        match load_skinned_gltf_scene(JAX_GLTF_URL).await {
-            Ok(scene) => {
-                if let Err(error) = run_nanite(scene) {
-                    webgpu::log_error(error);
-                }
-            }
-            Err(error) => webgpu::log_error(error),
-        }
-    });
-    Ok(())
 }

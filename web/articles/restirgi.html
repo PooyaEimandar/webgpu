@@ -1,0 +1,185 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 45</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Launch three cosine-weighted indirect paths per visible pixel, store one secondary surface or environment direction in a compact reservoir, reconnect it through visibility and a solid-angle Jacobian across frames and neighboring pixels, then combine the reused bounce with separately sampled direct light.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU ReSTIR global illumination at a glance">
+      <div><dt>Default GI candidates</dt><dd>3 per pixel</dd></div>
+      <div><dt>Indirect bounce setting</dt><dd>2</dd></div>
+      <div><dt>Reservoir stride</dt><dd>48 bytes</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#reuse-indirect-paths">Reuse indirect path samples</a></li>
+        <li><a href="#share-scene">Share the animated scene and BVHs</a></li>
+        <li><a href="#trace-gi-candidates">Trace GI candidates and secondary radiance</a></li>
+        <li><a href="#reconnect-paths">Reconnect paths across time and space</a></li>
+        <li><a href="#combine-lighting">Combine indirect and direct estimators</a></li>
+        <li><a href="#filter-present">Accumulate, filter, and present</a></li>
+        <li><a href="#passes-controls">Passes, resources, and controls</a></li>
+        <li><a href="#limits">Understand the quality limits</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="reuse-indirect-paths" tabindex="-1">Reuse indirect path samples without pretending they are direct lights</h2>
+    <p>The <a href="../restirdi/#about">previous ReSTIR direct illumination example</a> stores a selected point or spot emitter in each reservoir. ReSTIR GI changes the sample domain. A candidate is a cosine-weighted direction from the primary surface, followed by either an environment miss or a hit on Sponza or Jax. Its reservoir stores that secondary position, normal, estimated outgoing radiance, kind, target value, accumulated weight, represented count, and age.</p>
+    <p>That distinction changes the cost and reuse rules. DI can form twelve unshadowed candidates cheaply and defer visibility to the winner. Every GI candidate already traces a bounce and evaluates lighting at the secondary point, so the default pool is only three. Temporal and spatial reconnection must test visibility, transform the old sampling measure with a Jacobian, and reject animated secondary samples whose radiance is stale.</p>
+    <p>The shared implementation arrived in the <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">Metropolis and ReSTIR introduction</a>. The later <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">geometry update</a> revised its renderer, scene handling, and shaders. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/restirgi.rs"><code>restirgi</code> entry</a> selects <code>RestirMode::GlobalIllumination</code>; DI and GI otherwise share the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/renderer.rs">Rust renderer</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir.wgsl">reservoir WGSL</a>, denoiser, presentation code, assets, controls, and <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> host.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/restirgi.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Warm indirect light reaches the Sponza arches and the animated Jax character in this 1280&times;720 capture. The image is a 299,076-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirgi.jpg">JPEG</a> and 117,570-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirgi.webp">WebP</a>. Its panel shows 16 candidates and eight neighbors, not the current GI defaults of three and two. The displayed five FPS, Apple M2 Max timing, and 1080&times;678 ray target are capture context rather than a benchmark.</figcaption>
+    </figure>
+
+    <h2 id="share-scene" tabindex="-1">Share the Sponza hierarchy, skinned Jax refit, and material arrays</h2>
+    <p>GI traces exactly the same geometry as DI: 262,266 static Sponza triangles in a committed 524,531-node BVH plus 11,960 Jax triangles in a 23,919-node dynamic hierarchy. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/scene.rs">scene loader</a> validates the static asset against triangle count and a geometry fingerprint. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/accel.rs">acceleration module</a> stores each AABB node in 32 bytes, marks a leaf in the top bit of its first word, and preserves topology while refitting the animated bounds at 30 Hz.</p>
+    <p>Primary hits evaluate base-color, normal, and metallic-roughness texture arrays with generated mip chains. Twenty-five Sponza materials become 26 when Jax is appended. Jax receives a base-color layer, neutral normal and material-detail layers, roughness 0.62, and metallic 0.05. Its previous triangle pose is kept in a 16-texel-wide <code>Rgba32Float</code> texture so the G-buffer can store skeletal motion as well as camera motion.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirgi-scene-caption" tabindex="0">
+      <table>
+        <caption id="restirgi-scene-caption">Shared ReSTIR GI scene and acceleration payload</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Logical elements</th><th scope="col">Logical bytes</th><th scope="col">Update behavior</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Triangle storage</th><td>262,266 static + 11,960 dynamic at 128 bytes</td><td>35,100,928</td><td>Sponza once; Jax pose at most 30 Hz</td></tr>
+          <tr><th scope="row">BVH storage</th><td>524,531 static + 23,919 dynamic at 32 bytes</td><td>17,550,400</td><td>Prebuilt static nodes; dynamic bound refit</td></tr>
+          <tr><th scope="row">Previous Jax pose</th><td>16&times;5,980 <code>Rgba32Float</code> texels</td><td>1,530,880</td><td>Prior triangles uploaded before each new pose</td></tr>
+          <tr><th scope="row">Material texture arrays</th><td>26 layers at 512&sup2; + two arrays at 256&sup2;, full mips</td><td>54,525,848</td><td>Uploaded once; base color is sRGB</td></tr>
+          <tr><th scope="row">Materials + light capacity</th><td>64 materials + 64 lights at 64 bytes</td><td>8,192</td><td>Materials once; 64-light region every frame</td></tr>
+          <tr><th scope="row">Scene uniform</th><td>Two matrices and eight 16-byte vectors</td><td>256</td><td>Completely rewritten every frame</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The stored model package includes <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sponza.gltf"><code>sponza.gltf</code></a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sponza.bvh">the prebuilt BVH</a>, <a href="https://github.com/PooyaEimandar/webgpu/tree/main/assets/textures/sponza">69 Sponza textures</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png">Jax base color</a>. Sponza's model files carry the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/licenses/sponza.md">CryEngine Limited License Agreement</a>. This repository does not document a separate license for Jax, so reuse outside the project needs an independent provenance check.</p>
+
+    <h2 id="trace-gi-candidates" tabindex="-1">Trace three cosine-weighted paths and estimate secondary radiance</h2>
+    <p>After the 8&times;8 primary pass fills a 64-byte G-buffer, <code>cs_temporal_gi</code> generates three fresh candidates per valid pixel. It samples a cosine-weighted hemisphere about the primary normal, offsets the origin with geometric-normal and scale-aware epsilon terms, and traverses both BVHs. A miss stores a point 1,000 units along the direction, kind zero, an opposite normal, and the procedural environment multiplied by 1.5.</p>
+    <p>A hit stores the secondary surface position and normal. Kind one marks Sponza and kind two marks Jax. Its radiance begins with material emission plus direct lighting selected from eight RIS candidates. At the default two-bounce setting, the shader launches one more cosine-weighted ray from that secondary point. A tertiary hit adds emission and direct light selected from four candidates; a miss uses 1.5 times the environment. The secondary BRDF multiplies that incoming term by &pi;, and final secondary radiance is clamped to luminance 4.</p>
+    <pre tabindex="0" aria-label="Create a ReSTIR GI candidate from a secondary ray in WGSL"><code><span class="code-keyword">let</span> direction = sample_cosine_hemisphere(
+  primary.normal,
+  vec2&lt;f32&gt;(random(&amp;seed), random(&amp;seed)),
+);
+<span class="code-keyword">let</span> hit = trace_scene_ignoring(
+  origin, direction, 1000.0, primary.triangle_index,
+);
+<span class="code-keyword">if</span> (hit.valid) {
+  <span class="code-keyword">let</span> secondary = surface_from_hit(origin, direction, hit);
+  sample.sample_position = secondary.position;
+  sample.sample_normal = secondary.normal;
+  sample.radiance = secondary_radiance(secondary, view, &amp;seed);
+}
+sample.target_value = luminance(gi_contribution(primary, sample));</code></pre>
+    <p>The label “GI bounces” is easy to overread. The reservoir always represents the first indirect connection. Setting one stops at lighting evaluated on that secondary surface; setting two adds one tertiary ray inside its stored radiance. This is a bounded one- or two-bounce estimator, not an arbitrary-depth path tracer.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirgi-candidates-caption" tabindex="0">
+      <table>
+        <caption id="restirgi-candidates-caption">How DI and GI use the shared reservoir machinery</caption>
+        <thead><tr><th scope="col">Property</th><th scope="col">ReSTIR DI</th><th scope="col">ReSTIR GI</th><th scope="col">Consequence</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Default fresh candidates</th><td>12</td><td>3</td><td>GI candidates contain full bounce work</td></tr>
+          <tr><th scope="row">Stored sample</th><td>Local emitter position</td><td>Secondary surface or environment direction</td><td>Different target and reuse domain</td></tr>
+          <tr><th scope="row">Candidate visibility</th><td>Deferred</td><td>Primary-to-secondary inherent in path; reused connections tested</td><td>GI pays more traversals</td></tr>
+          <tr><th scope="row">Temporal stale rule</th><td>Refresh current light sample</td><td>Reject history whose secondary sample is dynamic Jax</td><td>Avoids reusing old animated radiance</td></tr>
+          <tr><th scope="row">Reuse measure</th><td>Target ratio</td><td>Target ratio &times; solid-angle Jacobian</td><td>Corrects origin changes near geometry</td></tr>
+          <tr><th scope="row">Boiling threshold</th><td>10&times; tile average</td><td>25&times; tile average</td><td>Preserves legitimate wider GI weights</td></tr>
+          <tr><th scope="row">Final reservoir clamp</th><td>Luminance 4.5</td><td>Luminance 5.5</td><td>Bounds fireflies differently</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="reconnect-paths" tabindex="-1">Reconnect compatible paths with visibility and a solid-angle Jacobian</h2>
+    <p>Temporal reprojection uses current and previous G-buffers, triangle-aware dynamic motion, and a dual-motion fallback for static background revealed behind Jax. It rejects class, normal, position, roughness, metallic, and albedo mismatches. GI also rejects any history reservoir whose selected secondary hit was dynamic; otherwise it recomputes the target at the current primary point and casts a visibility ray to the stored secondary position.</p>
+    <p>Moving a path sample from its old primary origin to a new one changes the solid-angle measure. For non-environment GI samples, the shader multiplies the reuse weight by:</p>
+    <pre tabindex="0" aria-label="Apply the ReSTIR GI reconnection Jacobian in WGSL"><code><span class="code-keyword">let</span> jacobian =
+  (cosine_new / max(cosine_old, 0.0001))
+  * (distance_old_squared / distance_new_squared);
+<span class="code-keyword">return</span> clamp(jacobian, 0.0, 4.0);</code></pre>
+    <p>Either connection shorter than 0.25 world units is rejected because its squared-distance ratio can explode. Grazing results are capped at four. Environment samples are directional and use a Jacobian of one. The reused sample then enters the same weighted reservoir stream with its represented count, after which the normal history cap of 20 is applied.</p>
+    <p>Spatial reuse ranks eight reciprocal XOR candidates and merges the best two inside a default 12-pixel radius. Static and dynamic pixels never mix. Every accepted GI neighbor must pass geometry and material compatibility, current target evaluation, reconnection visibility, and the Jacobian. These tests make GI reuse more expensive than copying a nearby radiance value, but they preserve the path interpretation.</p>
+
+    <h2 id="combine-lighting" tabindex="-1">Combine reused indirect light with separately sampled direct sources</h2>
+    <p>The selected GI reservoir estimates <code>BRDF * stored_radiance * PI * weight_sum / (count * target)</code>. Final shading casts a visibility ray to the stored secondary point and clamps the result to luminance 5.5. A secondary sample on animated Jax is multiplied by 0.18 before the primary BRDF to suppress a bright contact halo; this is an explicit artistic bias, not part of the general ReSTIR GI estimator.</p>
+    <p>Direct light does not disappear in GI mode. The sun uses the same deterministic disk and penumbra refinement as DI. Local direct illumination is estimated separately: four repetitions each select among eight local-light candidates and trace the selected visibility, then their average is clamped to luminance 3. Material emission and environment-derived ambient fill complete the signal. GI defaults to exposure 1.15 and ambient 0.20, lower fill than DI because reused bounce light is expected to illuminate shadowed regions.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirgi-lighting-caption" tabindex="0">
+      <table>
+        <caption id="restirgi-lighting-caption">Default ReSTIR GI shading terms</caption>
+        <thead><tr><th scope="col">Term</th><th scope="col">Estimator</th><th scope="col">Clamp or scale</th><th scope="col">Visibility</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Indirect reservoir</th><td>3 fresh paths + temporal + 2 spatial survivors</td><td>Luminance 5.5; dynamic secondary radiance &times;0.18</td><td>Reconnect winner to primary</td></tr>
+          <tr><th scope="row">Sun direct</th><td>Low-discrepancy disk, 8 base samples at native scale</td><td>Up to 16 samples in a mixed penumbra</td><td>One BVH shadow ray per disk sample</td></tr>
+          <tr><th scope="row">Local direct</th><td>4 repeated RIS estimates from up to 8 lights</td><td>Luminance 3</td><td>Selected sample in each repetition</td></tr>
+          <tr><th scope="row">Ambient</th><td>Albedo &times; nonmetal factor &times; environment(normal)</td><td>Default control 0.20; GI factors 0.45 and 0.05</td><td>No ray</td></tr>
+          <tr><th scope="row">Emission</th><td>Material emission</td><td>Included directly</td><td>No extra ray</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="filter-present" tabindex="-1">Accumulate demodulated GI and adapt four a-trous passes</h2>
+    <p>GI divides the combined lighting by a clamped albedo before accumulation, so the filter operates primarily on irradiance instead of smearing texture detail. Previous HDR and first two luminance moments are fetched at the reprojected pixel. History is rejected on geometry, motion, or shadow-guide changes, constrained to a current-color neighborhood, and blended with variance-driven reactivity. Fresh GI pixels receive an additional luminance-2 cap until their history count reaches 2.5.</p>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir_atrous.wgsl">a-trous shader</a> runs 5&times;5 B3-spline kernels at strides 1, 2, 4, and 8. GI uses a wider luminance stop and larger variance gain than DI. The filter never crosses the static/dynamic boundary and weighs depth, normal, metallic value, luminance, and sun coverage. Later passes can copy stable pixels without applying the full kernel.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir_present.wgsl">present shader</a> compensates the Halton jitter, clamps Catmull-Rom reconstruction to compatible neighbors, switches to geometry-aware bilinear filtering at silhouettes, remodulates albedo, sharpens only stable interior lighting, and applies the shared ACES fit from <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/include/tonemap.wgsl"><code>tonemap.wgsl</code></a>.</p>
+
+    <h2 id="passes-controls" tabindex="-1">Run eight compute passes and expose the quality tradeoffs</h2>
+    <p>Normal GI rendering records primary, GI candidate plus temporal, spatial, and GI shade compute passes, followed by four a-trous dispatches. Every compute entry uses 8&times;8 workgroups and dispatches <code>ceil(width/8) &times; ceil(height/8)</code>. A full-screen triangle presents the result; optional light gizmos, a joystick overlay, and egui load the same swapchain image afterward. Debug view Albedo skips candidate and spatial work, and any non-off debug view disables the denoiser.</p>
+    <p>The size-dependent set holds two 64-byte G-buffers, three 48-byte reservoirs, two HDR outputs, two denoise textures, and two moment textures. All six textures are <code>Rgba16Float</code>, making the total 320 logical bytes per ray pixel. Even-frame and odd-frame bind groups swap G-buffer, history reservoir, HDR, and moment roles without rebinding individual resources. The largest target dimension is capped at 1080 before the ray scale is applied.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirgi-controls-caption" tabindex="0">
+      <table>
+        <caption id="restirgi-controls-caption">Current ReSTIR GI defaults and live controls</caption>
+        <thead><tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">UI range or choices</th><th scope="col">GI tradeoff</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Candidates</th><td>3</td><td>1&ndash;16</td><td>Full secondary-path work per fresh sample</td></tr>
+          <tr><th scope="row">Neighbors / radius</th><td>2 / 12 px</td><td>1&ndash;8 / 2&ndash;36</td><td>Reuse breadth and visibility/Jacobian cost</td></tr>
+          <tr><th scope="row">History cap</th><td>20</td><td>1&ndash;64</td><td>Convergence against lag and correlation</td></tr>
+          <tr><th scope="row">GI bounces</th><td>2</td><td>1&ndash;2</td><td>Optional tertiary ray inside secondary radiance</td></tr>
+          <tr><th scope="row">Temporal / spatial reuse</th><td>On / on</td><td>Checkboxes</td><td>Path reuse stages</td></tr>
+          <tr><th scope="row">Animate Jax / lights</th><td>On / off</td><td>Checkboxes</td><td>Dynamic geometry and source stability</td></tr>
+          <tr><th scope="row">Denoise / exposure / ambient</th><td>On / 1.15 / 0.20</td><td>Toggle / 0.25&ndash;3 / 0&ndash;1</td><td>Noise suppression and output balance</td></tr>
+          <tr><th scope="row">Ray scale</th><td>1.0</td><td>0.35&ndash;1; Fast 0.65, Balanced 0.85, Native 1</td><td>Ray count, visibility quality, and history memory</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>W/A/S/D moves the FPS camera and the arrow keys look. Mouse and touch drags create left-half movement and right-half look sticks. The camera uses a 55-degree field of view, 3.5-unit movement speed, and 1.45-radian look speed. Resize and ray-scale changes rebuild all frame resources; any other control change clears history. The panel also reports CPU time, FPS, adapter, target dimensions, triangle and BVH counts, light counts, and, when available, each of the eight GPU compute timings.</p>
+    <p>Native requests WebGPU timestamp queries. WebAssembly requests no timestamp feature but otherwise runs the same shader and BVH path. Native asset batches use filesystem threads; the browser fetches Sponza resources concurrently inside a Worker, awaits Jax, and starts asynchronously. Both load the committed Sponza BVH and refit only Jax at runtime.</p>
+
+    <h2 id="limits" tabindex="-1">Understand the quality and portability limits</h2>
+    <p>This implementation favors a stable interactive demonstration over an unbiased reference. It clamps secondary radiance, reused estimates, direct estimates, temporal spikes, fresh GI pixels, demodulated luminance, and the Jacobian. It rejects short reconnections, suppresses dynamic-secondary bounce light, imposes finite history, adds an ambient floor, and applies temporal plus spatial denoising. Those choices control fireflies and ghosting but alter the converged result.</p>
+    <p>The bounded bounce setting, one selected indirect sample per pixel, analytic environment, simple light rig, and per-pixel wavelet filter do not reproduce a production path tracer. There is no multiple-importance sampling between BSDF and emitters, Russian roulette, emissive-triangle sampling, participating media, transmission, stochastic alpha, ray sorting, hardware traversal, or offline ground-truth comparison. Metallic-roughness BRDF evaluation is useful, but the estimator also contains artistic constants such as environment &times;1.5 and the Jax bounce attenuation.</p>
+    <p>Software BVH traversal and 320 bytes of frame history per ray pixel are demanding. At a 1080&times;608 target, listed size-dependent resources alone occupy about 200.4 MiB before driver overhead. GI adds secondary, optional tertiary, direct-light, reuse-visibility, sun, and final-visibility traversals whose exact count varies by hits, compatibility, and penumbrae. The capture's five FPS is neither a promise nor a cross-device comparison.</p>
+    <p>Alpha-blended Sponza materials are reduced to cutoff tests, texture LOD uses a distance approximation, and traversal holds a fixed 128-node stack. Jax asset licensing is not recorded separately in the repository. These are practical boundaries to address before treating the sample as a reusable production renderer.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run ReSTIR GI natively from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU ReSTIR global illumination example"><code>cargo run --example restirgi</code></pre>
+    <p>Build and serve its WebAssembly page:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU ReSTIR global illumination example"><code>scripts/build-wasm.sh --release restirgi
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/restirgi/</code> with WebGPU enabled and preserve the model, texture, and BVH paths. Productive experiments include showing the stored secondary kind and age, comparing one and two bounce settings, disabling each reuse stage, removing clamps against a reference image, adding BSDF/light multiple-importance sampling, or moving path and filter work to adaptive queues.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/restirgi.rs">Read the ReSTIR global illumination source &nearr;</a>
+      <a href="../restirdi/">&larr; Previous: WebGPU ReSTIR direct illumination</a>
+      <a href="../residentevil2/">Next: WebGPU Resident Evil fixed-camera scene &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

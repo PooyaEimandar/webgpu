@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Stencil Buffer Outlines with Rust and wgpu",
+  "description": "Render toon-shaded stencil buffer outlines with Rust, wgpu, and WebGPU. Learn two-draw masking, mesh expansion, depth-stencil state, and WGSL.",
+  "breadcrumbName": "Stencil buffer outlines",
+  "image": "stencilbuffer.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Red toon-shaded Venus statue surrounded by a white stencil buffer outline on a dark WebGPU canvas."
+}

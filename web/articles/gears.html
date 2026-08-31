@@ -1,0 +1,126 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 11</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Generate three toothed meshes in Rust, place their vertices in shared GPU buffers, animate each gear with its own uniform data, and shade the moving surfaces with WGSL.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Gears demo at a glance">
+      <div><dt>Gears</dt><dd>3</dd></div>
+      <div><dt>Submitted triangles</dt><dd>880</dd></div>
+      <div><dt>Model draws</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#procedural-gears">Procedural gears without model files</a></li>
+        <li><a href="#gear-specifications">Define the three gear specifications</a></li>
+        <li><a href="#generate-gear-mesh">Generate each toothed mesh</a></li>
+        <li><a href="#shared-buffers">Share buffers and keep per-gear uniforms</a></li>
+        <li><a href="#animate-and-light">Animate and light the gears in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="procedural-gears" tabindex="-1">Procedural gears without model files</h2>
+    <p>The <a href="../gltf/#about">glTF example</a> parsed geometry from a remote asset. Gears takes the opposite route: the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gears.rs">Rust example</a> constructs every position, normal, color, and index at startup. No model or texture file is needed.</p>
+    <p>Three solid-color gears rotate together on a black background. A bundled Vazirmatn font supplies the diagnostic overlay, whose first line literally reads <q>Vulkan Example - Gears</q> despite this being a wgpu/WebGPU demo. It also reports frame time, FPS, and the selected GPU. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> and has no mouse, keyboard, camera, or physics controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/gears.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A 20-tooth red gear turns against two 10-tooth gears. Separate front, back, tooth, and bore faces give the lighting distinct normals to work with.</figcaption>
+    </figure>
+
+    <h2 id="gear-specifications" tabindex="-1">Define the three gear specifications</h2>
+    <p>Each <code>GearSpec</code> describes the radii, thickness, tooth count and depth, vertex color, world position, speed multiplier, and starting angle. All three use a tooth depth of 0.7 units. Their other values differ:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="gear-specs-caption" tabindex="0">
+      <table>
+        <caption id="gear-specs-caption">Procedural gear specifications</caption>
+        <thead>
+          <tr><th scope="col">Gear</th><th scope="col">Inner radius</th><th scope="col">Outer radius</th><th scope="col">Width</th><th scope="col">Teeth</th><th scope="col">Position</th><th scope="col">Angular rate</th><th scope="col">Start angle</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Red</th><td>1.0</td><td>4.0</td><td>1.0</td><td>20</td><td>(&minus;3.0, 0.0, 0.0)</td><td>+90&deg;/s</td><td>0&deg;</td></tr>
+          <tr><th scope="row">Green</th><td>0.5</td><td>2.0</td><td>2.0</td><td>10</td><td>(3.1, 0.0, 0.0)</td><td>&minus;180&deg;/s</td><td>&minus;9&deg;</td></tr>
+          <tr><th scope="row">Blue</th><td>1.3</td><td>2.0</td><td>0.5</td><td>10</td><td>(&minus;3.1, &minus;6.2, 0.0)</td><td>&minus;180&deg;/s</td><td>&minus;30&deg;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The base angle advances at 90&deg; per second. Multipliers of <code>1.0</code> and <code>-2.0</code> make the two smaller gears turn twice as fast in the opposite direction, matching the 20-tooth to 10-tooth ratio. Their positions and starting offsets make the teeth appear to engage, but there is no collision detection, constraint solver, or torque simulation.</p>
+    <p>The nominal outer radius sits halfway between the tooth root and tip. For every spec, the generator computes the root as <code>outer_radius - tooth_depth * 0.5</code> and the tip as <code>outer_radius + tooth_depth * 0.5</code>.</p>
+
+    <h2 id="generate-gear-mesh" tabindex="-1">Generate each toothed mesh</h2>
+    <p><code>generate_gear</code> divides one revolution into equal tooth sectors. A second angle, <code>da</code>, is one quarter of a sector. Those five angles describe the rising edge, tip, falling edge, and gap of each tooth:</p>
+    <pre tabindex="0" aria-label="Calculate procedural gear radii and tooth angles"><code><span class="code-keyword">let</span> r0 = spec.inner_radius;
+<span class="code-keyword">let</span> r1 = spec.outer_radius - spec.tooth_depth * 0.5;
+<span class="code-keyword">let</span> r2 = spec.outer_radius + spec.tooth_depth * 0.5;
+<span class="code-keyword">let</span> da = std::f32::consts::TAU / spec.teeth as f32 / 4.0;</code></pre>
+    <p>For each tooth, the function emits triangles for the front annulus and tooth face, mirrors them across the gear width for the back, then closes the sloped tooth edges, tooth tip, outer gap, and inner bore with side quads. Front vertices use a +Z normal, back vertices use &minus;Z, and side normals point outward or inward as appropriate.</p>
+    <p>One tooth contributes <strong>40 vertices and 66 indices</strong>, or 22 submitted triangles. Two triangles per tooth have zero area because the annular front and back sections repeat one point. The other 20 are nondegenerate. Faces duplicate vertices so they can carry flat normals instead of averaging across hard edges.</p>
+    <p>The 20-tooth gear therefore uses 800 vertices and 1,320 indices; each 10-tooth gear uses 400 vertices and 660 indices. Together they produce 1,600 vertices, 2,640 <code>u32</code> indices, 880 submitted triangles, and 800 nondegenerate triangles.</p>
+    <p><code>GearVertex</code> has a 36-byte stride. Position is a <code>Float32x3</code> at shader location 0, normal is another <code>Float32x3</code> at location 1, and RGB color is a third <code>Float32x3</code> at location 2. There are no texture coordinates, textures, or samplers.</p>
+
+    <h2 id="shared-buffers" tabindex="-1">Share buffers and keep per-gear uniforms</h2>
+    <p>The three generators append into the same CPU vertex and index arrays. Before each append, the example records the current index length as <code>index_start</code>; afterward, it calculates the new range length as <code>index_count</code>. The combined arrays become one GPU vertex buffer and one GPU index buffer.</p>
+    <p>Geometry is shared at the buffer level, but transforms are not instanced. Each <code>Gear</code> owns a uniform buffer and bind group containing projection, view, model, inverse-transpose normal matrices, and the light position. The uniform is visible to the vertex stage at <code>@group(0) @binding(0)</code>.</p>
+    <p>The render loop binds the shared geometry once, then changes the bind group and indexed range for each gear:</p>
+    <pre tabindex="0" aria-label="Draw three indexed gear ranges from shared buffers"><code><span class="code-keyword">for</span> gear <span class="code-keyword">in</span> &amp;self.gears {
+    pass.set_bind_group(0, &amp;gear.bind_group, &amp;[]);
+    pass.draw_indexed(
+        gear.index_start..gear.index_start + gear.index_count,
+        0,
+        0..1,
+    );
+}</code></pre>
+    <p>This produces three model draw calls. An instanced design would be useful when many objects share identical geometry, but these gears have different tooth counts and index ranges.</p>
+
+    <h2 id="animate-and-light" tabindex="-1">Animate and light the gears in WGSL</h2>
+    <p>Every update adds <code>delta_seconds * 90.0</code> to the base angle. For each gear, translation is multiplied by a Z rotation built from its speed multiplier and starting offset. The CPU writes all three uniform buffers each frame; the procedural vertex and index buffers remain unchanged.</p>
+    <p>The camera sits at <code>(0, 7, -17)</code>, looks toward <code>(0, 2.5, 0)</code>, and uses <code>-Y</code> as its up vector. The perspective projection has a 60&deg; vertical field of view, a 0.001 near plane, and a 256-unit far plane. A positional light at <code>(0, 0, 2.5)</code> is transformed into view space, while each gear receives its own model and normal matrices.</p>
+    <p>In the vertex stage, the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gears.wgsl">WGSL shader</a> transforms the normal with the inverse-transpose matrix and calculates view-space eye and light vectors. The fragment stage combines ambient, Lambert-style diffuse, and reflected-vector specular terms:</p>
+    <pre tabindex="0" aria-label="Shade the procedural gears in WGSL"><code><span class="code-keyword">let</span> diffuse = vec4&lt;f32&gt;(0.5, 0.5, 0.5, 0.5)
+    * max(dot(normal, light_vector), 0.0);
+<span class="code-keyword">let</span> specular = vec4&lt;f32&gt;(0.5, 0.5, 0.5, 1.0)
+    * pow(max(dot(reflected, eye), 0.0), 0.8)
+    * 0.25;</code></pre>
+    <p>The exponent of 0.8 creates a broad highlight rather than a physically based material response. The scene pipeline uses counterclockwise front faces, back-face culling, a single sample, and <code>Depth32Float</code> with depth writes and <code>LessEqual</code> comparison. Alpha blending is not enabled.</p>
+    <p>The first pass clears color and depth, then issues the three gear draws. A second color-load pass renders the diagnostic overlay. Its FPS estimate updates on the default half-second sampling interval; the displayed milliseconds come from <code>1000 / fps</code> after the first complete sample, not a GPU timestamp query.</p>
+    <p>Resizing recreates the depth texture, recalculates each projection and normal matrix, and rebuilds the overlay placement. It does not regenerate or re-upload the gear meshes.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native procedural gears example"><code>cargo run --example gears</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU gears example"><code>scripts/build-wasm.sh --release gears
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/gears/</code>. Live rendering requires WebGPU support. The gear geometry is generated at startup, while the shader and overlay font are embedded in the build, so this demo does not download a runtime model or texture. The article and screenshot remain readable without WebGPU.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Change a tooth count and update the matching speed ratio, position, and starting offset.</li>
+      <li>Adjust <code>width</code> and <code>tooth_depth</code>, then compare the new mesh counts and silhouette.</li>
+      <li>Replace the three draw calls with instancing after making the gears share one geometry specification.</li>
+      <li>Tune the light position and specular exponent, or replace the lighting with a material model suited to metal.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gears.rs">Read the gears source &nearr;</a>
+      <a href="../gltf/">&larr; Previous: WebGPU glTF 2.0</a>
+      <a href="../stencilbuffer/">Next: WebGPU stencil buffer outlines &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

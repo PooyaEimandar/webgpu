@@ -1,0 +1,186 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 28</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load one self-contained Voyager glTF, flatten three material primitives into 20,378 triangles, and rasterize them into four-sample color and depth attachments before WebGPU performs a fixed-function color resolve into the presentation surface.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU multisampling demo at a glance">
+      <div><dt>Rasterization samples</dt><dd>4&times;</dd></div>
+      <div><dt>Voyager triangles</dt><dd>20,378</dd></div>
+      <div><dt>Runtime scene assets</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#smooth-voyager-edges">Smooth Voyager's geometry edges</a></li>
+        <li><a href="#load-one-voyager-asset">Load one self-contained Voyager asset</a></li>
+        <li><a href="#flatten-three-material-draws">Flatten three material draws</a></li>
+        <li><a href="#upload-material-textures">Upload duplicated one-mip textures</a></li>
+        <li><a href="#allocate-msaa-attachments">Allocate four-sample attachments</a></li>
+        <li><a href="#shade-resolve-and-overlay">Shade, resolve, and overlay</a></li>
+        <li><a href="#control-the-camera">Control the first-person camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="smooth-voyager-edges" tabindex="-1">Smooth Voyager's geometry edges with 4x MSAA</h2>
+    <p>The <a href="../parallaxmapping/#about">previous WebGPU parallax occlusion mapping example</a> adds apparent depth to a flat two-triangle plane inside its fragment shader. Multisampling addresses a different rasterization problem. The Voyager remains ordinary triangle geometry, but each output pixel receives four coverage locations and four color and depth storage samples. At the end of the scene pass, the GPU combines the multisampled color into the single-sample surface shown by the browser or native window.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/a4f0c4e5d8beb0f70420b89d1b111b52aa47fc36">introducing multisampling commit</a> added the example, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/multisampling.wgsl">WGSL shader</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/voyager.gltf">Voyager glTF asset</a>, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">gallery registration</a>. The model and shader remain byte-identical to that commit. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisampling.rs">Rust source</a> also includes a <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modernized WebAssembly entry point</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">removal of an obsolete clip-space adjustment</a>, and a <a href="https://github.com/PooyaEimandar/webgpu/commit/de16e06e35263457f2b71db9ab55b4f2376f21f8">fallback-material update</a>. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/multisampling.jpg">1280&times;720 screenshot</a> arrived in a <a href="https://github.com/PooyaEimandar/webgpu/commit/88837b4e9f531bbe7b8b157803747708d169e88d">later screenshot commit</a>, and the gallery's canonical host moved to <code>pooya.ai</code> in the <a href="https://github.com/PooyaEimandar/webgpu/commit/dabca148f6b919f3438a6159d4c808bcf5904d83">domain update</a>. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/multisampling.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The textured Voyager spacecraft is drawn against a white clear color. Four-sample coverage softens the high-contrast polygon silhouettes and thin structural edges before the color attachment resolves to the surface.</figcaption>
+    </figure>
+
+    <h2 id="load-one-voyager-asset" tabindex="-1">Load one self-contained Voyager asset</h2>
+    <p>The demo issues one runtime request through the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a>. Native startup reads <code>assets/models/voyager.gltf</code> from disk. WebAssembly awaits one browser <code>fetch</code> for <code>../assets/models/voyager.gltf</code>, then starts the renderer. Geometry and PNG images live inside the same Base64 data-URI buffer, so they do not create separate network requests.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="multisampling-assets-caption" tabindex="0">
+      <table>
+        <caption id="multisampling-assets-caption">Multisampling runtime asset and embedded data</caption>
+        <thead>
+          <tr><th scope="col">Data</th><th scope="col">Delivery</th><th scope="col">Stored bytes</th><th scope="col">Dimensions or structure</th><th scope="col">Decoded or uploaded representation</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>voyager.gltf</code></th><td>Runtime request 1</td><td>3,203,450</td><td>JSON with one Base64 buffer</td><td>2,396,228-byte raw embedded buffer</td><td>Complete scene, geometry, and source images</td></tr>
+          <tr><th scope="row">Geometry and accessors</th><td>Inside the glTF buffer</td><td>887,516</td><td>3 nodes, 3 meshes, 3 primitives, 12 accessors</td><td>23,914 vertices and 61,134 <code>u32</code> indices</td><td>Three indexed material draws</td></tr>
+          <tr><th scope="row"><code>tex_02_AO.png</code></th><td><code>bufferView 4</code></td><td>392,021</td><td>1024&times;1024 RGB8 PNG</td><td>4,194,304-byte RGBA8 image; uploaded twice</td><td>Base color for materials 0 and 1</td></tr>
+          <tr><th scope="row"><code>Voyager_tex_01</code></th><td><code>bufferView 13</code></td><td>1,116,685</td><td>1024&times;1024 RGB8 PNG</td><td>4,194,304-byte RGBA8 image; uploaded once</td><td>Base color for material 2</td></tr>
+          <tr><th scope="row">Buffer alignment</th><td>Inside the glTF buffer</td><td>6</td><td>Padding between buffer views</td><td>No GPU resource</td><td>Maintains byte-view alignment</td></tr>
+          <tr><th scope="row">WGSL</th><td>Compiled into the program</td><td>1,863</td><td>62 source lines</td><td>Shader module at initialization</td><td>Vertex transform and textured lighting</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>Compiled into the program</td><td>122,752</td><td>TrueType font</td><td>Framework-managed glyph resources</td><td>Title, GPU, FPS, and sample-count overlay</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The embedded geometry, two PNG files, and six padding bytes sum to the 2,396,228-byte raw buffer. Base64 encoding and glTF JSON expand the requested file to 3,203,450 bytes, about 3.055 MiB. The parser accepts embedded Base64 buffers, embedded image views, triangle primitives, and the first texture-coordinate set; this path rejects external buffers and GLB binary chunks.</p>
+    <p>The file describes one default scene, three nodes, three meshes, three materials, three texture records, two distinct images, one buffer, 14 buffer views, and 12 accessors. It contains no animations, skins, cameras, or explicit sampler objects. Rust flips the V texture coordinate, supplies white for missing vertex colors, and bakes each node transform into positions and normals before upload.</p>
+
+    <h2 id="flatten-three-material-draws" tabindex="-1">Flatten three material primitives into one mesh</h2>
+    <p>Each of the three glTF meshes contains one indexed triangle primitive. Rust appends their vertices and converted indices into a shared vertex buffer and a shared <code>u32</code> index buffer, while retaining one draw range per material. Every primitive provides position, normal, and UV attributes but no <code>COLOR_0</code>, so the active per-vertex color is white.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="multisampling-draws-caption" tabindex="0">
+      <table>
+        <caption id="multisampling-draws-caption">Voyager geometry and material draw ranges</caption>
+        <thead>
+          <tr><th scope="col">Draw</th><th scope="col">Material</th><th scope="col">First index</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Triangles</th><th scope="col">Base-color image</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><code>tex_02_AO_dark</code></td><td>0</td><td>433</td><td>1,368</td><td>456</td><td>Embedded image 0</td></tr>
+          <tr><th scope="row">2</th><td><code>tex_02_AO</code></td><td>1,368</td><td>1,553</td><td>6,960</td><td>2,320</td><td>Embedded image 0</td></tr>
+          <tr><th scope="row">3</th><td><code>tex_01</code></td><td>8,328</td><td>21,928</td><td>52,806</td><td>17,602</td><td>Embedded image 1</td></tr>
+          <tr><th scope="row">Total</th><td>3 active materials</td><td>&mdash;</td><td><strong>23,914</strong></td><td><strong>61,134</strong></td><td><strong>20,378</strong></td><td>2 distinct images</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A vertex stores a three-component position, three-component normal, two-component UV, and three-component color in a 44-byte stride. The resulting vertex buffer occupies 1,052,216 bytes. Converting all source indices to <code>u32</code> produces a 244,536-byte index buffer. The three draws bind a different material group but reuse those two buffers and the same scene pipeline.</p>
+    <p>The object transform translates Voyager by <code>(2.5, 0.35, -7.5)</code> and rotates it &minus;90&deg; around Y. The 144-byte uniform contains a 60&deg; perspective matrix, the current camera view multiplied by that object transform, and light vector <code>(5, -5, 5, 1)</code>. It is rewritten every frame as the camera moves and also after a resize changes the aspect ratio.</p>
+
+    <h2 id="upload-material-textures" tabindex="-1">Upload duplicated one-mip material textures</h2>
+    <p>The image decoder expands the two embedded RGB PNGs into two 4 MiB RGBA vectors. The fallback-material update also appends one generated 1&times;1 white image and one fallback material. Those three decoded image vectors total 8,388,612 bytes before initialization consumes and drops them.</p>
+    <p>Texture creation loops over all four materials. Materials 0 and 1 each receive a separate GPU upload of embedded image 0, material 2 uploads image 1, and the unused fallback uploads four white bytes. That reserves 12,582,916 logical texel bytes rather than sharing the first image between its two users. The three current draw ranges never select the fallback bind group.</p>
+    <p>Every material image becomes a single-sample, one-mip <code>Rgba8UnormSrgb</code> texture with its own sampler and bind group. Because the glTF declares no samplers, the defaults repeat U and V, clamp W, linearly magnify and minify, and select the only mip. MSAA does not create texture mips or antialias texture detail; the missing mip chain can still shimmer under minification.</p>
+
+    <h2 id="allocate-msaa-attachments" tabindex="-1">Allocate four-sample color and depth attachments</h2>
+    <p>Initialization creates a color target in the current surface format and a <code>Depth32Float</code> target. Both match the surface width and height, contain one mip and one array layer, use four samples, and are restricted to render-attachment usage. A resize recreates both images.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="multisampling-resources-caption" tabindex="0">
+      <table>
+        <caption id="multisampling-resources-caption">Multisampling GPU resources and render attachments</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Extent or elements</th><th scope="col">Format</th><th scope="col">Samples and mips</th><th scope="col">Logical bytes</th><th scope="col">Update or lifetime</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Voyager vertices</th><td>23,914 &times; 44-byte stride</td><td>Four vertex attributes</td><td>Not a texture</td><td>1,052,216</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Voyager indices</th><td>61,134 <code>u32</code> values</td><td><code>Uint32</code></td><td>Not a texture</td><td>244,536</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Scene uniform</th><td>One block</td><td>Two matrices + light vector</td><td>Not a texture</td><td>144</td><td>Rewritten every frame</td></tr>
+          <tr><th scope="row">Material textures</th><td>3 &times; 1024&times;1024 + 1 &times; 1&times;1</td><td><code>Rgba8UnormSrgb</code></td><td>1 sample; 1 mip each</td><td>12,582,916</td><td>Four initialization uploads</td></tr>
+          <tr><th scope="row">MSAA color</th><td>Surface width &times; height</td><td>Current surface format</td><td><strong>4 samples</strong>; 1 mip</td><td><code>16 &times; width &times; height</code> for a 4-byte format</td><td>Recreated on resize; discarded after resolve</td></tr>
+          <tr><th scope="row">MSAA depth</th><td>Surface width &times; height</td><td><code>Depth32Float</code></td><td><strong>4 samples</strong>; 1 mip</td><td><code>16 &times; width &times; height</code></td><td>Recreated on resize; discarded after scene pass</td></tr>
+          <tr><th scope="row">Presentation surface</th><td>Surface width &times; height</td><td>Current surface format</td><td>1 sample</td><td>Framework-managed</td><td>Receives color resolve, then overlays</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed mesh, uniform, and four material texture payloads total 13,879,812 bytes, excluding texture-object alignment and framework overlays. At the screenshot's 1280&times;720 size and a four-byte surface format, each four-sample attachment accounts for 14,745,600 logical bytes, or 14.0625 MiB. Color and depth together account for 29,491,200 bytes, or 28.125 MiB, before implementation-specific allocation overhead.</p>
+    <p>This is multisampling, not supersampling. The attachments stay at the surface's output dimensions; each pixel stores four raster samples instead of rendering a larger image and downscaling it. Coverage and depth are tracked at those sample locations. The shader has no <code>sample_index</code>, sample mask output, or sample-qualified interpolation, so the code does not request or guarantee four fragment-shader invocations per output pixel.</p>
+
+    <h2 id="shade-resolve-and-overlay" tabindex="-1">Shade, resolve, then draw single-sample overlays</h2>
+    <p>The scene pipeline uses triangle-list topology, no face culling, no blending, a full sample mask, and alpha-to-coverage disabled. <code>Depth32Float</code> writes are enabled with <code>LessEqual</code>. The fragment shader samples an sRGB base-color texture, applies a diffuse floor of 0.15, and adds a reflected-vector specular highlight with exponent 16 and strength 0.75.</p>
+    <pre tabindex="0" aria-label="Shade the textured Voyager in the multisampling fragment shader"><code><span class="code-keyword">let</span> base = textureSample(color_map, color_sampler, input.uv).rgb
+    * input.color;
+<span class="code-keyword">let</span> diffuse = max(dot(normal, light_dir), 0.15)
+    * input.color;
+<span class="code-keyword">let</span> specular = pow(max(dot(reflect_dir, view_dir), 0.0), 16.0)
+    * vec3&lt;f32&gt;(0.75);
+
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(diffuse * base + specular, 1.0);</code></pre>
+    <p>The current Voyager supplies white vertex and base-color factors, so multiplying <code>input.color</code> into both <code>base</code> and <code>diffuse</code> is neutral. For a non-white factor, the implementation would apply that color twice. Texture sampling automatically decodes <code>Rgba8UnormSrgb</code> RGB into linear values; final surface encoding depends on the surface format chosen by the rendering framework.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="multisampling-passes-caption" tabindex="0">
+      <table>
+        <caption id="multisampling-passes-caption">Multisampling render passes, attachments, and submitted work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Color attachment</th><th scope="col">Depth attachment</th><th scope="col">Pipeline and draw work</th><th scope="col">Store or resolve</th><th scope="col">Visible result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Voyager scene</th><td>Four-sample color; clear white</td><td>Four-sample <code>Depth32Float</code>; clear 1</td><td>Three indexed material draws; 61,134 indices; 20,378 triangles</td><td>Resolve color to surface; discard multisampled color and depth</td><td>Antialiased geometry coverage</td></tr>
+          <tr><th scope="row">Text and joystick overlay</th><td>Load resolved single-sample surface</td><td>None</td><td>Framework glyph draw plus active joystick geometry</td><td>Store surface; no resolve</td><td>Title, GPU, FPS, 4x count, and optional stick rings</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The scene pass names the single-sample swapchain view as the color attachment's resolve target. When the pass ends, fixed-function resolve combines the four stored colors into one surface color. The multisampled color store can then be discarded. The depth samples are also discarded because this example has no depth resolve and no later pass reads them.</p>
+    <p>The second pass loads that resolved surface and draws the 22 px Vazirmatn text followed by the joystick overlay without a depth attachment. Those framework pipelines are single-sample and operate after the resolve, so the overlay itself is not part of the four-sample scene. The text reads “Multisampling,” the GPU device information, FPS, and “rasterization samples: 4x.”</p>
+
+    <h2 id="control-the-camera" tabindex="-1">Control the first-person camera</h2>
+    <p>The example uses the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">joystick and first-person camera helper</a>. The camera starts at the origin with yaw and pitch zero, looking along negative Z. Its horizontal movement speed is four world units per second, its look speed is 1.6 radians per second, and pitch is clamped between &minus;1.45 and 1.45 radians.</p>
+    <ul>
+      <li>Press W and S to move forward and backward, and A and D to move left and right.</li>
+      <li>Use the arrow keys to look up, down, left, and right.</li>
+      <li>Press and drag on the left half of the canvas for movement or the right half for looking. Mouse and touch use the same virtual-stick path with a 44 px maximum radius.</li>
+    </ul>
+    <p>Keyboard and virtual-stick axes combine and clamp to unit length. Losing focus resets input, while releasing or cancelling a pointer clears its stick. Camera motion updates the view-model uniform each frame; the delta is capped at 1/15 second so a stalled frame cannot produce an unbounded movement step. Active stick rings appear in the post-resolve overlay pass.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU multisampling example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU 4x MSAA multisampling example"><code>cargo run --example multisampling</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU 4x MSAA multisampling example"><code>scripts/build-wasm.sh --release multisampling
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/multisampling/</code> in a browser with WebGPU support. Native startup reads and parses the glTF before calling <code>sib::render</code>. WebAssembly awaits its one fetch and then starts the same renderer asynchronously. Both targets flatten the same geometry, upload the same material data, allocate surface-sized four-sample attachments, and record the same two render passes.</p>
+    <p>The sample count is fixed at four with no runtime selector or capability-based fallback. There is no built-in lower-sample comparison, explicit per-sample shader evaluation, alpha-to-coverage, or depth resolve. MSAA smooths polygon coverage boundaries; it does not fix shader aliasing or the material textures' missing mipmaps. The two uses of the first embedded image also remain separate GPU allocations.</p>
+    <p>The lighting is intentionally compact rather than physically based. Its upper-left view-model matrix transforms the light as a direction and drops translation, the base-color factor would be applied twice when non-white, normal transformation assumes rigid or uniform scale, and back-face normals are not flipped even though culling is disabled. The shader ignores texture alpha and glTF metallic, roughness, emissive, occlusion, normal-map, and alpha-mode data. It has no HDR intermediate, tone mapping, shadows, or distance attenuation.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Query supported sample counts and rebuild the pipeline and attachments when the selected count changes.</li>
+      <li>Deduplicate shared glTF images, generate a mip chain, and compare geometry-edge coverage with texture minification behavior.</li>
+      <li>Move lighting into consistent world or view space, apply material color once, and transform normals with an inverse-transpose matrix.</li>
+      <li>Add an edge magnifier or sample-coverage visualization while keeping the text and joystick after the scene resolve.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisampling.rs">Read the Multisampling source &nearr;</a>
+      <a href="../parallaxmapping/">&larr; Previous: WebGPU parallax occlusion mapping</a>
+      <a href="../multisamplingalphatocoverage/">Next: WebGPU alpha-to-coverage &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

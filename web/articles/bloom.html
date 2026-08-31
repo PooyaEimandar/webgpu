@@ -1,0 +1,189 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 20</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Isolate a glowing UFO into a fixed WebGPU target, spread its light with vertical and horizontal nine-tap filters, and add the softened result over a separately lit scene.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Bloom demo at a glance">
+      <div><dt>Glow target</dt><dd>256&times;256</dd></div>
+      <div><dt>Blur taps</dt><dd>9 + 9</dd></div>
+      <div><dt>Render passes</dt><dd>4</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#separable-bloom-four-passes">Build bloom with four passes</a></li>
+        <li><a href="#load-ufo-assets">Load the visible and glowing UFOs</a></li>
+        <li><a href="#build-bloom-targets">Build the bloom targets and bindings</a></li>
+        <li><a href="#render-glow-mask">Render the authored glow mask</a></li>
+        <li><a href="#blur-vertically">Blur nine taps vertically</a></li>
+        <li><a href="#render-lit-ufo">Render the Phong-lit UFO</a></li>
+        <li><a href="#composite-horizontal-blur">Blur horizontally and composite</a></li>
+        <li><a href="#animate-ufo">Animate the UFO</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="separable-bloom-four-passes" tabindex="-1">Build bloom with four passes</h2>
+    <p>The <a href="../radialblur/#about">previous WebGPU radial blur example</a> gathers samples along rays that point toward the screen center. Bloom spreads selected bright regions in every direction. This example approximates a two-dimensional Gaussian filter as two one-dimensional passes: one vertical and one horizontal. That separable design produces a conceptual 9&times;9 footprint without taking 81 samples in one full-resolution fragment shader.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/55132cbb36b7d1b2bccd842f20544d69f257db0f">original bloom commit</a> introduced the two UFO models, four pipelines, fixed offscreen targets, separable WGSL filter, animation, and screenshots. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/bloom.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/bloom.wgsl">WGSL shader</a> retain that rendering design. Later changes removed an obsolete clip-space compatibility matrix and modernized the WebAssembly entry point; the shader, models, and screenshots remain unchanged. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/bloom.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The visible UFO is lit in the main scene. A separately authored version supplies its cyan windows, gold trim, and lower beam to the two-pass bloom filter.</figcaption>
+    </figure>
+
+    <h2 id="load-ufo-assets" tabindex="-1">Load the visible and glowing UFOs</h2>
+    <p>The example requests two top-level glTF files in sequence. Each file embeds its binary buffer as a Base64 data URI, so there are no secondary <code>.bin</code>, image, or material-texture requests. Native initialization loads both files synchronously. WebAssembly awaits the same two URLs one after the other.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="bloom-assets-caption" tabindex="0">
+      <table>
+        <caption id="bloom-assets-caption">Bloom runtime assets and flattened meshes</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">File size</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Triangles</th><th scope="col">Runtime role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo.gltf"><code>retroufo.gltf</code></a></th><td>1,095,375 bytes</td><td>19,990</td><td>49,284</td><td>16,428</td><td>Phong-lit visible UFO</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo_glow.gltf"><code>retroufo_glow.gltf</code></a></th><td>1,102,950 bytes</td><td>20,245</td><td>50,148</td><td>16,716</td><td>Black mask with colored emissive geometry and beam</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two requests total 2,198,325 bytes, about 2.10 MiB. The visible file contains 253 nodes and 77 mesh primitives. The glow file contains 242 nodes and 74 primitives. Its bounds extend farther down Y because it includes the luminous beam below the craft.</p>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs">colored glTF loader</a> uses the repository's <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a> to fetch each file. It traverses the node hierarchy, bakes transforms, supplies white because neither model has vertex colors, multiplies the material base-color factors, converts indices to <code>u32</code>, and flattens every primitive into one GPU mesh per file. Texture coordinates are present but are not copied into this colored vertex format.</p>
+    <p>One <code>GltfColoredVertex</code> occupies 40 bytes: position at shader location 0, normal at location 1, and RGBA color at location 3. The visible mesh uses 799,600 bytes of vertex data and 197,136 bytes of indices. The glow mesh uses 809,800 vertex bytes and 200,592 index bytes. Across both flattened models, that is 40,235 vertices, 99,432 indices, and 33,144 authored triangles. Together the four static buffers occupy 2,007,128 bytes, about 1.91 MiB.</p>
+    <p>The glow model is not a small emissive subset. It contains slightly more triangles than the visible UFO. Most of its non-emissive structure is assigned black, while cyan, yellow, orange, red, and beam geometry keep bright material colors. The first pass still rasterizes all 16,716 triangles and lets black pixels disappear into a black target.</p>
+
+    <h2 id="build-bloom-targets" tabindex="-1">Build the bloom targets and bindings</h2>
+    <p>Initialization creates two fixed <code>OffscreenTarget</code> objects. One receives the authored glow scene. The other receives the vertical filter result and becomes the horizontal filter's input. Their dimensions stay at 256&times;256 when the surface is resized.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="bloom-resources-caption" tabindex="0">
+      <table>
+        <caption id="bloom-resources-caption">Bloom buffers, textures, and update cadence</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">How it changes</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene uniforms</th><td>192 bytes</td><td>Fully rewritten every update and resize</td><td>Projection, view, and animated model matrices</td></tr>
+          <tr><th scope="row">Vertical blur uniforms</th><td>16 bytes</td><td>Initialized once</td><td>Scale 1, strength 1.5, direction (0, 1)</td></tr>
+          <tr><th scope="row">Horizontal blur uniforms</th><td>16 bytes</td><td>Initialized once</td><td>Scale 1, strength 1.5, direction (1, 0)</td></tr>
+          <tr><th scope="row">Glow color</th><td>256&times;256 <code>Rgba8Unorm</code></td><td>Cleared and rendered every frame</td><td>Input to the vertical blur</td></tr>
+          <tr><th scope="row">Glow depth</th><td>256&times;256 <code>Depth32Float</code></td><td>Cleared by the glow pass</td><td>Depth-tests glow geometry</td></tr>
+          <tr><th scope="row">Blur color</th><td>256&times;256 <code>Rgba8Unorm</code></td><td>Cleared and filtered every frame</td><td>Input to the horizontal blur</td></tr>
+          <tr><th scope="row">Blur depth</th><td>256&times;256 <code>Depth32Float</code></td><td>Allocated but never used</td><td>No current runtime role</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Recreated on resize</td><td>Depth-tests the visible UFO</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Every fixed four-byte-per-pixel image occupies 262,144 bytes, so the two color and two depth images reserve exactly 1 MiB before texture-object overhead. Color textures have one mip and one sample, <code>RENDER_ATTACHMENT | TEXTURE_BINDING</code> usage, clamp-to-edge addressing, linear minification and magnification, and nearest mip filtering. The depth textures also expose texture-binding usage and comparison samplers, although the shaders never sample either depth image.</p>
+    <p>The bind-group layout combines a scene uniform, filterable texture, sampler, and blur uniform. One group pairs the glow color with vertical parameters; the other pairs the intermediate color with horizontal parameters. Mesh shaders read only the scene binding, while blur shaders ignore it. Rust writes exactly 192 example-owned uniform bytes per normal update. Each 16-byte blur block stays unchanged after initialization; text overlay uploads are managed separately.</p>
+
+    <h2 id="render-glow-mask" tabindex="-1">Render the authored glow mask</h2>
+    <p>The first pass clears the glow color to black and glow depth to 1, binds the glow pipeline, and draws all 50,148 indices once. The vertex shader applies <code>projection * view * model</code>. The fragment shader simply returns the baked material color with alpha 1. There is no brightness threshold or lighting calculation in this pass.</p>
+    <p>The target is <code>Rgba8Unorm</code> with blending disabled. The pipeline uses triangle lists, one sample, no face culling, and <code>Depth32Float</code> writes with <code>LessEqual</code>. Color is stored for filtering; depth is discarded at the end of the pass. The separately authored black materials provide the mask, while the retained bright geometry supplies the glow source.</p>
+
+    <h2 id="blur-vertically" tabindex="-1">Blur nine taps vertically</h2>
+    <p>The second pass clears the intermediate color target, binds the vertical blur group, and generates one oversized fullscreen triangle from <code>vertex_index</code>. No vertex buffer or depth attachment is needed. With <code>blur_scale</code> equal to 1 and an input size of 256&times;256, the shader samples the center plus four texels above and four below:</p>
+    <pre tabindex="0" aria-label="Apply a nine-tap separable Gaussian blur in WGSL"><code><span class="code-keyword">let</span> weights = array&lt;f32, 5&gt;(
+    0.227027,
+    0.1945946,
+    0.1216216,
+    0.054054,
+    0.016216,
+);
+<span class="code-keyword">let</span> texture_size = vec2&lt;f32&gt;(textureDimensions(blur_input));
+<span class="code-keyword">let</span> texel_offset = blur.direction * blur.blur_scale
+    / max(texture_size, vec2&lt;f32&gt;(1.0));
+<span class="code-keyword">var</span> result = textureSample(blur_input, blur_sampler, input.uv).rgb
+    * weights[0];
+
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 1u; i &lt; 5u; i = i + 1u) {
+    <span class="code-keyword">let</span> offset = texel_offset * f32(i);
+    result += textureSample(blur_input, blur_sampler, input.uv + offset).rgb
+        * weights[i] * blur.blur_strength;
+    result += textureSample(blur_input, blur_sampler, input.uv - offset).rgb
+        * weights[i] * blur.blur_strength;
+}</code></pre>
+    <p>The center coefficient is 0.227027. The four base weights on either side are 0.1945946, 0.1216216, 0.054054, and 0.016216. Those canonical coefficients sum to approximately 1 when mirrored, but the shader multiplies only the eight neighboring samples by a strength of 1.5. Their effective per-side weights become 0.2918919, 0.1824324, 0.081081, and 0.024324.</p>
+    <p>The resulting one-dimensional kernel sums to 1.3864856, so it amplifies brightness instead of preserving energy. The 256&times;256 vertical pass performs nine texture samples for each of 65,536 pixels, or 589,824 samples. Its <code>Rgba8Unorm</code> output can clamp amplified values before the horizontal pass reads them.</p>
+
+    <h2 id="render-lit-ufo" tabindex="-1">Render the Phong-lit UFO</h2>
+    <p>The third pass clears the surface to opaque black and its depth image to 1, then draws the visible model's 49,284 indices. It uses the surface's configured color format, no blending, one sample, no face culling, and writable <code>Depth32Float</code> with <code>LessEqual</code>.</p>
+    <p>WGSL transforms positions by the same projection, view, and model matrices. A fixed view-space light sits at <code>(-5, -5, 0)</code>. Bright material colors whose red, green, or blue channel reaches 0.9 receive 25% ambient color. Every fragment also receives color-weighted Lambert diffuse light and a white specular term:</p>
+    <pre tabindex="0" aria-label="Shade the visible UFO with compact Phong lighting"><code><span class="code-keyword">let</span> diffuse = max(dot(normal, light_vector), 0.0) * input.color;
+<span class="code-keyword">let</span> specular = pow(
+    max(dot(reflected, view_vector), 0.0),
+    8.0,
+) * vec3&lt;f32&gt;(0.75);
+
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(ambient + diffuse + specular, 1.0);</code></pre>
+    <p>The normal transform uses the upper-left 3&times;3 part of <code>view * model</code> rather than an inverse transpose. That is sufficient for the current translation and rigid rotations, but it would become incorrect after nonuniform model scaling.</p>
+
+    <h2 id="composite-horizontal-blur" tabindex="-1">Blur horizontally and composite</h2>
+    <p>The fourth pass loads the Phong scene color, binds the intermediate texture and horizontal parameters, and draws another fullscreen triangle. It takes the same nine coefficients at X offsets from &minus;4 to +4 source texels. The separable result has a conceptual 9&times;9 footprint, but the horizontal stage needs only nine texture samples per final-surface pixel.</p>
+    <p>RGB blending uses source <code>One</code>, destination <code>One</code>, and addition, so the horizontally filtered glow is added over the visible UFO. Alpha uses source <code>One</code> and destination <code>Zero</code>, replacing the surface alpha with the shader's value of 1. The text overlay renders after the fullscreen draw in this same pass.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="bloom-passes-caption" tabindex="0">
+      <table>
+        <caption id="bloom-passes-caption">Bloom render passes and explicit effect draws</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Target</th><th scope="col">Draw</th><th scope="col">Triangles</th><th scope="col">Color behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Glow mask</th><td>256&times;256 <code>Rgba8Unorm</code></td><td>1 indexed glow mesh</td><td>16,716</td><td>Clear black, store authored colors</td></tr>
+          <tr><th scope="row">Vertical blur</th><td>256&times;256 <code>Rgba8Unorm</code></td><td>1 fullscreen triangle</td><td>1</td><td>Clear black, replace with filtered result</td></tr>
+          <tr><th scope="row">Lit scene</th><td>Surface format</td><td>1 indexed visible mesh</td><td>16,428</td><td>Clear black, store Phong shading</td></tr>
+          <tr><th scope="row">Horizontal composite</th><td>Surface format</td><td>1 fullscreen triangle</td><td>1</td><td>Load scene and add filtered RGB</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Excluding text-overlay geometry, a frame records four render passes, four draws, and 33,146 submitted triangles. The two mesh draws and two procedural triangles produce 99,438 index or vertex invocations. Glyphon adds one instanced text draw when the overlay contains visible glyphs, but it does not create a fifth pass.</p>
+
+    <h2 id="animate-ufo" tabindex="-1">Animate the UFO</h2>
+    <p>The camera stays fixed. Its right-handed perspective uses a 45&deg; vertical field of view, current surface aspect, and near and far planes of 0.1 and 256. The eye sits 10.25 units from the origin at 17&deg; yaw and 7.5&deg; pitch, approximately <code>(-2.971, 1.338, -9.718)</code>, and looks toward <code>(0, -1, 0)</code>.</p>
+    <p>Rust advances normalized animation time by half of the elapsed seconds, so one cycle lasts two seconds. The phase drives a 0.25-unit XZ orbit around Y&nbsp;=&nbsp;&minus;1, a complete Y rotation, and an X tilt of <code>-sin(phase) * 0.15</code> radians, about &plusmn;8.59&deg;. Elapsed time is not clamped, so a long stall can jump the animation.</p>
+    <p>The same 192-byte uniform block moves both model meshes together and is rewritten once per update. Resizing recreates only the surface-size depth image, rewrites the matrices, and rebuilds overlay placement; all four fixed offscreen images remain 256&times;256.</p>
+    <p>There are no demo keyboard, mouse, pointer, or touch controls. The 22 px Vazirmatn overlay displays “Bloom,” the GPU device description, and FPS. That FPS is CPU frame cadence averaged over 500 ms, not a GPU timestamp. Its text updates on the statistics cadence while overlay preparation runs every frame.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native four-pass example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU bloom example"><code>cargo run --example bloom</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU bloom example"><code>scripts/build-wasm.sh --release bloom
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/bloom/</code> in a browser with WebGPU support. Native code loads both models synchronously. The WebAssembly entry point starts an asynchronous task, awaits the visible model and then the glow model, and logs loading or rendering errors. Both targets run the same four passes and WGSL; there is no browser fallback. The shader and Vazirmatn font are compiled into the binary.</p>
+    <p>This compact example favors a readable filter over a production HDR bloom stack. Its two 256&times;256 targets use eight-bit color, the blur radius and strength are fixed, and the horizontal filter still executes at full surface resolution. It has no threshold pass over the lit scene, exposure or tone mapping, downsample pyramid, multi-scale reconstruction, temporal stabilization, MSAA, face culling, shadows, or user controls.</p>
+    <p>The two mostly duplicated glTF files and meshes make emissive selection easy to see, but they cost about 2.10 MiB of requests, about 1.91 MiB of mesh buffers, and a second full geometry draw. The blur target also allocates an unused depth texture. The fullscreen shader maps texture Y directly to clip-space Y, vertically flipping each input; the second fullscreen pass flips it back, so final orientation is correct only because both stages run.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Render an HDR emissive attachment beside the main scene color, then remove the duplicated glow model and geometry pass.</li>
+      <li>Downsample through several resolutions, normalize or expose the kernel gain, and composite the reconstructed levels after tone mapping.</li>
+      <li>Move the horizontal filter to the 256&times;256 target and use a separate one-sample composite, then compare total texture work at high resolutions.</li>
+      <li>Remove the unused blur depth allocation, specialize bind-group layouts for mesh and blur pipelines, and correct the fullscreen Y convention directly.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/bloom.rs">Read the bloom source &nearr;</a>
+      <a href="../radialblur/">&larr; Previous: WebGPU radial blur</a>
+      <a href="../shadowmapping/">Next: WebGPU shadow mapping &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

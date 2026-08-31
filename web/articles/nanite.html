@@ -1,0 +1,255 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 42</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Preprocess one animated Jax model into four meshlet LODs and 30 geometry pages, choose an adapter-scaled population, stream GPU-requested pages, reject hidden work with a two-pass depth pyramid, and submit compacted static and skinned populations through indirect draws.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Nanite-style WebGPU demo at a glance">
+      <div><dt>Meshlet LODs</dt><dd>4</dd></div>
+      <div><dt>Geometry pages</dt><dd>30</dd></div>
+      <div><dt>Startup tiers</dt><dd>272&ndash;8,857</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#nanite-style-design">Define the Nanite-style design</a></li>
+        <li><a href="#load-jax">Load the skinned Jax asset</a></li>
+        <li><a href="#scale-population">Scale the population to the adapter</a></li>
+        <li><a href="#build-meshlet-lods">Build four meshlet LODs</a></li>
+        <li><a href="#stream-geometry-pages">Stream virtual geometry pages</a></li>
+        <li><a href="#select-cull-and-draw">Select, compact, and draw indirectly</a></li>
+        <li><a href="#two-pass-hzb">Recover visibility with two-pass HZB</a></li>
+        <li><a href="#skin-and-shade">Share GPU skinning and shade Jax</a></li>
+        <li><a href="#resources-and-passes">Account for resources and passes</a></li>
+        <li><a href="#controls-and-platforms">Use the controls on desktop and mobile</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="nanite-style-design" tabindex="-1">Build a WebGPU teaching renderer inspired by Nanite</h2>
+    <p>The <a href="../raytracinggltf/#about">previous glTF ray-tracing article</a> traces an imported triangle scene in compute. This example returns to rasterization and asks a different scaling question: how can the renderer choose less geometry with distance, make page residency visible to the GPU, compact surviving work, and avoid one CPU draw call per object?</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/4d6adfa84331e1c4f684f3fe9218b67a1363e80e">introducing Nanite commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/nanite.rs">Rust example</a>, the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_compute.wgsl">compute</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_render.wgsl">render</a> shaders, the HZB <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_copy.wgsl">copy</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_reduce.wgsl">reduction</a> shaders, screenshots, meshlet paging, HZB recovery, and indirect submission. The <a href="https://github.com/PooyaEimandar/webgpu/commit/a0d7a41e144706b5f79dc30f95b253100f5a2a33">adapter-scaled population update</a> replaced one maximum default with four startup tiers. The <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible-panel change</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/0a6f61003b053d261bf2e264063527aad3d8ba14">mobile joystick fix</a> produced the current interaction path. Rendering and application setup use <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+    <p><strong>Nanite-style</strong> is deliberate wording. This is not Unreal Engine's Nanite implementation. It uses CPU-generated grid-quantized LODs, fixed-size meshlet pages, a CPU-managed residency cache, ordinary WGSL vertex shaders, and four WebGPU indirect commands. It has no mesh shaders, persistent cluster hierarchy, GPU decompression, disk page store, or production-quality simplifier.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/nanite.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The stored maximum-population capture shows 8,281 LOD instances, 576 full-detail instances, and cyan, green, orange, and magenta LOD tinting. Its 53 fps on an unidentified browser adapter is one capture, not a benchmark. The current panel also reports startup tier, page residency, and HZB state, rows not visible in this earlier, shorter panel capture.</figcaption>
+    </figure>
+
+    <h2 id="load-jax" tabindex="-1">Load one skinned Jax model, animation, and texture</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs">skinned glTF loader</a> first reads <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>, then batches its external binary buffer and base-color image. Browser and native builds make the same three logical asset requests:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-assets-caption" tabindex="0">
+      <table>
+        <caption id="nanite-assets-caption">Nanite-style example runtime assets</caption>
+        <thead><tr><th scope="col">Asset</th><th scope="col">Stored bytes</th><th scope="col">Decoded content</th><th scope="col">Role</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a></th><td>68,324</td><td>59 nodes, one mesh, one skin, one animation</td><td>Scene, materials, skeleton, and resource URLs</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a></th><td>1,957,752</td><td>35,880 vertices and 35,880 indices</td><td>Geometry, 46-joint skin, and animation samples</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png"><code>jax_base_color.png</code></a></th><td>13,008</td><td>1024&times;1024 RGB decoded to 4,194,304 RGBA bytes</td><td>One sRGB base-color texture</td></tr>
+          <tr><th scope="row">Download total</th><td><strong>2,039,084</strong></td><td>Three files</td><td>Loaded before renderer initialization</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The model has one triangle primitive with 11,960 triangles. Its 35,880 indices are sequential and every corner has its own source vertex. A 76-byte <code>SkinnedVertex</code> carries position, normal, UV, RGB color, four joint IDs stored as floats, and four normalized weights. The source lacks vertex color, so the loader supplies white. The material base-color factor is also white and metallic is zero; this example consumes only base color, not a full glTF PBR material.</p>
+    <p>The single one-second animation, <code>Walking_1</code>, contains 138 channels: translation, rotation, and scale for each of 46 joints. Rust samples those channels and constructs a 128-matrix palette. Animation time advances by at most 1/15 second per update, limiting large jumps after a stalled frame.</p>
+    <p>The PNG is uploaded as one-mip <code>Rgba8UnormSrgb</code> with repeat addressing and linear minification and magnification. There is no generated mip chain, normal map, metallic-roughness texture, or separate material per meshlet.</p>
+
+    <h2 id="scale-population" tabindex="-1">Choose population and memory capacity from adapter heuristics</h2>
+    <p>Initialization classifies the adapter before allocating its largest buffers. Mobile GPU-name markers or a mobile browser user agent choose the mobile tier. Otherwise, any of three constrained limits selects conservative: storage bindings below 128 MiB, fewer than 8,192 compute workgroups in one dimension, or a maximum 2D texture dimension below 8,192. Device type and name then distinguish maximum, balanced, and conservative.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-population-caption" tabindex="0">
+      <table>
+        <caption id="nanite-population-caption">Adapter-scaled startup population tiers</caption>
+        <thead><tr><th scope="col">Tier</th><th scope="col">LOD Jax</th><th scope="col">Full-detail Jax</th><th scope="col">Total</th><th scope="col">Typical selector</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Maximum</th><td>8,281 (91&times;91)</td><td>576 (48&times;12)</td><td>8,857</td><td>Discrete GPU or recognized high-end integrated/other adapter</td></tr>
+          <tr><th scope="row">Balanced</th><td>4,096 (64&times;64)</td><td>192 (24&times;8)</td><td>4,288</td><td>Other integrated GPU or generic BrowserWebGPU adapter</td></tr>
+          <tr><th scope="row">Conservative</th><td>1,024 (32&times;32)</td><td>48 (12&times;4)</td><td>1,072</td><td>CPU, virtual GPU, constrained limits, or unrecognized adapter</td></tr>
+          <tr><th scope="row">Mobile</th><td>256 (16&times;16)</td><td>16 (8&times;2)</td><td>272</td><td>Mobile GPU marker or mobile browser user agent</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A mobile surface above two million pixels reduces those counts further with a square-root resolution scale clamped between 0.5 and 1.0. This is a startup heuristic rather than measured adaptive quality: it does not benchmark the adapter, monitor frame time, or change capacity after resize.</p>
+    <p>Both groups form centered grids. Full-detail characters begin at Z&nbsp;=&nbsp;7; the LOD grid starts behind the final full-detail row. Model scale is 3.0 for LOD instances and 3.24 for full detail. Changing either population slider reconstructs the active grids, keeps zero-filled inactive slots so the skinned offset remains stable, rewrites the entire tier-sized instance buffer, and invalidates the previous depth hierarchy.</p>
+
+    <h2 id="build-meshlet-lods" tabindex="-1">Quantize four LODs and partition them into meshlets</h2>
+    <p>Startup preprocessing calculates the source bound, whose center is approximately (0.0265, 1.1163, 0.0077), radius is 1.5806, and diagonal is 3.1612. LOD 0 preserves the source index stream. LODs 1 through 3 quantize positions into 64, 28, and 12 cells per model-bounds axis. Every cell keeps its first source vertex; triangles that collapse or repeat the same sorted index triple are removed.</p>
+    <p>The remaining triangle centroids receive 30-bit Morton codes, and sorting those codes improves spatial locality before fixed clustering. Each meshlet holds at most 96 triangles, or 288 indices. Eight consecutive meshlets form one page. This produces exact, deterministic statistics for the current Jax asset:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-lods-caption" tabindex="0">
+      <table>
+        <caption id="nanite-lods-caption">CPU-generated Jax meshlet LOD hierarchy</caption>
+        <thead><tr><th scope="col">LOD</th><th scope="col">Quantization</th><th scope="col">Triangles</th><th scope="col">Meshlets</th><th scope="col">Pages</th><th scope="col">Estimated object-space error</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Original indices</td><td>11,960</td><td>125</td><td>16</td><td>0</td></tr>
+          <tr><th scope="row">1</th><td>64 cells/axis</td><td>6,474</td><td>68</td><td>9</td><td>0.04939</td></tr>
+          <tr><th scope="row">2</th><td>28 cells/axis</td><td>2,424</td><td>26</td><td>4</td><td>0.11290</td></tr>
+          <tr><th scope="row">3</th><td>12 cells/axis</td><td>386</td><td>5</td><td>1</td><td>0.26343</td></tr>
+          <tr><th scope="row">Total stored</th><td>Four independent index sets</td><td>21,244</td><td><strong>224</strong></td><td><strong>30</strong></td><td>Diagonal divided by grid count</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>One 32-byte <code>MeshletData</code> record stores a bind-pose bounding sphere plus first index, index count, LOD level, and page ID. A page deduplicates vertices shared by its eight meshlets. The largest page still reaches 2,304 vertices and 2,304 indices, so every physical cache slot reserves those capacities.</p>
+    <pre tabindex="0" aria-label="Select a meshlet LOD from projected geometric error"><code><span class="code-keyword">let</span> own_error = projected_error(
+    scene.lod_errors[level], instance.position_scale.w, distance_to_center,
+);
+<span class="code-keyword">let</span> parent_error = projected_error(
+    scene.lod_errors[level + 1u], instance.position_scale.w, distance_to_center,
+);
+<span class="code-keyword">if</span> (parent_error &gt; scene.screen.z &amp;&amp; own_error &lt;= scene.screen.z) {
+    <span class="code-keyword">return</span> level;
+}</code></pre>
+    <p>The default threshold is 1.5 pixels. Projection uses surface height, a 56&deg; vertical field of view, instance scale, and distance to the nearest side of the model sphere. A larger allowed error accepts coarser levels sooner. There is no temporal hysteresis or blend, so a moving camera can switch levels at a hard boundary.</p>
+
+    <h2 id="stream-geometry-pages" tabindex="-1">Turn GPU page requests into CPU cache uploads</h2>
+    <p>LOD 3's one page is pinned and uploaded during initialization, guaranteeing a resident fallback. The page table uses zero for missing and physical slot plus one for resident. During <code>select_lod</code>, each visible static instance requests every page belonging to its desired level. If any is missing, the shader requests the next coarser level until it finds one whose complete page set is resident.</p>
+    <pre tabindex="0" aria-label="Request a WebGPU geometry page and fall back to resident LOD"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> level = desired_level; level &lt; 4u; level = level + 1u) {
+    <span class="code-keyword">var</span> resident = true;
+    <span class="code-keyword">for</span> (<span class="code-keyword">var</span> local_page = 0u; local_page &lt; page_count; local_page = local_page + 1u) {
+        <span class="code-keyword">if</span> (request_page(page_start + local_page) == 0u) {
+            resident = false;
+        }
+    }
+    <span class="code-keyword">if</span> (resident) { <span class="code-keyword">return</span> level; }
+}</code></pre>
+    <p>Thirty page IDs fit in one 32-bit request word. The command encoder copies that word to a four-byte map-read buffer and clears the GPU request bits. A later update maps the result asynchronously, queues missing pages, and uploads at most four queued pages per feedback cycle. The cache chooses an empty slot first, then the least-recently requested non-pinned slot; page-table updates use four-byte queue writes.</p>
+    <p>This is a residency demonstration, not network or disk streaming. All four LODs are generated from the already downloaded Jax mesh and retained as CPU vectors. The requested slot count is 32 but clamps to the current asset's 30 total pages. Consequently all pages fit after warm-up and the LRU eviction path should remain at zero for this asset. A larger virtual set or smaller requested cache would be needed to demonstrate sustained cache pressure.</p>
+
+    <h2 id="select-cull-and-draw" tabindex="-1">Select LODs, compact visible records, and draw indirectly</h2>
+    <p>The first 64-thread kernel assigns one LOD per active LOD instance after a whole-model frustum test and residency fallback. The static culling dispatch then spans two workgroups in X&mdash;enough for the maximum 125 meshlets&mdash;and one Y row per active instance. Threads beyond the selected level's meshlet count return. Full-detail instances use a separate one-dimensional culling dispatch.</p>
+    <p>Survivors atomically allocate entries in a 48-byte <code>VisibleDraw</code> array. Each record stores the instance transform and either a meshlet/page reference or the source full-detail instance index. The atomic counts live directly inside four indirect argument records:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-indirect-caption" tabindex="0">
+      <table>
+        <caption id="nanite-indirect-caption">GPU-counted indirect commands per HZB-enabled steady frame</caption>
+        <thead><tr><th scope="col">Command</th><th scope="col">API</th><th scope="col">Fixed primitive count</th><th scope="col">GPU-written value</th><th scope="col">Visible-array region</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Main LOD meshlets</th><td><code>draw_indirect</code></td><td>288 vertices</td><td>Meshlet instance count</td><td>Main static</td></tr>
+          <tr><th scope="row">Main full detail</th><td><code>draw_indexed_indirect</code></td><td>35,880 indices</td><td>Jax instance count</td><td>Main skinned</td></tr>
+          <tr><th scope="row">Recovered LOD meshlets</th><td><code>draw_indirect</code></td><td>288 vertices</td><td>Recovered meshlet count</td><td>Recovery static</td></tr>
+          <tr><th scope="row">Recovered full detail</th><td><code>draw_indexed_indirect</code></td><td>35,880 indices</td><td>Recovered Jax count</td><td>Recovery skinned</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The static vertex shader uses <code>vertex_index</code> to read the selected page's index and vertex storage. Short meshlets still receive the fixed 288 vertex invocations; excess lanes return an off-screen position. One indirect call can therefore draw all visible static meshlets across every LOD without a vertex buffer.</p>
+    <p>Main and recovery records occupy separate halves of the visible array. Separate shader entry points add the recovery offset because a nonzero indirect <code>first_instance</code> would require the optional <code>INDIRECT_FIRST_INSTANCE</code> feature, unavailable on some WebGPU targets. The example requests no such feature.</p>
+
+    <h2 id="two-pass-hzb" tabindex="-1">Use previous-frame HZB, then recover against current depth</h2>
+    <p>The first frame renders frustum survivors because no depth history is valid. After the main render pass, compute copies the full-size <code>Depth32Float</code> image into mip 0 of an <code>R32Float</code> hierarchy. Each following mip takes the maximum of a clamped 2&times;2 footprint. At 1280&times;720, the pyramid has 11 levels and 1,228,763 texels, or 4,915,052 logical bytes.</p>
+    <p>On later frames, the main cull projects each candidate sphere with the previous rendered view-projection matrix. It chooses a mip from the projected diameter, samples four footprint corners, and rejects a candidate only when its nearest estimated depth lies beyond the farthest sampled occluder plus 0.0015.</p>
+    <p>A previous-frame result can be stale after camera motion. Candidates rejected by history receive a scratch flag rather than disappearing permanently. Once the current main depth pyramid exists, a recovery compute pass retests only those flags with the current view-projection matrix. Newly visible records enter the second half of the compact buffer and render in a color-and-depth load pass.</p>
+    <pre tabindex="0" aria-label="Recover a candidate rejected by the previous WebGPU HZB"><code><span class="code-keyword">if</span> (hzb_occluded(
+    sphere_center, sphere_radius, scene.projection * scene.view,
+)) {
+    <span class="code-keyword">return</span>;
+}
+<span class="code-keyword">let</span> slot = atomicAdd(&amp;draw_state.values[10], 1u);
+visible_draws[scene.params2.w + slot] = recovered_draw;</code></pre>
+    <p>The HZB is built before recovery, so it does not include geometry added by the recovery pass. Disabling the HZB checkbox stops history rejection and removes recovery, but the current implementation still builds all HZB mips every frame. <strong>Freeze culling frustum</strong> freezes the frustum planes and LOD camera; HZB projection continues to follow the rendered camera.</p>
+
+    <h2 id="skin-and-shade" tabindex="-1">Share one GPU joint palette across every Jax</h2>
+    <p>Rust samples the animation and uploads 128 matrices, or 8,192 bytes, every frame. Both render paths blend four matrices in the vertex stage. Full-detail Jax uses the original 76-byte vertex buffer and conventional indexed drawing. LOD pages use 96-byte storage vertices containing the same position, normal, UV, color, joint IDs, and weights padded to six <code>vec4</code> values.</p>
+    <p>Every character reads the same palette, so thousands of instances walk in sync. There is no per-instance animation time, palette, pose blend, or motion vector. Disabling <strong>Animated mode</strong> stops animation advancement and skips skinning in both vertex paths, revealing the bind-pose T-pose. When animation is enabled, static meshlet bind-pose spheres could miss deformed limbs, so culling uses a conservative whole-model sphere scaled by 1.15 for every meshlet. Per-meshlet frustum and HZB spheres are used only in T-pose mode.</p>
+    <p>The fragment shader samples the sRGB base color, multiplies it by material and warm vertex tints, and adds ambient, Lambert diffuse, and a small exponent-36 Blinn highlight from a point at (28, 42, 22). When LOD colors are enabled, static instances mix 72% toward cyan, green, orange, or magenta; full-detail instances retain the textured shade. Pipelines use one sample, no face culling, no blending, and <code>Depth32Float</code> writes with <code>LessEqual</code>.</p>
+
+    <h2 id="resources-and-passes" tabindex="-1">Account for tier-scaled buffers and the steady frame graph</h2>
+    <p>The largest allocations scale with the selected startup tier. The visible buffer reserves the maximum 125 meshlets for every LOD instance, adds one record per full-detail instance, then doubles that capacity for main and recovery. The draw-state buffer reserves matching candidate flags plus page tables and request bits.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-tier-resources-caption" tabindex="0">
+      <table>
+        <caption id="nanite-tier-resources-caption">Logical fixed GPU payload by startup tier, before depth, HZB, surface, staging, joystick, and egui</caption>
+        <thead><tr><th scope="col">Tier</th><th scope="col">Instance buffer</th><th scope="col">Two-pass visible buffer</th><th scope="col">Draw state + scratch</th><th scope="col">All listed fixed resources</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Maximum</th><td>283,424 B</td><td>99,427,296 B</td><td>4,176,132 B</td><td>117,879,432 B (112.42 MiB)</td></tr>
+          <tr><th scope="row">Balanced</th><td>137,216 B</td><td>49,170,432 B</td><td>2,065,356 B</td><td>65,365,584 B (62.34 MiB)</td></tr>
+          <tr><th scope="row">Conservative</th><td>34,304 B</td><td>12,292,608 B</td><td>516,492 B</td><td>26,835,984 B (25.59 MiB)</td></tr>
+          <tr><th scope="row">Mobile</th><td>8,704 B</td><td>3,073,536 B</td><td>129,292 B</td><td>17,204,112 B (16.41 MiB)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed totals also include a 6,912,000-byte 30-slot physical page cache, 2,870,400 bytes of full-detail Jax geometry, a 4,194,304-byte decoded base-color texture, 7,168 bytes of meshlet metadata, the 8,192-byte palette, 512-byte scene uniform, and four-byte page-feedback buffer. At 1280&times;720, depth and HZB add another 8,601,452 logical bytes. The maximum tier reaches about 120.62 MiB before presentation, alignment, staging, joystick, and egui resources.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-passes-caption" tabindex="0">
+      <table>
+        <caption id="nanite-passes-caption">Default steady-frame pass order after HZB history becomes valid</caption>
+        <thead><tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Passes</th><th scope="col">Submitted work</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Main selection and culling</td><td>1 compute</td><td>LOD selection, static meshlets, full-detail instances</td></tr>
+          <tr><th scope="row">2</th><td>Main geometry</td><td>1 render</td><td>2 indirect draws</td></tr>
+          <tr><th scope="row">3</th><td>Depth hierarchy</td><td>11 compute at 1280&times;720</td><td>Depth copy + 10 max reductions</td></tr>
+          <tr><th scope="row">4</th><td>Current-frame recovery</td><td>1 compute + 1 render</td><td>2 recovery dispatches + 2 indirect draws</td></tr>
+          <tr><th scope="row">5</th><td>Page feedback</td><td>Copy + clear commands</td><td>One 32-bit request word when readback is available</td></tr>
+          <tr><th scope="row">6</th><td>Interaction overlays</td><td>2 render</td><td>Joystick, then egui</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>That is 13 compute passes and four render passes in a typical HZB-enabled steady frame at screenshot size. The first frame skips recovery. Before culling, a staging belt uploads 512 bytes of scene data, 8,192 palette bytes, and 80 bytes of indirect-command headers and zeroed counters: 8,784 bytes per frame before variable page, instance, joystick, or egui writes.</p>
+    <p>The panel's visibility counts are CPU calculations, not GPU counter readback. They repeat whole-instance frustum and desired-LOD selection, omit HZB rejection and page-residency fallback, and report a <q>meshlet upper bound</q>. They are useful diagnostics but do not state the exact indirect counts or rendered triangles.</p>
+
+    <h2 id="controls-and-platforms" tabindex="-1">Tune LOD, culling, population, animation, and camera</h2>
+    <p>The 360 px non-resizable, collapsible egui window refreshes at most every 0.25 seconds unless input or resize makes it dirty. Defaults and behavior are:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nanite-controls-caption" tabindex="0">
+      <table>
+        <caption id="nanite-controls-caption">Nanite-style renderer controls</caption>
+        <thead><tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">Range or effect</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">LOD Jax</th><td>Selected tier capacity</td><td>0 to tier capacity; rebuilds both grids</td></tr>
+          <tr><th scope="row">Full-detail Jax</th><td>Selected tier capacity</td><td>0 to tier capacity; rebuilds both grids</td></tr>
+          <tr><th scope="row">LOD error</th><td>1.5 px</td><td>0.35&ndash;8.0, logarithmic; larger means coarser</td></tr>
+          <tr><th scope="row">Animate camera</th><td>Off</td><td>Orbit at 0.055 rad/s and disable manual movement</td></tr>
+          <tr><th scope="row">Animated mode</th><td>On</td><td>Shared walking palette; off shows every Jax in T-pose</td></tr>
+          <tr><th scope="row">Freeze culling frustum</th><td>Off</td><td>Freeze frustum planes and LOD camera, not HZB projection</td></tr>
+          <tr><th scope="row">Two-pass HZB occlusion</th><td>On</td><td>Previous-frame rejection plus current-frame recovery</td></tr>
+          <tr><th scope="row">Show LOD colors</th><td>On</td><td>Tint only the meshlet LOD population</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>With camera animation off, W/A/S/D move on the XZ plane and arrow keys look. Pointer or touch input creates two virtual sticks: the left half moves and the right half looks. Movement speed is 72 world units per second, look speed is 1.6 radians per second, and input delta is capped at 1/15 second. egui consumes its own input and clears any active pointer stick so a slider drag cannot continue moving the camera.</p>
+    <p>The initial manual camera inherits the orbit view. Automated orbit uses radius 98 around Z&nbsp;=&nbsp;&minus;76 at Y&nbsp;=&nbsp;18 and looks toward (0, 1.1, &minus;76). Projection uses a 56&deg; field of view, 0.1 near plane, 1,080 far plane, and a small upward clip-space shift. Resize recreates depth and every HZB view/bind group, resets history, and updates projection, but it does not choose a new population tier.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run the example and understand its limits</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native Nanite-style WebGPU example"><code>cargo run --example nanite</code></pre>
+    <p>Build the WebAssembly target and serve the generated page:</p>
+    <pre tabindex="0" aria-label="Build and serve the Nanite-style WebGPU example"><code>scripts/build-wasm.sh --release nanite
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/nanite/</code> in a browser with WebGPU support. Startup downloads about 1.94 MiB across the glTF, binary, and PNG, then performs LOD, Morton sorting, meshlet, and page construction on the CPU before allocating tier-scaled GPU buffers.</p>
+    <p>The example demonstrates the architecture without claiming production parity. LODs are independent grid-collapse results rather than a crack-free cluster hierarchy; error is estimated from bounding-box diagonal rather than measured deviation; pages are uncompressed CPU memory; all 30 pages fit the current 30-slot cache; and default animation falls back to whole-model bounds instead of per-meshlet culling. It has no meshlet cone culling, material bins, instance animation phases, dynamic resolution, timestamp queries, exact GPU statistics, occluder pass, temporal LOD stability, or page-store I/O.</p>
+    <p>The maximum-tier selector also treats a per-dimension compute limit of exactly 8,192 as unconstrained even though the 8,281-row static dispatch needs at least 8,281; initialization catches that mismatch and returns an error instead of falling back. HZB generation continues when occlusion is disabled, and maximum tier reserves roughly 99.4 MB for the two-pass visible array alone. Useful extensions include a cache smaller than the virtual page set, offline compressed pages, measured-error simplification, per-instance palettes, GPU-readback diagnostics, animated cluster bounds, and frame-time-driven population selection.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/nanite.rs">Read the Nanite-style source &nearr;</a>
+      <a href="../raytracinggltf/">&larr; Previous: WebGPU glTF ray tracing</a>
+      <a href="../metropolis/">Next: WebGPU Metropolis renderer &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

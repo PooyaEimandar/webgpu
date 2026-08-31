@@ -1,0 +1,151 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 35</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Evolve a 60&times;60 mass-spring sheet through two alternating storage buffers, run 64 GPU substeps per displayed frame, collide particles against a sphere, reconstruct normals, and draw the resulting buffer directly as textured cloth.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU compute cloth demo at a glance">
+      <div><dt>Cloth particles</dt><dd>3,600</dd></div>
+      <div><dt>Default substeps</dt><dd>64</dd></div>
+      <div><dt>Cloth triangles</dt><dd>6,962</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#simulate-a-sheet">Simulate a sheet on the GPU</a></li>
+        <li><a href="#initialize-grid">Initialize particles and topology</a></li>
+        <li><a href="#spring-forces">Accumulate spring forces</a></li>
+        <li><a href="#ping-pong-substeps">Ping-pong 64 substeps</a></li>
+        <li><a href="#sphere-collision">Collide with the sphere</a></li>
+        <li><a href="#normals-and-shading">Rebuild normals and shade</a></li>
+        <li><a href="#resources-and-passes">Account for resources and passes</a></li>
+        <li><a href="#controls">Use the simulation controls</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="simulate-a-sheet" tabindex="-1">Use storage buffers as simulation state and geometry</h2>
+    <p>The <a href="../computeparticles/#about">previous compute-particles article</a> writes particle state in compute and reads it as procedural billboard input. Compute Cloth makes the storage data a conventional vertex stream. Position, UV, and normal fields from the active particle buffer feed the cloth vertex shader after the final substep, so no CPU readback or copy into a second rendering buffer is required.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">introducing compute-cloth commit</a> added the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computecloth.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computecloth.wgsl">WGSL module</a>. The <a href="https://github.com/PooyaEimandar/webgpu/commit/8ce764051bc386c949d430799f06411c194c50f0">screenshot commit</a> added both published images. A later <a href="https://github.com/PooyaEimandar/webgpu/commit/bb83a6106e8270d0451161da6db00b03fa143fb1">stability fix</a> reduced the default time step from 0.0025 to 0.00077, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible-panel update</a> changed the only other current behavior. The shader remains byte-identical to its introduction. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/computecloth.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A procedurally checkered sheet falls over the collision sphere. The screenshot shows the current defaults: 64 iterations, time step 0.00077, stiffness 2,000, damping 0.25, radius 1.00, with pause and wind disabled.</figcaption>
+    </figure>
+
+    <h2 id="initialize-grid" tabindex="-1">Initialize a 60&times;60 sheet and indexed surface</h2>
+    <p>Rust places 3,600 particles at Y&nbsp;=&nbsp;2 over a 5&times;5 XZ square. X and Z range from &minus;2.5 to 2.5. Adjacent rest lengths are <code>5 / 59</code>, about 0.084746, and diagonal rest length is about 0.119849. UVs span 0 through 3 on both axes, repeating the procedural texture three times.</p>
+    <p>Each 64-byte particle stores four <code>vec4</code> values: position, velocity, UV, and normal. The cloth index buffer joins 59&times;59 cells with 20,886 <code>u32</code> indices, producing 6,962 triangles. There are no pinned particles: every grid point is dynamic, and <code>pos.w</code> is reset to one but is not a pin flag.</p>
+
+    <h2 id="spring-forces" tabindex="-1">Connect structural and shear springs</h2>
+    <p>Each interior particle evaluates its left, right, up, down, and four diagonal neighbors. The kernel applies Hooke stretch and a velocity damper along each spring direction, adds gravity, then performs semi-implicit Euler integration:</p>
+    <pre tabindex="0" aria-label="WebGPU cloth spring and integration equations"><code><span class="code-keyword">let</span> spring = stiffness * (distance - rest_distance);
+<span class="code-keyword">let</span> damper = damping * dot(relative_velocity, direction);
+force += direction * (spring + damper);
+
+velocity = current_velocity + force / mass * delta_t;
+position = current_position + velocity * delta_t;</code></pre>
+    <p>Across the complete grid, one substep evaluates 28,084 directed spring relationships: 7,080 horizontal, 7,080 vertical, and 13,924 diagonal. At the default 64 substeps, that is 1,797,376 source-level spring evaluations per displayed frame. There are no two-hop bending springs, constraint projection, tearing, plasticity, or self-collision.</p>
+
+    <h2 id="ping-pong-substeps" tabindex="-1">Alternate two complete particle buffers</h2>
+    <p>Two bind groups reverse the same two buffers: A reads while B writes, then B reads while A writes. Every substep is a separate compute pass, which supplies the dependency between complete grid states and avoids races between neighboring particles. A 10&times;10 workgroup covers 100 particles; the 60&times;60 grid dispatches exactly 6&times;6 = 36 workgroups.</p>
+    <p>With 64 iterations, a normal frame records 64 compute passes, 2,304 workgroups, and 230,400 compute invocations before rendering. The final pass selects <code>simulate_normals</code>; earlier passes use <code>simulate</code>. An even number returns the active state to the buffer that began the frame, while an odd number swaps it.</p>
+    <p>The UI calls these passes “Iterations,” but each one is a full integration substep, not repeated convergence of a positional constraint. Simulation time per displayed frame is <code>iterations &times; time_step</code>. At the defaults that is 0.04928 simulated seconds per frame, so speed depends on frame rate rather than measured wall time.</p>
+
+    <h2 id="sphere-collision" tabindex="-1">Project penetrating particles onto a collision sphere</h2>
+    <p>After integration, a particle inside the selected radius is moved radially to the sphere surface and its complete velocity becomes zero. If it lands exactly at the center, the fallback direction points down. This is a simple inelastic projection rather than a friction, restitution, or continuous collision model.</p>
+    <pre tabindex="0" aria-label="Resolve WebGPU cloth particles against the sphere"><code><span class="code-keyword">if</span> (sphere_dist &lt; sim.params1.w) {
+    position = sim.sphere_pos.xyz + direction * sim.params1.w;
+    velocity = vec3&lt;f32&gt;(0.0);
+}</code></pre>
+    <p>A notable current mismatch appears when the radius slider moves away from 1.0: compute collision uses the selected 0.55&ndash;1.35 radius, but the rendered sphere remains an unscaled unit mesh. The visible obstacle therefore matches collision only at the default. Collision is particle-only, so triangles between vertices can still intersect the sphere.</p>
+
+    <h2 id="normals-and-shading" tabindex="-1">Reconstruct a normal on the last substep</h2>
+    <p>The final compute pass estimates each normal from left-right and up-down position differences in its input buffer. It writes that normal alongside the newly integrated output position, making the normal one substep behind position. Boundary coordinates clamp to the edge, and a near-zero cross product falls back to +Y.</p>
+    <p>The render pass first draws a 32&times;64 procedural sphere: 2,145 vertices, 12,288 indices, and 4,096 submitted triangles, including 128 pole degenerates. It then draws the double-sided cloth with 6,962 triangles. Both pipelines are single-sample, opaque, and depth-writing with <code>LessEqual</code>; only the sphere culls back faces.</p>
+    <p>The 256&times;256 <code>Rgba8UnormSrgb</code> checker-weave texture is generated on the CPU and uploaded once. It uses repeat U/V, linear filtering, and one mip, so distant cloth can shimmer. Blinn-style lighting uses a 0.15 diffuse floor and separate sphere/cloth specular settings. The fixed camera sits at (4.2, 2.8, 5.4), looks toward (0, &minus;0.45, 0), and has no orbit controls.</p>
+
+    <h2 id="resources-and-passes" tabindex="-1">Account for fixed simulation and render resources</h2>
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-cloth-resources-caption" tabindex="0">
+      <table>
+        <caption id="compute-cloth-resources-caption">Compute cloth explicit fixed GPU payloads</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Elements</th><th scope="col">Logical bytes</th><th scope="col">Use</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Particle buffers A + B</th><td>2 &times; 3,600 &times; 64</td><td>460,800</td><td>Storage + active vertex stream</td></tr>
+          <tr><th scope="row">Cloth indices</th><td>20,886 <code>u32</code></td><td>83,544</td><td>Indexed cloth draw</td></tr>
+          <tr><th scope="row">Sphere vertices</th><td>2,145 &times; 24</td><td>51,480</td><td>Position + normal</td></tr>
+          <tr><th scope="row">Sphere indices</th><td>12,288 <code>u32</code></td><td>49,152</td><td>Indexed sphere draw</td></tr>
+          <tr><th scope="row">Scene uniform</th><td>2 matrices + 3 vectors</td><td>176</td><td>Vertex + fragment</td></tr>
+          <tr><th scope="row">Simulation uniform</th><td>4 vectors</td><td>64</td><td>Compute</td></tr>
+          <tr><th scope="row">Procedural texture</th><td>256&times;256 RGBA8</td><td>262,144</td><td>One sRGB mip</td></tr>
+          <tr><th scope="row">Fixed total</th><td>Excluding depth, surface, and egui</td><td><strong>907,360</strong></td><td>About 0.865 MiB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The <code>Depth32Float</code> image adds <code>4 &times; width &times; height</code> bytes. At 1280&times;720, fixed payload plus depth is 4,593,760 bytes (about 4.381 MiB), before row alignment, driver allocation, surface images, and egui resources.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-cloth-passes-caption" tabindex="0">
+      <table>
+        <caption id="compute-cloth-passes-caption">Default per-frame pass sequence</caption>
+        <thead><tr><th scope="col">Stage</th><th scope="col">Passes or draws</th><th scope="col">Work</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Simulation</th><td>63 ordinary + 1 normal compute pass</td><td>2,304 workgroups; 230,400 invocations</td></tr>
+          <tr><th scope="row">Scene</th><td>1 render pass; 2 indexed draws</td><td>Sphere then cloth; 11,058 submitted triangles</td></tr>
+          <tr><th scope="row">UI</th><td>1 load render pass</td><td>Framework-managed egui draws</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="controls" tabindex="-1">Tune stability and reset state independently</h2>
+    <p>The 300 px non-resizable, collapsible egui panel reports CPU-sampled frame time/FPS, device information, particle count, and selected iterations. Defaults and exposed ranges are:</p>
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-cloth-controls-caption" tabindex="0">
+      <table>
+        <caption id="compute-cloth-controls-caption">Compute cloth controls</caption>
+        <thead><tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">Range or behavior</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Paused</th><td>Off</td><td>Sets delta to zero; does not skip compute passes</td></tr>
+          <tr><th scope="row">Simulate wind</th><td>Off</td><td>Uniform oscillating X/Z body force up to 2.4</td></tr>
+          <tr><th scope="row">Iterations</th><td>64</td><td>1&ndash;64 substeps per frame</td></tr>
+          <tr><th scope="row">Time step</th><td>0.00077</td><td>0.0004&ndash;0.004, logarithmic</td></tr>
+          <tr><th scope="row">Spring stiffness</th><td>2,000</td><td>250&ndash;3,000</td></tr>
+          <tr><th scope="row">Damping</th><td>0.25</td><td>0&ndash;1; spring-direction damping only</td></tr>
+          <tr><th scope="row">Sphere radius</th><td>1.0</td><td>0.55&ndash;1.35 collision radius</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Particle mass exists in the controls structure and defaults to 0.1, but the panel exposes no mass slider. <strong>Reset params</strong> restores controls without resetting particle state. <strong>Reset cloth</strong> writes the initial 230,400-byte particle array into both buffers (460,800 bytes), selects buffer A, and preserves controls and wind time.</p>
+    <p>Pause still records every selected compute pass. With delta zero, spring integration stays unchanged, but the last pass can update normals and any particle already inside the collision sphere can still be projected and stopped. Animation time also continues, so enabled wind resumes at the current phase.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native simulation:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU compute cloth example"><code>cargo run --example computecloth</code></pre>
+    <p>Build the WebAssembly module and local site:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU compute cloth example"><code>scripts/build-wasm.sh --release computecloth
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/computecloth/</code> in a WebGPU-capable browser. Both targets generate all geometry and texels locally; there is no runtime asset request. The 122,752-byte Vazirmatn font and 6,917-byte shader source are compiled into the program.</p>
+    <p>The simulation is educational rather than a production cloth solver. It has no fixed particles, ground, self-collision, triangle-sphere collision, bending resistance, stretch constraints, adaptive substeps, continuous collision, tearing, or conservation checks. Explicit integration can become unstable when time step or stiffness increases, and the default 64 separate compute passes add command overhead.</p>
+    <p>Normals trail positions by one substep, the rendered sphere ignores its collision-radius control, wind is a spatially uniform acceleration rather than aerodynamic pressure, damping acts only along springs, and simulation speed depends on display frame rate. Useful extensions include fixed corners, a constraint solver, one compute pass with safe multi-step synchronization, correct radius rendering, GPU timing, and a normal pass after the final position is complete.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computecloth.rs">Read the Compute Cloth source &nearr;</a>
+      <a href="../computeparticles/">&larr; Previous: WebGPU compute particles</a>
+      <a href="../computecullandlod/">Next: WebGPU compute culling and LOD &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

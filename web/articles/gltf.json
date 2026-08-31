@@ -1,0 +1,9 @@
+{
+  "title": "Load and Render glTF 2.0 with Rust and WebGPU",
+  "description": "Load a glTF 2.0 model from a URL with Rust, wgpu, and WebGPU. Learn scene traversal, mesh buffers, materials, textures, samplers, and WGSL lighting.",
+  "breadcrumbName": "glTF 2.0",
+  "image": "gltf.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "An angled gray cube textured with blue, green, and white Cesium logos on a dark WebGPU canvas."
+}

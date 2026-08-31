@@ -1,0 +1,9 @@
+{
+  "title": "glTF Vertex Skinning in WebGPU with Rust and wgpu",
+  "description": "Animate a glTF character with GPU vertex skinning in Rust, wgpu, and WGSL. Load joints, weights, inverse bind matrices, animation channels, and textures.",
+  "breadcrumbName": "glTF vertex skinning",
+  "image": "gltfskinning.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Slender purple, red, and gold Jax character walking on a black WebGPU canvas with GPU and FPS text."
+}

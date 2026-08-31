@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Occlusion Queries in Rust: Visibility with wgpu",
+  "description": "Build a WebGPU visibility test in Rust with two native occlusion queries, asynchronous result readback, a translucent occluder, and a browser-safe fallback.",
+  "breadcrumbName": "WebGPU occlusion queries",
+  "image": "occlusionquery.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A translucent blue WebGPU occluder separating a dark teapot from a partly visible green sphere, with sample counts shown in an overlay."
+}

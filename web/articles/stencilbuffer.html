@@ -1,0 +1,112 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 12</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Draw a toon-shaded Venus model, record its projected footprint in a stencil buffer, then render a normal-expanded copy only where that footprint is absent.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Stencil buffer demo at a glance">
+      <div><dt>Model triangles</dt><dd>31,398</dd></div>
+      <div><dt>Model draws</dt><dd>2</dd></div>
+      <div><dt>Stencil reference</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#stencil-outline">A stencil-buffer outline around a 3D model</a></li>
+        <li><a href="#load-venus-mesh">Load and frame the Venus mesh</a></li>
+        <li><a href="#write-stencil-mask">First draw: shade the model and write stencil</a></li>
+        <li><a href="#draw-expanded-outline">Second draw: expand the mesh and test stencil</a></li>
+        <li><a href="#depth-stencil-pass">Configure depth, stencil, and pass order</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="stencil-outline" tabindex="-1">A stencil-buffer outline around a 3D model</h2>
+    <p>The <a href="../gears/#about">gears example</a> used ordinary depth testing to separate overlapping surfaces. This demo adds a stencil channel: an integer mask that a render pipeline can compare and update for every covered sample. That mask lets a second draw distinguish the model's original screen-space footprint from the larger silhouette around it.</p>
+    <p>The result is a red, toon-shaded Venus statue with a white border. The <a href="https://github.com/PooyaEimandar/webgpu/commit/975b07df28e2c91485548ed9ee351553af3483b0">original stencil-buffer commit</a> introduced the example; this article follows the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/stencilbuffer.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/stencilbuffer.wgsl">WGSL shader</a>, and shared loader. It runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> and has no camera, keyboard, mouse, or animation controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/stencilbuffer.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The original mesh fills the stencil mask with 1. Its expanded copy can write white only where the stencil value is not 1, leaving a border around the projected silhouette.</figcaption>
+    </figure>
+
+    <h2 id="load-venus-mesh" tabindex="-1">Load and frame the Venus mesh</h2>
+    <p>The bundled <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/venus.gltf"><code>venus.gltf</code> asset</a> contains one scene, node, mesh, triangle primitive, and material. Its 1.48 MB JSON file embeds a 1,110,756-byte binary buffer as a data URI, so there is no separate <code>.bin</code> download. The primitive supplies 28,824 positions, normals, and texture coordinates plus 94,194 source indices, which form 31,398 triangles.</p>
+    <p><a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs"><code>load_colored_gltf_scene</code></a> walks the scene graph and bakes the node transform into each position and normal. It converts the indices to <code>u32</code> and uploads one vertex buffer and one index buffer. The colored vertex layout also reserves location 3 for RGBA, but this shader reads only position at location 0 and normal at location 1. It ignores the asset's texture coordinates and material color, uses no textures or samplers, and sets the visible surface to red in WGSL.</p>
+    <p>The transformed bounds determine the framing. Their radius is about 1.123 units, so the camera distance becomes about 2.864 units and the object-space outline width becomes about 0.028 units. The model matrix recenters the bounds, rotates the statue &minus;45&deg; around Y, and applies a fixed view whose yaw is &minus;35&deg;. A 60&deg; perspective projection uses a 0.1 near plane and a far plane equal to 16 times the radius. Resizing rebuilds these uniforms and the depth-stencil target, but it does not reload the mesh.</p>
+
+    <h2 id="write-stencil-mask" tabindex="-1">First draw: shade the model and write stencil</h2>
+    <p>The first pipeline uses <code>vs_toon</code> and <code>fs_toon</code>. The fragment shader takes the dot product of the normalized surface normal and light vector, then selects one of five brightness bands at 0.25, 0.5, 0.9, and 0.98. Mixing 10% luminance back into the hardcoded red gives the bands a slightly desaturated finish.</p>
+    <p>At the same time, depth writes are enabled with <code>LessEqual</code> comparison. Stencil comparison is <code>Always</code>, and the fail, depth-fail, and pass operations all use <code>Replace</code>. With the render-pass reference set to 1, every rasterized sample covered by the original mesh becomes 1:</p>
+    <pre tabindex="0" aria-label="Configure the first draw to write the stencil mask"><code><span class="code-keyword">let</span> face = wgpu::StencilFaceState {
+    compare: wgpu::CompareFunction::Always,
+    fail_op: wgpu::StencilOperation::Replace,
+    depth_fail_op: wgpu::StencilOperation::Replace,
+    pass_op: wgpu::StencilOperation::Replace,
+};</code></pre>
+    <p><code>depth_fail_op</code> matters here. Hidden fragments do not update color or depth, but they still replace the stencil value. The mask therefore represents the union of the model's projected coverage rather than only the nearest visible fragments. The usual depth test still chooses which red surface reaches the color attachment.</p>
+
+    <h2 id="draw-expanded-outline" tabindex="-1">Second draw: expand the mesh and test stencil</h2>
+    <p>The outline pipeline draws the same 94,194 indices again; it does not build a separate outline mesh. Its vertex shader moves each position along its object-space normal before applying the same model and projection matrices:</p>
+    <pre tabindex="0" aria-label="Expand the Venus mesh along its normals in WGSL"><code><span class="code-keyword">let</span> position = vec4&lt;f32&gt;(
+    input.position + input.normal * uniforms.outline_width,
+    1.0,
+);
+<span class="code-keyword">return</span> uniforms.projection * uniforms.model * position;</code></pre>
+    <p>The expanded copy overlaps most of the mask stamped by the first draw. A <code>NotEqual</code> stencil comparison rejects those samples because their stored value is already 1. Only the extra ring outside the original footprint begins with 0, passes the comparison, and reaches the white outline fragment shader.</p>
+    <p>Depth comparison is <code>Always</code> and depth writes are disabled for this draw, so the original depth buffer cannot hide that exterior ring. Both pipelines disable face culling. This works well for the closed, smooth statue, but normal expansion is not a universal outline solution: hard edges, split normals, open geometry, or a width that is too large can produce gaps and uneven thickness.</p>
+
+    <h2 id="depth-stencil-pass" tabindex="-1">Configure depth, stencil, and pass order</h2>
+    <p>A single-sampled <code>Depth24PlusStencil8</code> texture provides both depth and stencil aspects. At the start of the scene pass, depth clears to 1.0 and stencil clears to 0. The code sets reference 1 once, binds the uniform and geometry buffers once, then switches pipelines between the two indexed draws.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="stencil-pipelines-caption" tabindex="0">
+      <table>
+        <caption id="stencil-pipelines-caption">Stencil outline pipeline states</caption>
+        <thead>
+          <tr><th scope="col">Draw</th><th scope="col">Depth write</th><th scope="col">Depth compare</th><th scope="col">Stencil compare</th><th scope="col">Stencil operations</th><th scope="col">Color result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Toon model</th><td>Enabled</td><td><code>LessEqual</code></td><td><code>Always</code></td><td><code>Replace</code> on fail, depth-fail, and pass</td><td>Five-band red shading</td></tr>
+          <tr><th scope="row">Expanded outline</th><td>Disabled</td><td><code>Always</code></td><td><code>NotEqual</code></td><td><code>Keep</code> on fail/depth-fail; <code>Replace</code> on pass</td><td>White outside the original mask</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Both states use front and back stencil faces with <code>0xff</code> read and write masks. The outline pass replaces the surviving exterior samples with 1, although no later model draw consumes that updated value. After the scene pass ends, a separate color-load pass adds the bundled Vazirmatn diagnostic overlay. Its text reports the frame interval, estimated FPS, and GPU name; the milliseconds are calculated as <code>1000 / fps</code> after the default sampling interval, not measured with GPU timestamps.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU stencil buffer example"><code>cargo run --example stencilbuffer</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU stencil buffer example"><code>scripts/build-wasm.sh --release stencilbuffer
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/stencilbuffer/</code> in a browser with WebGPU support. Native execution reads <code>assets/models/venus.gltf</code> from the checkout; the WASM build fetches the copied asset from the same local site. The geometry buffer is embedded inside that file, and the shader and overlay font are embedded in the program, so the demo has no third-party runtime asset dependency. The article and screenshot remain readable if WebGPU is unavailable.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Adjust the <code>radius * 0.025</code> outline width and observe how object-space expansion changes across the silhouette.</li>
+      <li>Replace the five fixed toon thresholds with a one-dimensional ramp texture or a configurable uniform.</li>
+      <li>Change the stencil reference and masks, then inspect how comparison and write masks affect the two draws.</li>
+      <li>Add a second occluding model and decide whether the outline should respect scene depth or remain visible through it.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/stencilbuffer.rs">Read the stencil buffer source &nearr;</a>
+      <a href="../gears/">&larr; Previous: Procedural WebGPU gears</a>
+      <a href="../gltfskinning/">Next: WebGPU glTF vertex skinning &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

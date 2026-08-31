@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Bloom in Rust: Separable Gaussian Blur with wgpu",
+  "description": "Build a WebGPU bloom effect in Rust with a 256×256 glow pass, two 9-tap Gaussian blurs, and additive compositing over a Phong-lit UFO.",
+  "breadcrumbName": "WebGPU bloom",
+  "image": "bloom.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A WebGPU-rendered retro UFO with cyan windows, yellow trim, and a bright blurred tractor beam against a black background."
+}

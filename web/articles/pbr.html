@@ -1,0 +1,181 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 24</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render one procedural sphere mesh 49 times, vary gold metallic and roughness values per instance, and evaluate a compact GGX and Schlick specular model under four moving or fixed lights.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="PBR Basic demo at a glance">
+      <div><dt>Spheres</dt><dd>49</dd></div>
+      <div><dt>Lights</dt><dd>4</dd></div>
+      <div><dt>Scene draws</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#compare-metallic-and-roughness">Compare metallic and roughness</a></li>
+        <li><a href="#generate-sphere-mesh">Generate one sphere mesh</a></li>
+        <li><a href="#pack-material-instances">Pack 49 material instances</a></li>
+        <li><a href="#bind-pbr-resources">Bind the PBR resources</a></li>
+        <li><a href="#evaluate-ggx-specular-brdf">Evaluate the GGX specular BRDF</a></li>
+        <li><a href="#render-instanced-grid">Render the instanced grid</a></li>
+        <li><a href="#animate-four-lights">Animate four lights</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="compare-metallic-and-roughness" tabindex="-1">Compare metallic and roughness across one grid</h2>
+    <p>The <a href="../shadowmappingomni/#about">previous omnidirectional shadow mapping example</a> projects visibility from a point light in every direction. PBR Basic removes the shadow map and focuses on how a microfacet specular response changes as metallic and roughness values move across 49 otherwise identical gold spheres. One indexed instanced draw keeps the geometry and material comparison compact.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/657a1bca82bacf4017c814077c7ed8391e2d4893">original PBR examples commit</a> introduced the grid, procedural mesh, GGX and Schlick shader, four-light animation, screenshots, and web registration. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbr.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbr.wgsl">WGSL shader</a> preserve that design. Later changes <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modernized the WebAssembly entry point</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">removed an obsolete clip-space correction</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/21636cd62fd68f378d72693382c2b9af1cbcf811">made output encoding follow the surface format</a>, and <a href="https://github.com/PooyaEimandar/webgpu/commit/de16e06e35263457f2b71db9ab55b4f2376f21f8">bounded normalized animation time</a>. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/pbr.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The same gold sphere ranges from broad, dim highlights to tight reflections as roughness and metallic values change. Animated and fixed white lights make the response visible from several directions.</figcaption>
+    </figure>
+
+    <h2 id="generate-sphere-mesh" tabindex="-1">Generate one sphere mesh in Rust</h2>
+    <p>The renderer makes no runtime model, image, material-texture, or shader request. Rust generates a radius-one latitude-longitude sphere with 40 latitude segments and 56 longitude segments. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbr.wgsl"><code>pbr.wgsl</code> shader</a> and 122,752-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn font</a> are compiled into the program.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbr-geometry-caption" tabindex="0">
+      <table>
+        <caption id="pbr-geometry-caption">PBR Basic procedural geometry and material-instance storage</caption>
+        <thead>
+          <tr><th scope="col">Data</th><th scope="col">Items</th><th scope="col">Stride</th><th scope="col">GPU payload</th><th scope="col">Per-frame use</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sphere vertices</th><td>2,337</td><td>24 bytes</td><td>56,088 bytes</td><td>Reused by 49 instances</td><td>Position and normal</td></tr>
+          <tr><th scope="row"><code>u32</code> indices</th><td>13,440</td><td>4 bytes</td><td>53,760 bytes</td><td>4,480 submitted triangles per instance</td><td>Triangle-list topology</td></tr>
+          <tr><th scope="row">Material instances</th><td>49</td><td>32 bytes</td><td>1,568 bytes</td><td>One record per sphere</td><td>Position, roughness, color, and metallic</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The vertex loops include both ends of each angular range, producing 41 latitude rows and 57 vertices per row. Positions and normals each use three <code>f32</code> values. The indexed loops add two triangles for every latitude-longitude cell, giving 13,440 indices and 4,480 submitted triangles.</p>
+    <p>This straightforward topology duplicates the longitudinal seam and every pole position. At the top and bottom, 112 submitted triangles per sphere collapse to zero area. The GPU still receives all 4,480 triangles; 4,368 are geometrically nondegenerate. Across 49 instances, the scene submits 219,520 triangles, including 5,488 pole degenerates.</p>
+
+    <h2 id="pack-material-instances" tabindex="-1">Pack 49 material instances</h2>
+    <p>The grid is seven spheres wide and seven deep with 2.5 units between centers. X changes metallic while Z changes roughness. Both axes span &minus;8.75 through 6.25 and are centered on &minus;1.25, which matches the camera target. Radius-one spheres therefore keep a half-unit gap.</p>
+    <pre tabindex="0" aria-label="Build metallic and roughness values for the PBR instance grid"><code><span class="code-keyword">let</span> metallic = (x as f32 / 6.0).clamp(0.1, 1.0);
+<span class="code-keyword">let</span> roughness = (y as f32 / 6.0).clamp(0.05, 1.0);
+
+InstanceData {
+    position: [(x as f32 - 3.5) * 2.5, 0.0,
+               (y as f32 - 3.5) * 2.5],
+    roughness,
+    color: [1.0, 0.765557, 0.336057],
+    metallic,
+}</code></pre>
+    <p>Metallic values are 0.1, one sixth, one third, 0.5, two thirds, five sixths, and 1. Roughness begins at 0.05 and then follows the same fractions. The grid deliberately has no fully dielectric metallic value of 0. Each instance record supplies shader locations 2 through 5 with no per-frame mutation.</p>
+    <p>A model matrix rotates the source mesh &minus;90&deg; around Y before adding the instance translation. Because positions and normals rotate together and the mesh is a perfect sphere, this transform has no visible effect.</p>
+
+    <h2 id="bind-pbr-resources" tabindex="-1">Bind one uniform and one surface-size depth image</h2>
+    <p>The example owns four fixed buffers. Its 208-byte uniform contains a view-projection matrix, model matrix, camera vector, and four light vectors. One bind group exposes only that buffer to the vertex and fragment stages. There are no material texture or sampler bindings, dynamic offsets, immediate data, or push constants.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbr-resources-caption" tabindex="0">
+      <table>
+        <caption id="pbr-resources-caption">PBR Basic buffers, bindings, attachments, and update cadence</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">How it changes</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sphere vertices</th><td>56,088 bytes</td><td>Initialized once</td><td>Shared positions and normals</td></tr>
+          <tr><th scope="row">Sphere indices</th><td>53,760 bytes</td><td>Initialized once</td><td>Shared triangle list</td></tr>
+          <tr><th scope="row">Material instances</th><td>1,568 bytes</td><td>Initialized once</td><td>49 transforms and material parameters</td></tr>
+          <tr><th scope="row">Scene uniforms</th><td>208 bytes</td><td>Fully rewritten every update and resize</td><td>Camera, model, transfer exponent, and four lights</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Recreated on resize</td><td>Depth-tests the sphere grid</td></tr>
+          <tr><th scope="row">Surface color</th><td>Adapter-selected surface format</td><td>Presented every frame</td><td>Receives PBR color directly</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed example-owned buffer payload totals 111,624 bytes. The depth image has one mip, one layer, and one sample with <code>RENDER_ATTACHMENT | TEXTURE_BINDING</code> usage. At four bytes per texel it needs <code>width * height * 4</code> logical bytes, or 3,686,400 bytes at the native default 1280&times;720 size. Its comparison sampler and texture-binding capability are not used here.</p>
+    <p>The scene pipeline uses triangle-list topology, no face culling, no blending, and no MSAA. Depth writes are enabled with <code>LessEqual</code>. The color target is the current surface format; there is no HDR intermediate or post-processing pass.</p>
+
+    <h2 id="evaluate-ggx-specular-brdf" tabindex="-1">Evaluate a compact GGX specular BRDF</h2>
+    <p>The fragment shader forms a normalized view vector and, for each of four lights, a normalized vector from the fragment to the light position. It evaluates a GGX normal-distribution term, Schlick-GGX visibility, and Schlick Fresnel:</p>
+    <pre tabindex="0" aria-label="Evaluate GGX distribution, geometry, and Fresnel terms in WGSL"><code><span class="code-keyword">let</span> alpha = roughness * roughness;
+<span class="code-keyword">let</span> alpha2 = alpha * alpha;
+<span class="code-keyword">let</span> d = alpha2 /
+    (PI * denom * denom);
+
+<span class="code-keyword">let</span> k = ((roughness + 1.0) *
+         (roughness + 1.0)) / 8.0;
+<span class="code-keyword">let</span> g = geometry_nl * geometry_nv;
+
+<span class="code-keyword">let</span> f0 = mix(vec3&lt;f32&gt;(0.04),
+             material_color, vec3&lt;f32&gt;(metallic));
+<span class="code-keyword">let</span> f = f0 + (vec3&lt;f32&gt;(1.0) - f0) *
+    pow(1.0 - dot_nv, 5.0);</code></pre>
+    <p>The shader divides <code>D * F * G</code> by <code>max(4 * NdotL * NdotV, 0.001)</code>, multiplies the result by <code>NdotL</code>, and sums four contributions. It then adds <code>material_color * 0.02</code> and multiplies the accumulated radiance by 4.</p>
+    <p>This is a focused specular demonstration rather than a complete energy-conserving metallic-roughness renderer. It has no diffuse term such as <code>kD * albedo / PI</code>. Schlick Fresnel uses <code>NdotV</code> where a conventional Cook-Torrance implementation evaluates <code>HdotV</code>. The four positional lights also have no color, intensity, range, or inverse-square attenuation.</p>
+    <p>Before writing the result, Rust stores an output exponent in <code>cam_pos.w</code>. It is 1 on an sRGB surface, allowing hardware encoding, and <code>1 / 2.2</code> on a linear surface for approximate manual encoding. This avoids the earlier version's double encoding on sRGB swapchains, but the direct surface path still has no exposure, tone mapping, or HDR headroom.</p>
+
+    <h2 id="render-instanced-grid" tabindex="-1">Render the instanced grid in one scene draw</h2>
+    <p>The first pass clears surface color to near-black <code>(0.02, 0.022, 0.028, 1)</code> and depth to 1. It binds the scene pipeline, uniform group, shared sphere buffers, and instance buffer before issuing one <code>draw_indexed</code> call over all 49 instances.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbr-passes-caption" tabindex="0">
+      <table>
+        <caption id="pbr-passes-caption">PBR Basic render passes and submitted draw work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draws</th><th scope="col">Submitted work</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">PBR scene</th><td>Surface color + surface-size depth</td><td>1 indexed instanced draw</td><td>658,560 index invocations; 219,520 triangles</td><td>49 shaded gold spheres</td></tr>
+          <tr><th scope="row">Text overlay</th><td>Load surface color; no depth</td><td>1 framework glyph draw when text is visible</td><td>Glyph count varies with GPU and FPS text</td><td>Title, GPU information, FPS, and material name</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A frame therefore records two render passes. The example owns one scene pipeline and one bind group; Glyphon supplies its own text pipeline, atlas group, viewport group, and instanced glyph draw. Overlay preparation and atlas trimming run every frame, while the displayed FPS is CPU frame cadence sampled over approximately 500 ms rather than a GPU timestamp.</p>
+
+    <h2 id="animate-four-lights" tabindex="-1">Animate four lights around a fixed camera</h2>
+    <p>The camera stays at <code>(12, 15.5, 5)</code> and looks toward the grid center at <code>(-1.25, 0, -1.25)</code>. Its right-handed perspective uses a 60&deg; vertical field of view, current surface aspect, and near and far planes of 0.1 and 256. Resizing recreates depth, rebuilds overlay placement, and rewrites the uniform for the new aspect.</p>
+    <p>Normalized animation time advances by <code>delta_seconds * 0.25</code> and keeps its fractional part, producing a four-second cycle. One light circles the grid with radius 20 at Y&nbsp;=&nbsp;11.25. A second ranges from &minus;20 to 20 on X and 7.25 to 15.25 on Y while Z stays 15. The other two remain at <code>(15, 11.25, 15)</code> and <code>(15, 11.25, -15)</code>.</p>
+    <pre tabindex="0" aria-label="Animate the two moving PBR light positions in Rust"><code><span class="code-keyword">let</span> lights = [
+    [phase.sin() * 20.0, 11.25,
+     phase.cos() * 20.0, 1.0],
+    [phase.cos() * 20.0,
+     11.25 + phase.sin() * 4.0,
+     15.0, 1.0],
+    <span class="code-comment">// Two static lights follow.</span>
+];</code></pre>
+    <p>The complete 208-byte uniform is rewritten every normal update. There are no keyboard, mouse, pointer, touch, camera, or material controls. The 22 px Vazirmatn overlay displays “PBR basic,” GPU device information, FPS, and “material: Gold.”</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU PBR example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU PBR Basic example"><code>cargo run --example pbr</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU PBR Basic example"><code>scripts/build-wasm.sh --release pbr
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/pbr/</code> in a browser with WebGPU support. The demo requires no optional WebGPU feature and uses downlevel default limits. Native and WebAssembly execute the same generated geometry, two passes, and WGSL with no rendering fallback. Browser startup downloads the JavaScript module and WebAssembly binary, but no separate scene data.</p>
+    <p>The example intentionally keeps its PBR ingredients visible, but it omits diffuse energy conservation, distance attenuation, light colors, shadows, environment lighting, texture maps, normal mapping, HDR rendering, tone mapping, MSAA, face culling, and controls. Directly adding four unattenuated specular responses and scaling them by 4 is useful for comparison, not a calibrated lighting model.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Add a Lambert or Burley diffuse lobe with metallic energy conservation, then include a true metallic-zero column.</li>
+      <li>Evaluate Schlick Fresnel with <code>HdotV</code>, add radiometric light intensity and inverse-square attenuation, and compare the highlights.</li>
+      <li>Remove degenerate pole triangles or generate an indexed icosphere, then compare vertex and rasterization work.</li>
+      <li>Render to an HDR target, add exposure and tone mapping, and continue to the texture and image-based-lighting examples.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbr.rs">Read the PBR Basic source &nearr;</a>
+      <a href="../shadowmappingomni/">&larr; Previous: WebGPU omnidirectional shadow mapping</a>
+      <a href="../pbrtexture/">Next: WebGPU PBR texture &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

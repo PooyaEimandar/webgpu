@@ -1,0 +1,9 @@
+{
+  "title": "Ray-Traced glTF Animation in WebGPU with Rust and WGSL",
+  "description": "Ray trace an animated glTF character in WebGPU: CPU-skin Jax, rebuild a median BVH, traverse it in WGSL, cast shadows, and accumulate reflections.",
+  "breadcrumbName": "Ray-traced glTF animation",
+  "image": "raytracinggltf.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Animated Jax rabbit character ray traced between reflective orange and blue spheres, cyan and yellow boxes, and a checkerboard floor."
+}

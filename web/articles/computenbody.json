@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU N-Body Simulation in Rust: 12,288 GPU Particles",
+  "description": "Build a WebGPU N-body simulation in Rust and wgpu: calculate all-pairs gravity with tiled WGSL compute shaders, then render 12,288 additive billboards.",
+  "breadcrumbName": "WebGPU N-body simulation",
+  "image": "computenbody.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "WebGPU N-body simulation showing six colorful particle clusters interacting in 3D space, with live controls open."
+}

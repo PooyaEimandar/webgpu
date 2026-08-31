@@ -1,0 +1,9 @@
+{
+  "title": "Resident Evil 2 Fixed-Camera Rendering with WebGPU and Rust",
+  "description": "Build a Resident Evil-style WebGPU scene in Rust with fixed camera cuts, glTF skinning, tank controls, pre-rendered backgrounds, and debug overlays.",
+  "breadcrumbName": "WebGPU Resident Evil fixed-camera scene",
+  "image": "residentevil2.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Claire Redfield standing before the rainy R.P.D. front gate in a WebGPU fixed-camera scene with a small status and model-credit overlay."
+}

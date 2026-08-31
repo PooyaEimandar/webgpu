@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Alpha-to-Coverage in Rust: 4x MSAA Foliage",
+  "description": "Learn WebGPU alpha-to-coverage with Rust and wgpu by rendering 25 instanced oak trees with 4x MSAA, alpha-textured leaves, depth testing, and hardware resolve.",
+  "breadcrumbName": "WebGPU alpha-to-coverage foliage",
+  "image": "multisamplingalphatocoverage.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Dense grove of alpha-textured oak trees rendered with 4x WebGPU MSAA and alpha-to-coverage against a dark blue background."
+}

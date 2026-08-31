@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU PBR Textures in Rust: Cerberus Materials and IBL",
+  "description": "Render a textured Cerberus model with WebGPU and Rust using albedo, normal, AO, metallic, and roughness maps, GGX lighting, and image-based lighting.",
+  "breadcrumbName": "WebGPU PBR textures",
+  "image": "pbrtexture.jpg",
+  "imageWidth": 960,
+  "imageHeight": 540,
+  "imageAlt": "An ornate black, brass, and wood Cerberus triple-barrel pistol rendered against a sunlit bridge cubemap beside PBR controls."
+}

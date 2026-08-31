@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Multisampling in Rust: 4x MSAA with wgpu",
+  "description": "Build 4x MSAA multisampling in WebGPU with Rust and wgpu, rendering a textured Voyager glTF model to multisampled color and depth before hardware resolve.",
+  "breadcrumbName": "WebGPU 4x MSAA multisampling",
+  "image": "multisampling.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Textured Voyager spacecraft on a white background rendered with four-sample WebGPU multisampling."
+}

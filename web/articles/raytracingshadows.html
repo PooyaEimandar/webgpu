@@ -1,0 +1,118 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 39</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Trace a primary ray against ten analytic objects, launch a bounded visibility ray toward an animated point light, and turn occlusion into crisp contact shadows on spheres, boxes, and a procedural checkerboard.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Ray-traced shadows demo at a glance">
+      <div><dt>Scene objects</dt><dd>10</dd></div>
+      <div><dt>Shadow visibility</dt><dd>30%</dd></div>
+      <div><dt>Trace cap</dt><dd>1024 px</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#add-visibility-rays">Add direct-light visibility rays</a></li>
+        <li><a href="#build-shadow-scene">Build the analytic room</a></li>
+        <li><a href="#intersections">Intersect spheres, boxes, and planes</a></li>
+        <li><a href="#trace-shadows">Trace bounded hard shadows</a></li>
+        <li><a href="#compute-workload">Understand the compute workload</a></li>
+        <li><a href="#controls-limitations">Controls and limitations</a></li>
+        <li><a href="#run-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="add-visibility-rays" tabindex="-1">Add a visibility ray between each visible hit and the light</h2>
+    <p>The <a href="../computeraytracing/#about">previous compute ray tracing example</a> mixed hard shadows with stylized reflection steps. This page isolates direct-light visibility in a cleaner scene. One primary ray finds the visible surface. A second ray starts just above that surface and asks whether any other object lies before the point light. The answer is binary, so the edge remains hard.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/ebcea27866f3cc1a807e31bb542388380853d5a8">introducing ray tracing shadows commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracingshadows.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracingshadows_compute.wgsl">compute shader</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracingshadows_present.wgsl">present shader</a>, and both screenshots. A <a href="https://github.com/PooyaEimandar/webgpu/commit/8c9abf21bcb429756f93dbdf970a0044552acad3">later camera-basis fix</a> chooses Z-up when a view points almost vertically, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">current WebAssembly entry update</a> modernized startup. Rendering uses <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/raytracingshadows.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A blue central sphere, two smaller colored spheres, and three boxes cast crisp shadows on a checkerboard floor. The 1280&times;720 capture is unchanged since introduction: a 55,149-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracingshadows.jpg">JPEG</a> and 20,198-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracingshadows.webp">WebP</a>. Its overlay shows a 1024&times;576 storage target and one 120&nbsp;fps sample; neither value guarantees performance on another GPU or browser.</figcaption>
+    </figure>
+
+    <h2 id="build-shadow-scene" tabindex="-1">Build a ten-object room from typed storage records</h2>
+    <p>Each 64-byte scene record holds four <code>vec4</code> values: primary geometry, extra box extents, RGB plus specular exponent, and integer IDs. Rust writes three spheres, three axis-aligned boxes, a floor, a back plane, and two side planes into a single read-only storage buffer.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="shadow-scene-caption" tabindex="0">
+      <table>
+        <caption id="shadow-scene-caption">Objects searched by every primary ray</caption>
+        <thead><tr><th scope="col">Type</th><th scope="col">Count</th><th scope="col">Shape data</th><th scope="col">Surface treatment</th><th scope="col">Role</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Sphere</th><td>3</td><td>Center + radius</td><td>Blue, red, and green; exponents 32&ndash;48</td><td>Curved receivers and occluders</td></tr>
+          <tr><th scope="row">Box</th><td>3</td><td>Center + half extents</td><td>Cyan, yellow, and orange; exponents 20&ndash;28</td><td>Flat-faced receivers and occluders</td></tr>
+          <tr><th scope="row">Plane</th><td>4</td><td>Normal + signed distance</td><td>Checker floor, gray back, red and green sides</td><td>Room enclosure</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The fixed camera sits at <code>(0, 1.55, 8.8)</code>, looks toward <code>(0, 0.42, -1.15)</code>, and uses a 40-degree vertical field of view. The point light orbits mostly above the objects: X sweeps around &minus;1.4 with radius 2.4, Y oscillates around 5.8, and Z moves around 3.2. Animation time advances at 0.25 times elapsed wall time and wraps every cycle.</p>
+
+    <h2 id="intersections" tabindex="-1">Intersect spheres, slab-tested boxes, and infinite planes</h2>
+    <p>Spheres use the two quadratic roots and accept the far root if the near root is behind the origin. Planes solve their signed equation. Boxes use a slab test: a guarded reciprocal prevents zero direction components from producing invalid bounds, then the shader compares the largest entry distance with the smallest exit distance. The winning object also supplies a normalized surface normal, procedural color, and specular exponent.</p>
+    <pre tabindex="0" aria-label="Ray versus axis-aligned box slab intersection in WGSL"><code><span class="code-keyword">let</span> t0 = (min_bounds - ray_o) * safe_inverse(ray_d);
+<span class="code-keyword">let</span> t1 = (max_bounds - ray_o) * safe_inverse(ray_d);
+<span class="code-keyword">let</span> t_min = max(max(min(t0, t1).x, min(t0, t1).y), min(t0, t1).z);
+<span class="code-keyword">let</span> t_max = min(min(max(t0, t1).x, max(t0, t1).y), max(t0, t1).z);
+<span class="code-keyword">if</span> (t_max &lt; max(t_min, EPSILON)) { <span class="code-keyword">return</span> -1.0; }</code></pre>
+    <p>The checkerboard is not a texture. On the floor, the shader adds <code>floor(x * 0.75)</code> and <code>floor(z * 0.75)</code>, then multiplies the base gray by either 0.52 or 0.82. That keeps this example free of runtime image assets.</p>
+
+    <h2 id="trace-shadows" tabindex="-1">Trace a bounded ray and dim blocked light to 30 percent</h2>
+    <p>After the primary hit, the shader computes the exact point-to-light vector and distance. It offsets the origin by <code>normal * 0.004</code>, skips the surface's own ID, and stops at the first positive intersection nearer than the light:</p>
+    <pre tabindex="0" aria-label="Test whether another analytic object blocks the light"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; object_count(); i = i + 1u) {
+  <span class="code-keyword">if</span> (i32(scene_objects[i].ids.x) == object_id) { <span class="code-keyword">continue</span>; }
+  <span class="code-keyword">let</span> t = object_intersect(ray_o, ray_d, scene_objects[i]);
+  <span class="code-keyword">if</span> ((t &gt; EPSILON) &amp;&amp; (t &lt; max_t)) { <span class="code-keyword">return</span> true; }
+}</code></pre>
+    <p>An unblocked hit receives base color times diffuse plus a Blinn-style highlight. Diffuse has a 0.2 floor. When blocked, the complete lit color is multiplied by <code>0.3</code>, retaining visible ambient detail rather than becoming black. Distance fog blends toward a dark blue background over 24 world units.</p>
+
+    <h2 id="compute-workload" tabindex="-1">Trace at most 19 analytic intersections per active pixel</h2>
+    <p>The trace target caps its largest dimension at 1,024 while preserving aspect ratio. At the screenshot's 1024&times;576 resolution, one dispatch contains 64&times;36 workgroups and exactly 589,824 active 16&times;16 invocations. A primary ray always tests ten objects. A shadowed surface can test up to nine more after excluding itself, although early exit often stops sooner. Misses do no shadow work.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="shadow-resources-caption" tabindex="0">
+      <table>
+        <caption id="shadow-resources-caption">Core ray-traced shadow resources at 1024&times;576</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Logical layout</th><th scope="col">Bytes</th><th scope="col">Lifetime</th><th scope="col">Use</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Storage target</th><td>1024&times;576 <code>Rgba8Unorm</code></td><td>2,359,296</td><td>Recreated when capped size changes</td><td>Compute output, then sampled input</td></tr>
+          <tr><th scope="row">Scene buffer</th><td>10 &times; 64 bytes</td><td>640</td><td>Uploaded once</td><td>All analytic geometry and materials</td></tr>
+          <tr><th scope="row">Uniform buffer</th><td>4 &times; <code>vec4</code></td><td>64</td><td>Written each frame</td><td>Light, camera, dimensions, time</td></tr>
+          <tr><th scope="row">Embedded font</th><td>Vazirmatn TrueType; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td><td>122,752 stored</td><td>Overlay atlas</td><td>Runtime diagnostics</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The three passes are compute, a three-vertex full-screen presentation draw, and a color-load text overlay. The target has one mip and one sample. Linear filtering scales a capped ray image to the presentation surface; no depth attachment, blending, hardware ray-tracing API, or multisampling participates.</p>
+
+    <h2 id="controls-limitations" tabindex="-1">Controls and limitations</h2>
+    <p>There are no interactive controls. The camera is fixed, the light animates automatically, and the overlay reports frame timing, device, ten objects, shadow-ray status, and trace dimensions. The camera-basis helper contains a Z-up fallback for vertical views even though the current fixed view does not approach that singularity.</p>
+    <p>Every shadow sample is binary and uses one point light, so edges cannot soften with blocker distance. Infinite planes and axis-aligned boxes have no object transforms. The linear object list scales poorly, specular highlights are not physically based, output is clamped directly into linear <code>Rgba8Unorm</code>, and there is no anti-aliasing, transparency, refraction, global illumination, temporal accumulation, or denoising.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and modify the example</h2>
+    <p>Run the native target:</p>
+    <pre tabindex="0" aria-label="Run the native ray-traced shadows example"><code>cargo run --example raytracingshadows</code></pre>
+    <p>Build and serve the browser version:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU ray-traced shadows example"><code>scripts/build-wasm.sh --release raytracingshadows
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/raytracingshadows/</code> with WebGPU enabled. All shader and font inputs are embedded. Try sampling several points across an area light for soft shadows, returning a continuous visibility estimate, or adding a BVH before increasing the object count.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracingshadows.rs">Read the ray-traced shadows source &nearr;</a>
+      <a href="../computeraytracing/">&larr; Previous: WebGPU compute shader ray tracing</a>
+      <a href="../raytracingreflections/">Next: WebGPU ray-traced reflections &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

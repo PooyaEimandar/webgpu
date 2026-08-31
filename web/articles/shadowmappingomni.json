@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Omnidirectional Shadow Mapping in Rust",
+  "description": "Render point-light shadows in every direction with Rust and WebGPU. Build a six-face 1024×1024 floating-point cube map, store radial distance, and shade a room.",
+  "breadcrumbName": "WebGPU omnidirectional shadow mapping",
+  "image": "shadowmappingomni.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Four colored teapots inside a three-walled room, lit by a small moving point light and casting shadows in several directions."
+}

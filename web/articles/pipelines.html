@@ -1,0 +1,174 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 16</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Flatten one 67-node glTF treasure scene, draw its 6,968 triangles through Phong and toon pipelines, convert every triangle edge into a line list, and compare all three render states in adjacent WebGPU viewports.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU render pipelines demo at a glance">
+      <div><dt>Render pipelines</dt><dd>3</dd></div>
+      <div><dt>Scene triangles</dt><dd>6,968</dd></div>
+      <div><dt>Scene draws</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#compare-pipelines">Compare state objects with one scene</a></li>
+        <li><a href="#load-gltf-scene">Load and flatten the glTF asset</a></li>
+        <li><a href="#create-pipelines">Create three compatible pipelines</a></li>
+        <li><a href="#shade-phong-and-toon">Contrast Phong and toon shading</a></li>
+        <li><a href="#build-wireframe">Build a portable wireframe index buffer</a></li>
+        <li><a href="#split-viewports">Split one pass into three viewports</a></li>
+        <li><a href="#resources-and-passes">Account for resources and passes</a></li>
+        <li><a href="#camera-and-controls">Understand camera, resize, and input behavior</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="compare-pipelines" tabindex="-1">Compare render-pipeline state with one scene</h2>
+    <p>The <a href="../indirectdraw/#about">previous indirect-draw article</a> changes where a draw call reads its arguments. This example keeps the geometry, camera, uniform bind group, color target, and depth attachment constant, then changes the graphics pipeline itself. Two pipelines interpret the index stream as triangles and enter different fragment functions; the third interprets a generated index stream as independent lines.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/3eb76c9199b71db31f963c6a520d0b7e270140b8">introducing pipelines commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pipelines.rs">Rust example</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pipelines.wgsl">WGSL module</a>, treasure model, and original PNG. The <a href="https://github.com/PooyaEimandar/webgpu/commit/195f2953d9219b97d56ae856ca5722b2f26d52ac">image-loading update</a> replaced that PNG with the current JPEG and WebP. Later Rust revisions replaced internal panics with reported errors, aligned the WebAssembly entry point, and removed an obsolete projection conversion; the WGSL and glTF files remain byte-identical to their introduction. The program runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/pipelines.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The same treasure clearing appears with glossy continuous lighting, discrete toon bands, and explicit triangle edges. At 1280&times;720, the panels are 426, 426, and 428 pixels wide.</figcaption>
+    </figure>
+
+    <h2 id="load-gltf-scene" tabindex="-1">Load and flatten the glTF asset</h2>
+    <p>Before renderer initialization, <code>load_colored_gltf_scene</code> reads <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/treasure_smooth.gltf"><code>treasure_smooth.gltf</code></a>. Native builds address <code>assets/models/treasure_smooth.gltf</code>; WebAssembly uses <code>../assets/models/treasure_smooth.gltf</code>. The 285,755-byte JSON file contains its 107,040-byte binary buffer as a Base64 data URI, so startup makes one model request and no secondary buffer or texture request.</p>
+    <p>The default scene has 67 root nodes, 67 meshes, and 86 triangle primitives spread across 11 materials. The loader recursively applies each node transform, appends every primitive to one mesh, rebases its indices, and computes one axis-aligned bound. The result contains 4,050 vertices and 20,904 <code>u32</code> indices, or 6,968 triangles.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pipelines-gltf-caption" tabindex="0">
+      <table>
+        <caption id="pipelines-gltf-caption">Treasure glTF data used by the render-pipelines example</caption>
+        <thead><tr><th scope="col">Source data</th><th scope="col">Count or size</th><th scope="col">Current loader behavior</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">JSON glTF</th><td>285,755 bytes</td><td>One native read or browser fetch</td></tr>
+          <tr><th scope="row">Embedded buffer</th><td>107,040 decoded bytes</td><td>Decoded in memory; no extra request</td></tr>
+          <tr><th scope="row">Scene hierarchy</th><td>67 roots, no children</td><td>Node transforms are baked into vertices</td></tr>
+          <tr><th scope="row">Meshes and primitives</th><td>67 meshes, 86 triangle primitives</td><td>Merged into one indexed mesh</td></tr>
+          <tr><th scope="row">Materials</th><td>11</td><td>Only base-color factors become vertex color</td></tr>
+          <tr><th scope="row">Flattened geometry</th><td>4,050 vertices; 20,904 indices</td><td>Position, normal, and RGBA color</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The source primitives contain positions and normals but no <code>COLOR_0</code>. The loader supplies white, multiplies it by each primitive's material base-color factor, and stores that result in a 40-byte <code>GltfColoredVertex</code>. Position uses shader location 0, normal uses location 1, location 2 is unused, and RGBA color uses location 3. Metallic, roughness, textures, alpha modes, and the original material boundaries do not reach the pipelines.</p>
+    <p>The flattened bounds run from approximately (&minus;7.565, &minus;1.006, &minus;7.507) to (7.588, 5.846, 7.501). Their center is (0.011, 2.420, &minus;0.003), and the half-diagonal radius is about 11.201. Those values drive centering and camera distance rather than hard-coding the treasure asset's scale.</p>
+
+    <h2 id="create-pipelines" tabindex="-1">Create three compatible WebGPU pipelines</h2>
+    <p>All three pipeline objects share one layout and one 144-byte uniform buffer. The buffer contains a projection matrix, a combined view/centering matrix named <code>model</code>, and a four-component light value. Its bind group is visible to both shader stages, although the fragment functions consume only interpolated values from the vertex stage.</p>
+    <pre tabindex="0" aria-label="Create three WebGPU render pipelines from one shader module"><code><span class="code-keyword">let</span> phong = create_pipeline(
+    context, layout, shader, "vs_lit", "fs_phong",
+    wgpu::PrimitiveTopology::TriangleList,
+);
+<span class="code-keyword">let</span> toon = create_pipeline(
+    context, layout, shader, "vs_lit", "fs_toon",
+    wgpu::PrimitiveTopology::TriangleList,
+);
+<span class="code-keyword">let</span> wireframe = create_pipeline(
+    context, layout, shader, "vs_wireframe", "fs_wireframe",
+    wgpu::PrimitiveTopology::LineList,
+);</code></pre>
+    <p>The helper changes only entry points and primitive topology. Every pipeline uses the surface format with color writes and no blending, counterclockwise front faces, no face culling, one sample, and a <code>Depth32Float</code> attachment with writes enabled and <code>LessEqual</code> comparison. Because the third pipeline uses <code>LineList</code>, it does not request the optional polygon-line feature used by a native fill-mode wireframe.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pipelines-state-caption" tabindex="0">
+      <table>
+        <caption id="pipelines-state-caption">The three scene pipelines and their submitted primitives</caption>
+        <thead><tr><th scope="col">Pipeline</th><th scope="col">Vertex entry</th><th scope="col">Fragment entry</th><th scope="col">Topology</th><th scope="col">Per-frame work</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Phong</th><td><code>vs_lit</code></td><td><code>fs_phong</code></td><td>Triangle list</td><td>20,904 indices; 6,968 triangles</td></tr>
+          <tr><th scope="row">Toon</th><td><code>vs_lit</code></td><td><code>fs_toon</code></td><td>Triangle list</td><td>20,904 indices; 6,968 triangles</td></tr>
+          <tr><th scope="row">Wireframe</th><td><code>vs_wireframe</code></td><td><code>fs_wireframe</code></td><td>Line list</td><td>41,808 indices; 20,904 segments</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="shade-phong-and-toon" tabindex="-1">Contrast continuous Phong terms with discrete toon bands</h2>
+    <p><code>vs_lit</code> transforms each position into view space and passes a transformed normal, view vector, and light vector to both filled pipelines. The Phong fragment path desaturates the material color by 65%, then adds full-strength ambient color, a Lambert term scaled by 1.75, and a reflected-vector highlight with exponent 32 and strength 0.35:</p>
+    <pre tabindex="0" aria-label="WebGPU Phong fragment shading terms"><code><span class="code-keyword">let</span> diffuse = max(dot(normal, light), 0.0) * color;
+<span class="code-keyword">let</span> specular = pow(
+    max(dot(reflect(-light, normal), view), 0.0),
+    32.0,
+) * vec3&lt;f32&gt;(0.35);
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(color + diffuse * 1.75 + specular, 1.0);</code></pre>
+    <p>The toon function uses the same per-fragment normal and light vector but quantizes their dot product. Intensities at least 0.5 use a factor of 1.0; successive bands use 0.75, 0.6, 0.5, and 0.25 below thresholds 0.5, 0.35, 0.25, and 0.1. It multiplies the original material color by both that factor and 3.0, creating the bright flat bands visible in the middle panel.</p>
+    <p>These are compact teaching shaders, not energy-conserving material models. Neither path tone-maps its output, and both can produce components above 1.0 that the color target clamps. The value named <code>light_position</code> is transformed with homogeneous <code>w = 0</code> and then treated as a point by subtracting the vertex position; view translation therefore does not affect it as a true positional light would.</p>
+
+    <h2 id="build-wireframe" tabindex="-1">Build a portable wireframe index buffer</h2>
+    <p>The original 20,904-index triangle stream remains intact for the two filled draws. Initialization also walks every group of three indices and emits its three edges as six line-list indices:</p>
+    <pre tabindex="0" aria-label="Convert each indexed triangle to three WebGPU line segments"><code><span class="code-keyword">for</span> triangle <span class="code-keyword">in</span> indices.chunks_exact(3) {
+    lines.extend_from_slice(&amp;[
+        triangle[0], triangle[1],
+        triangle[1], triangle[2],
+        triangle[2], triangle[0],
+    ]);
+}</code></pre>
+    <p>Each triangle contributes three segments, so 6,968 triangles produce 20,904 segments and 41,808 indices. This shows every triangulation edge, including diagonals inside surfaces. It does not deduplicate edges shared by adjacent triangles, calculate silhouette edges, hide back lines, or add perspective-correct line thickness. Shared edges can therefore be submitted twice, and line width remains the implementation's one-pixel rasterization behavior.</p>
+    <p>The wire vertex shader uses the same projection and combined transform but passes only RGB color. Its fragment stage multiplies that color by 1.5 and writes opaque output. Depth testing still hides lines behind nearer geometry within the wireframe panel.</p>
+
+    <h2 id="split-viewports" tabindex="-1">Split one render pass into three viewports</h2>
+    <p>Landscape surfaces are divided into three columns with integer widths. The first two receive <code>floor(width / 3)</code>; the third receives the remainder. Portrait surfaces use the same rule for three rows. Before each indexed draw, <code>draw_panel</code> sets both the floating-point viewport and matching integer scissor rectangle, changes the pipeline, and submits one instance.</p>
+    <pre tabindex="0" aria-label="Draw one pipeline into its own WebGPU viewport and scissor"><code>pass.set_viewport(
+    panel.x <span class="code-keyword">as</span> f32, panel.y <span class="code-keyword">as</span> f32,
+    panel.width <span class="code-keyword">as</span> f32, panel.height <span class="code-keyword">as</span> f32,
+    0.0, 1.0,
+);
+pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
+pass.set_pipeline(pipeline);
+pass.draw_indexed(indices, 0, 0..1);</code></pre>
+    <p>All panels occupy disjoint regions of one color target and one full-surface depth image, so a single clear at the start of the scene pass is sufficient. One projection is calculated from the first panel's aspect ratio and shared by all three. Only the last panel can differ by one or two pixels after integer division, making its aspect ratio slightly different without a separate projection.</p>
+
+    <h2 id="resources-and-passes" tabindex="-1">Account for explicit buffers and two render passes</h2>
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pipelines-resources-caption" tabindex="0">
+      <table>
+        <caption id="pipelines-resources-caption">Render-pipelines example fixed GPU buffers</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Layout</th><th scope="col">Logical bytes</th><th scope="col">Use</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Colored vertices</th><td>4,050 &times; 40</td><td>162,000</td><td>Shared by all three draws</td></tr>
+          <tr><th scope="row">Triangle indices</th><td>20,904 <code>u32</code></td><td>83,616</td><td>Phong and toon</td></tr>
+          <tr><th scope="row">Line indices</th><td>41,808 <code>u32</code></td><td>167,232</td><td>Wireframe</td></tr>
+          <tr><th scope="row">Uniform</th><td>2 matrices + light vector</td><td>144</td><td>Shared bind group</td></tr>
+          <tr><th scope="row">Fixed buffer total</th><td>Excluding depth and overlay</td><td><strong>412,992</strong></td><td>Unchanged after initialization</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The <code>Depth32Float</code> image adds <code>4 &times; width &times; height</code> logical bytes. At the 1280&times;720 screenshot size, that is 3,686,400 bytes, bringing these explicit fixed buffers plus depth to 4,099,392 bytes (about 3.909 MiB) before alignment, the presentation surface, and text-overlay resources.</p>
+    <p>Each frame uses one color-and-depth scene pass for the three indexed draws, followed by one color-load pass for the text overlay. The three scene calls consume 83,616 index references in total: 20,904 for each filled panel and 41,808 for lines. The overlay reports the adapter string and CPU-sampled FPS; it does not issue GPU timestamps or compare the cost of the three pipelines.</p>
+
+    <h2 id="camera-and-controls" tabindex="-1">Understand camera, resize, and input behavior</h2>
+    <p>The model bound is translated to the origin before the view transform. With the current radius of about 11.201, the camera eye is approximately (0, 5.824, 12.097), the target is (0, &minus;1.344, 0), and the far plane is about 89.605. The vertical field of view is 60&deg; and the near plane is 0.1.</p>
+    <p>The scene is static. There are no keyboard, pointer, touch, orbit, zoom, pipeline, material, light, or animation controls. Resize is the only input-dependent scene change: it recreates the full-surface depth texture, recalculates the first-panel projection, rewrites 144 uniform bytes, and rebuilds the overlay placements. Wide windows show three columns; tall windows show three rows. During ordinary frames, only the FPS text may change.</p>
+    <p>The example's compact loader also defines its limits. It accepts triangle primitives only, substitutes +Z normals and white colors when attributes are missing, ignores material textures and PBR properties, and merges every primitive into one draw range. Node normals are transformed with the node's ordinary linear matrix rather than its inverse transpose, so non-uniform node scales in this asset can distort lighting normals. The demo is a pipeline comparison rather than a production glTF renderer.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU render pipelines example"><code>cargo run --example pipelines</code></pre>
+    <p>Build the WebAssembly target and serve the generated pages:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU render pipelines example"><code>scripts/build-wasm.sh --release pipelines
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/pipelines/</code> in a browser with WebGPU support. The treasure glTF is the only runtime scene asset. WGSL and the Vazirmatn overlay font are compiled into the native binary or WebAssembly module, while the article and screenshot remain readable if WebGPU initialization fails.</p>
+    <p>Useful extensions include adding a normal-debug or PBR pipeline, giving each panel its own projection and uniform, deduplicating wireframe edges, adding multisampling, and measuring each draw with timestamp queries on adapters that support them. A fuller glTF path could retain primitive/material boundaries, load textures, and use inverse-transpose normal transforms.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pipelines.rs">Read the render pipelines source &nearr;</a>
+      <a href="../indirectdraw/">&larr; Previous: WebGPU indirect draw</a>
+      <a href="../particlesystem/">Next: WebGPU CPU particle system &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

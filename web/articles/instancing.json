@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Instancing in Rust: 2,048 Asteroids with wgpu",
+  "description": "Render 2,048 animated asteroids in one indexed WebGPU draw with Rust, wgpu, and WGSL. Learn per-instance buffers, texture arrays, and procedural meshes.",
+  "breadcrumbName": "WebGPU instancing",
+  "image": "instancing.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Thousands of gray, brown, and white instanced asteroids forming dense rings beneath a dark star field."
+}

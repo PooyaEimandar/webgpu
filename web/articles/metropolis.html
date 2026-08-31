@@ -1,0 +1,195 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 43</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render the Crytek Sponza atrium with a GPU-skinned Jax crowd, compute frustum compaction, one indexed indirect draw, clustered Forward+ lights, cached and local shadows, reflections, probe lighting, procedural weather, volumetric fog, and a temporal post stack.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU Metropolis renderer at a glance">
+      <div><dt>Sponza triangles</dt><dd>262,266</dd></div>
+      <div><dt>Native crowd budget</dt><dd>48&ndash;384</dd></div>
+      <div><dt>Light clusters</dt><dd>3,456</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#assemble-renderer">Assemble the Metropolis renderer</a></li>
+        <li><a href="#load-sponza-jax">Load Sponza and Jax</a></li>
+        <li><a href="#animate-cull-crowd">Animate, move, and cull the crowd</a></li>
+        <li><a href="#cluster-light-shadows">Cluster lights and build shadows</a></li>
+        <li><a href="#reflections-gi">Combine reflections and probe lighting</a></li>
+        <li><a href="#particles-volumetrics">Simulate particles and volumetrics</a></li>
+        <li><a href="#frame-graph-post">Record the frame graph and post stack</a></li>
+        <li><a href="#controls-platforms">Use the controls on native and WebAssembly</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="assemble-renderer" tabindex="-1">Assemble one broad WebGPU rendering workload</h2>
+    <p>The <a href="../nanite/#about">previous Nanite-style example</a> concentrates on meshlets, page residency, hierarchical-Z rejection, and indirect geometry submission. Metropolis uses one conventional static environment and asks how many real-time systems can cooperate around it. The renderer updates one shared skeletal pose, moves a tier-sized crowd, compacts visible instances, bins local lights, builds shadows, shades into HDR, derives reflections and atmospheric effects, and resolves a dynamically scaled image through bloom, tone mapping, and anti-aliasing.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">introducing Metropolis and ReSTIR commit</a> added the wrapper, renderer modules, WGSL, assets, gallery entry, and both captures. A <a href="https://github.com/PooyaEimandar/webgpu/commit/e9b76741b194b585bb1a27e7af66cda47ac60b63">follow-up refactor</a> simplified the first implementation. The later <a href="https://github.com/PooyaEimandar/webgpu/commit/a7c72105cfea62f90893b6c9f502a08c6d8e7f79">fog and light-shafts change</a> added the froxel volume, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">geometry and presentation update</a> added the current portable ground path and revised crowd movement. Read the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/metropolis/mod.rs">Metropolis renderer</a>, its small <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/metropolis.rs">example wrapper</a>, and the <a href="https://github.com/PooyaEimandar/webgpu/tree/main/shaders">WGSL modules</a>. Application setup and rendering run through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+    <p>The current working implementation also expands shared WGSL declarations before module creation. Light, cluster, spot-shadow, attenuation, and tone-map definitions can therefore be included by several shaders without keeping duplicate structs and functions synchronized by hand.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/metropolis.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1155" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The native 1155&times;720 capture fills Sponza's nave with animated Jax instances and leaves the settings panel open. It is stored as a 211,342-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/metropolis.jpg">JPEG</a> and 106,530-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/metropolis.webp">WebP</a>, both unchanged since the introducing commit. The overlay records an Apple M2 Max, 35 fps, a historical Low-tier label, 128 crowd members, and 101 CPU-estimated visible instances. The panel shows tuned sun, light, exposure, reflection, bloom, GI, and TAA values rather than today's defaults, and the capture predates the later volumetric controls. It is a visual record, not a benchmark.</figcaption>
+    </figure>
+
+    <h2 id="load-sponza-jax" tabindex="-1">Load a 262,266-triangle atrium and one shared skinned mesh</h2>
+    <p>The shared scene loader parses <code>sponza.gltf</code>, batches its external binary, 69 material images, and committed BVH, then loads <code>jax.gltf</code> and its two dependencies. The checked-in runtime set contains 75 files and 66,810,867 stored bytes. Sponza contributes 262,266 triangles, 25 glTF materials, and 524,531 compact 32-byte BVH nodes. Metropolis expands that triangle soup to 786,798 non-indexed raster vertices and derives tangents per corner. The prebuilt BVH is retained for the optional Ultra reflection path.</p>
+    <p>The loader resizes every Sponza material to matching arrays: base color at 512&times;512 and normal plus metallic-roughness at 256&times;256. Adding Jax creates layer and material 26. The GPU upload builds complete mip chains on the CPU, averages base color in linear space, renormalizes downsampled tangent-space normals, and uses ordinary linear averaging for material data. The raster sampler enables trilinear filtering and an anisotropy clamp of eight.</p>
+    <p>Jax contains one primitive with 35,880 indexed corners, or 11,960 triangles, one 46-joint skin, and one 138-channel walking animation. Rust evaluates at most 128 joint matrices once per frame. Every crowd member then reuses that palette, and the vertex shader blends four joint matrices before applying the instance scale, yaw, and translation. “GPU-skinned crowd” describes that vertex-stage work; animation sampling and palette construction still happen on the CPU.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="metropolis-assets-caption" tabindex="0">
+      <table>
+        <caption id="metropolis-assets-caption">Metropolis external scene assets and embedded inputs</caption>
+        <thead>
+          <tr><th scope="col">Input</th><th scope="col">Files</th><th scope="col">Stored bytes</th><th scope="col">Decoded or compiled role</th><th scope="col">Repository evidence</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sponza glTF + binary</th><td>2</td><td>9,694,626</td><td>262,266 static triangles and 25 materials</td><td>glTF-Transform 1.2.3 generator metadata</td></tr>
+          <tr><th scope="row">Sponza material images</th><td>69</td><td>38,292,133</td><td>65 KTX + 4 PNG files resized into three 26-layer arrays after Jax is appended</td><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/licenses/sponza.md">Sponza license declaration</a></td></tr>
+          <tr><th scope="row">Sponza BVH</th><td>1</td><td>16,785,024</td><td>524,531 nodes plus a 32-byte validated header</td><td><code>RSTBVH01</code>, version 1</td></tr>
+          <tr><th scope="row">Jax glTF + binary + PNG</th><td>3</td><td>2,039,084</td><td>11,960 triangles, 46 joints, one walk animation, 1024&times;1024 base color</td><td>Khronos Blender glTF I/O 5.0.21 generator metadata</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>1 embedded file</td><td>122,752</td><td>HUD and egui glyph atlas</td><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL Open Font License 1.1</a></td></tr>
+          <tr><th scope="row">Metropolis WGSL</th><td>17 embedded modules</td><td>Build-time source</td><td>Graphics, compute, temporal, and post pipelines</td><td>Compiled through wgpu at startup</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The repository's Sponza declaration assigns files associated with that model to the CryEngine Limited License Agreement and its metadata documentation to CC BY 4.0. Jax's glTF generator string identifies the export tool, not the model's author or license; no Jax-specific license file is present, so this article does not infer one. The weather system is procedural and does not load the repository's particle KTX textures.</p>
+
+    <h2 id="animate-cull-crowd" tabindex="-1">Animate one pose, move tier-sized agents, and compact visible instances</h2>
+    <p>Character height is normalized to nine percent of Sponza's vertical extent. The renderer places the initial crowd on a square grid inside 55 percent of the atrium footprint, with spacing capped at 1.8 character heights. Startup adapter detection chooses 48 Low, 128 Medium, 256 High, or 384 Ultra instances. Browser startup clamps that budget to 32 even when adapter detection selected more.</p>
+    <p>Native movement uses Rapier kinematic capsules, six nested eight-waypoint routes, turn-rate limiting, simple O(N&sup2;) separation, and a thin ground box plus central rectangular boundary. It deliberately does not collide every capsule against all 262,266 Sponza triangles. WebAssembly omits Rapier and advances deterministic lane walkers that reflect at the portable floor boundary. Both paths stream the resulting 32-byte transforms to the instance buffer every frame.</p>
+    <p>On native targets, a 64-thread compute shader tests a bounding sphere against six normalized frustum planes. Surviving transforms are compacted with an atomic increment that also fills <code>instance_count</code> in a 20-byte indexed-indirect command. Jax currently has one primitive, so the forward pass binds the compacted buffer and submits one <code>draw_indexed_indirect</code>. The CPU repeats the sphere test only to print the visible count in the HUD; it does not read the GPU counter back.</p>
+    <pre tabindex="0" aria-label="Compact visible Metropolis crowd instances in WGSL"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> p = 0; p &lt; 6; p = p + 1) {
+    <span class="code-keyword">let</span> plane = cull.planes[p];
+    <span class="code-keyword">if</span> (dot(plane.xyz, center) + plane.w &lt; -radius) {
+        <span class="code-keyword">return</span>;
+    }
+}
+<span class="code-keyword">let</span> slot = atomicAdd(&amp;draw_args.instance_count, 1u);
+visible[slot] = inst;</code></pre>
+    <p>Sun-shadow rendering still draws the whole crowd, while each spot tile receives a CPU-built subset of nearby casters. If a future Jax file contains several primitives, the forward path falls back to one direct instanced draw per primitive and no longer consumes the compacted indirect command.</p>
+
+    <h2 id="cluster-light-shadows" tabindex="-1">Assign eight local lights to 3,456 Forward+ clusters</h2>
+    <p>The current light builder creates four warm/cool point lights and four downward spot lights. A 16&times;9&times;24 grid divides the camera frustum into 3,456 exponentially spaced clusters. One 64-thread compute dispatch uses 54 workgroups; every cluster tests all eight live lights and stores at most 64 indices. The buffers reserve capacity for 128 lights, but the scene currently submits eight. The static and skinned fragment shaders recover the cluster from pixel coordinates and view-space depth, then evaluate only its list with metallic-roughness BRDF terms and windowed inverse-square attenuation.</p>
+    <p>One <code>Depth32Float</code> sun map combines a static cache with dynamic crowd depth. Sponza is re-rendered only when the sun matrix changes; each frame copies the cached texture into the live map and draws every Jax instance over it. Four spot matrices occupy aligned uniform slots, and one 2&times;2 depth atlas gives each spot a viewport. These local tiles draw nearby crowd casters only. Sponza does not enter the spot atlas, and the implementation has one sun projection rather than cascaded shadow maps. Both sun and spot sampling use 3&times;3 percentage-closer filtering.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="metropolis-lighting-caption" tabindex="0">
+      <table>
+        <caption id="metropolis-lighting-caption">Fixed lighting grids and source-level workloads</caption>
+        <thead>
+          <tr><th scope="col">System</th><th scope="col">Logical size</th><th scope="col">Normal native dispatch or draw</th><th scope="col">Contribution</th><th scope="col">Boundary</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Crowd culling</th><td>48&ndash;384 instances</td><td>1&ndash;6 workgroups of 64</td><td>Compacted forward instances + indirect count</td><td>Frustum spheres only; no occlusion test</td></tr>
+          <tr><th scope="row">Light clusters</th><td>16&times;9&times;24 = 3,456</td><td>54 workgroups of 64</td><td>Up to 64 light indices per cluster</td><td>Eight lights are populated; capacity is 128</td></tr>
+          <tr><th scope="row">Irradiance probes</th><td>8&times;4&times;6 = 192</td><td>3 workgroups of 64</td><td>Four SH-L1 vectors per probe</td><td>Analytic lights; no visibility rays</td></tr>
+          <tr><th scope="row">Sun shadow</th><td>One tier-sized map</td><td>Cached Sponza + all crowd</td><td>Directional visibility</td><td>One projection, not cascades</td></tr>
+          <tr><th scope="row">Spot shadows</th><td>Four tiles in one 2&times;2 atlas</td><td>Up to four filtered crowd draws</td><td>Local spot visibility</td><td>No static Sponza casters</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="reflections-gi" tabindex="-1">Layer a static reflection probe, SSR, optional BVH rays, and SH probes</h2>
+    <p>A 256&times;256 six-face <code>Rgba16Float</code> cubemap captures static Sponza from the atrium center. The capture runs after startup and is marked stale when the sun moves, with at least 15 rendered frames between rebuilds. Half-resolution screen-space reflections march the forward depth and sample lit HDR, then fall back to that cubemap when a ray leaves the screen.</p>
+    <p>On an Ultra startup tier, the renderer additionally uploads the 524,531-node BVH and 262,266 Sponza triangles to storage buffers and builds a full-screen fragment pipeline that traces off-screen reflection rays through the hierarchy. The panel's ray-tracing checkbox selects it only when those Ultra resources exist; otherwise the renderer falls back to SSR. This path contains static Sponza only, so animated Jax and particles cannot appear as BVH hits. Particles are rendered after reflection generation specifically to prevent additive flame color from contaminating SSR without matching particle depth.</p>
+    <p>The indirect-light volume stores four first-order spherical-harmonic vectors at each of 192 probes. Its compute shader projects ambient sky and ground, the sun, and all eight punctual lights, then the forward shaders trilinearly interpolate neighboring probes. It does not trace probe rays, test Sponza visibility, retain temporal state, or implement DDGI relocation. IBL tiers set its contribution to zero, although the native compute dispatch still runs.</p>
+    <p>The Ultra tier is labeled <code>GiMode::Restir</code> in the HUD, but the current Metropolis renderer still uses this same analytic 192-probe shader. It has no GI reservoirs or ReSTIR reuse passes. The <a href="../restirdi/#about">next ReSTIR direct-illumination example</a> contains the actual reservoir workflow.</p>
+
+    <h2 id="particles-volumetrics" tabindex="-1">Simulate 11,400 particles and integrate 589,824 fog froxels</h2>
+    <p>The native particle buffer always contains 6,000 snowflakes, 5,000 rain streaks, and 400 fire sprites. A 64-thread compute shader advances all 11,400 records in 179 workgroups every frame, even when a weather group is hidden. The render stage issues separate procedural six-vertex billboard draws for enabled groups. Snow and rain use alpha blending; fire uses additive blending. All test against scene depth without writing it. Current defaults render only the 400 fire particles, positioned around four lion-eye emitters.</p>
+    <p>When fog is enabled, a 128&times;72&times;64 volume represents 589,824 froxels. The injection pass dispatches 16&times;9&times;64 = 9,216 workgroups of 8&times;8&times;1, evaluates ambient, sun, local lights, height density, shadow maps, and a Henyey-Greenstein phase term, and ping-pongs temporal scatter. A second 16&times;9 = 144-workgroup pass marches each depth column into integrated scattering and transmittance. Its history factor becomes 0.88 after the first frame; an eight-frame jitter moves the sample within each depth slice. Turning light shafts off removes shadowed direct in-scatter while retaining the participating medium.</p>
+
+    <h2 id="frame-graph-post" tabindex="-1">Resolve a dynamic-resolution HDR frame through temporal post-processing</h2>
+    <p>Metropolis allocates full-sized render targets but rasterizes into a top-left viewport scaled within the startup tier's range. After a 60-frame warmup, an exponential CPU-frame-duration average decreases scale by 0.02 above the target band and increases it by 0.01 below it. Auto-tuning can promote or demote the tier, but it preserves resource-sized values such as shadow resolution, crowd budget, and cluster capacity. The measurement is not a GPU timestamp.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="metropolis-frame-caption" tabindex="0">
+      <table>
+        <caption id="metropolis-frame-caption">Current native Metropolis frame order; conditional work is identified explicitly</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Reads</th><th scope="col">Writes</th><th scope="col">When it runs</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Cull, particle, GI, and cluster compute</td><td>Transforms, particles, lights, camera</td><td>Visible instances, indirect args, particle state, SH probes, cluster lists</td><td>Native; all four dispatches are recorded</td></tr>
+          <tr><th scope="row">2</th><td>Sun + local shadows</td><td>Static vertices, full or filtered crowd</td><td>Sun depth and optional spot atlas</td><td>Static sun cache only when dirty; crowd each frame</td></tr>
+          <tr><th scope="row">3</th><td>Volumetric injection + integration</td><td>Lights, shadows, prior scatter</td><td>Scatter history and integrated volume</td><td>Fog enabled</td></tr>
+          <tr><th scope="row">4</th><td>Forward+</td><td>Sponza arrays, skinned Jax, clusters, probes, shadows</td><td>Scaled HDR color and depth</td><td>Every frame</td></tr>
+          <tr><th scope="row">5</th><td>SSR or BVH reflection</td><td>HDR, depth, cubemap or BVH</td><td>Half-resolution reflection viewport</td><td>Every native frame; selected mode may have zero strength</td></tr>
+          <tr><th scope="row">6</th><td>Particle render</td><td>Simulated particles and depth</td><td>Loaded HDR color</td><td>Enabled native weather groups</td></tr>
+          <tr><th scope="row">7</th><td>Bloom bright + two blur passes</td><td>HDR</td><td>Two half-resolution ping-pong targets</td><td>Tier bloom enabled</td></tr>
+          <tr><th scope="row">8</th><td>Present</td><td>HDR, reflection, bloom, volume</td><td>Full-size LDR target</td><td>Every frame; ACES-fit tone map</td></tr>
+          <tr><th scope="row">9</th><td>TAA or FXAA resolve</td><td>LDR, depth, optional history</td><td>History and swapchain</td><td>Selected anti-aliasing mode</td></tr>
+          <tr><th scope="row">10</th><td>Joystick, HUD, gizmos, egui</td><td>CPU diagnostics and UI geometry</td><td>Loaded swapchain</td><td>Every frame; gizmos optional</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>FXAA is the initial Low and Medium resolve. High and Ultra start with an eight-sample Halton jitter and TAA that reconstructs world position from current depth, rejects sky, behind-camera, and off-screen history, clamps the reprojected color to the current 3&times;3 neighborhood, and blends at 0.9 before a plain final blit. Bloom uses a bright pass plus horizontal and vertical half-resolution blurs. The present shader composites reflection, bloom, and integrated fog into HDR, applies exposure and an ACES-fit curve, then writes the LDR target.</p>
+
+    <h2 id="controls-platforms" tabindex="-1">Navigate the scene and separate native features from the browser fallback</h2>
+    <p>Keyboard movement uses W, A, S, and D; arrow keys look around. Holding and dragging the left half of the surface acts as a movement stick, while the right half controls view direction, which also supports touch. Press V to cycle lit, shadow-factor, sun N&middot;L, and cluster-heat views. egui consumes pointer events over its panel before the virtual sticks.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="metropolis-controls-caption" tabindex="0">
+      <table>
+        <caption id="metropolis-controls-caption">Metropolis live control groups and current defaults before tier and WebAssembly overrides</caption>
+        <thead>
+          <tr><th scope="col">Group</th><th scope="col">Current defaults</th><th scope="col">What changes</th><th scope="col">Workload consequence</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sun</th><td>Azimuth 2.3, elevation 0.9, intensity 3.6</td><td>Directional lighting and projection</td><td>Moving it invalidates static shadow and reflection-probe caches</td></tr>
+          <tr><th scope="row">Lights</th><td>Point 6 / range 4; spot 10 / range 6; animation off</td><td>Four points and four spots; gizmos and local shadows</td><td>Ranges change cluster membership; local shadows add atlas draws</td></tr>
+          <tr><th scope="row">Weather</th><td>Snow off, rain off, fire on</td><td>Which particle ranges are drawn</td><td>All 11,400 native particles still simulate</td></tr>
+          <tr><th scope="row">Volumetrics</th><td>Fog on; density 0.05; range 45; shafts on</td><td>Density, height falloff, ambient, shaft gain, anisotropy</td><td>Fog enables 9,360 compute workgroups</td></tr>
+          <tr><th scope="row">Post and GI</th><td>Exposure 0.7; ambient 0.32; reflection 0.6; bloom 0.35; GI 0.6</td><td>Compositing and probe contribution</td><td>Tier gates actual SSR, bloom, GI, and RT availability</td></tr>
+          <tr><th scope="row">Quality and debug</th><td>Auto-tune on; AA chosen by tier; lit view</td><td>Dynamic resolution, FXAA/TAA, four diagnostics</td><td>Auto-tune does not rebuild baked-size resources</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The WebAssembly route intentionally presents a smaller workload than the native screenshot. It caps the crowd at 32, omits Rapier, GPU crowd culling, cluster assignment, probe compute, native particles, Sponza's forward draw, SSR, and BVH reflections, and submits all Jax instances directly over a procedural six-vertex ground plane. Browser startup selects FXAA and turns off local shadows, bloom, weather, fog, and shafts. It still loads the full Sponza and Jax asset set and constructs shared scene resources, so the portable visual fallback does not yet reduce network transfer proportionally.</p>
+    <p>Several <code>TierConfig</code> fields describe intended quality choices that the current frame graph does not consume directly. <code>shadow_cascades</code>, <code>contact_shadows</code>, and <code>reflection_probes</code> do not switch distinct passes; the renderer uses one sun map and always creates its static cubemap. The live cluster grid remains 16&times;9&times;24 with 64 slots regardless of tier fields. Medium's <code>Msaa4x</code> enum is mapped to FXAA, and no multisampled Metropolis pipeline is built. Ultra's ReSTIR GI label still selects the analytic probe contribution described above.</p>
+
+    <h2 id="run-example" tabindex="-1">Run the native renderer or its portable browser branch</h2>
+    <p>From a local checkout with Rust installed, run the full native Metropolis renderer:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU Metropolis example"><code>cargo run --example metropolis</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU Metropolis example"><code>scripts/build-wasm.sh --release metropolis
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/metropolis/</code> in a browser with WebGPU support. The wrapper loads the shared scene asynchronously on WebAssembly and synchronously on native, then passes the resulting assets to <code>run_metropolis</code> and <code>sib::render</code>.</p>
+    <p>This is a feature-integration demo, not a production city renderer. Static Sponza is one unculled non-indexed draw; only the crowd receives frustum compaction, with no HZB or occlusion stage. The CPU still performs crowd separation, the HUD mirrors culling on the CPU, and adaptive quality uses CPU frame delivery rather than GPU timestamps. The large asset batch and CPU-generated texture mips make startup heavy, especially in a browser.</p>
+    <p>Lighting approximations have visible boundaries. Probe GI contains no scene occlusion or temporal convergence. The static reflection cubemap cannot show Jax, weather, or moving lights between rebakes; SSR cannot recover off-screen dynamic geometry; the optional BVH only contains Sponza. Spot maps omit static casters. Volumetric history has no explicit camera-teleport detector despite the nearby comment, and the TAA path has no motion-vector target for independently moving crowd vertices.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Build a browser-specific loader that skips Sponza geometry, textures, and BVH when the portable ground path is selected.</li>
+      <li>Connect the tier fields to truly variable cluster buffers, cascaded sun shadows, contact shadows, and a real multisampled path.</li>
+      <li>Add GPU timestamps and feed dynamic resolution from measured pass cost rather than event-loop frame duration.</li>
+      <li>Add per-instance previous transforms and skinned motion vectors, then compare TAA crowd ghosting before and after.</li>
+      <li>Move static geometry to meshlets or indirect chunks and reuse the previous example's HZB for environment occlusion.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/metropolis.rs">Read the Metropolis source &nearr;</a>
+      <a href="../nanite/">&larr; Previous: WebGPU Nanite-style mesh rendering</a>
+      <a href="../restirdi/">Next: WebGPU ReSTIR direct illumination &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU HTML Mesh in Rust: Web Pages on a 3D Plane",
+  "description": "Render HTML to a 1024×576 RGBA texture and map it onto a WebGPU plane in Rust. Learn ray-mapped input, native/WASM capture, and a 2,304-shard effect.",
+  "breadcrumbName": "WebGPU HTML mesh",
+  "image": "htmlmesh.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 633,
+  "imageAlt": "A tilted HTML Mesh page with a green Click button and button counter, rendered on a dark 3D plane beside an egui control panel."
+}

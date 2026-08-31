@@ -5,11 +5,61 @@ Readers and search engines receive the complete text in the initial HTML, even
 when WebGPU is unavailable. Demos without an article keep their existing
 fullscreen layout.
 
-The triangle, vertex attributes, texture, texture cubemap, texture array, and
-texture mipmap generation examples include articles. Use their HTML as
-references for code snippets, screenshots, section links, and comparison
-tables. Keep the footer links in reading order: triangle, vertex attributes,
-texture loading, texture cubemap, texture array, then texture mipmap generation.
+Every Rust example now has an article. The reading order is:
+
+1. Triangle
+2. Vertex attributes
+3. Texture loading
+4. Texture cubemap
+5. Texture array
+6. Texture mipmap generation
+7. Text overlay
+8. Text mesh
+9. HTML mesh
+10. glTF model loading
+11. Gears
+12. Stencil buffer outlines
+13. glTF vertex skinning
+14. Instancing
+15. Indirect draw
+16. Multiple render pipelines
+17. CPU particle system
+18. Occlusion queries
+19. Radial blur
+20. Bloom
+21. Shadow mapping
+22. Cascaded shadow mapping
+23. Omnidirectional shadow mapping
+24. Basic PBR
+25. Textured PBR
+26. PBR image-based lighting
+27. Parallax occlusion mapping
+28. 4x MSAA multisampling
+29. Alpha-to-coverage
+30. Deferred shading
+31. Deferred multisampling
+32. Deferred shadows
+33. Screen-space ambient occlusion
+34. Compute particles
+35. Compute cloth
+36. Compute culling and LOD
+37. N-body simulation
+38. Compute shader ray tracing
+39. Ray-traced shadows
+40. Ray-traced reflections
+41. glTF ray tracing
+42. Nanite-style mesh rendering
+43. Metropolis renderer
+44. ReSTIR direct illumination
+45. ReSTIR global illumination
+46. Resident Evil fixed-camera scene
+47. Geometry Dash
+
+Use the existing HTML as references for code snippets, screenshots, stable
+section links, and accessible comparison tables. Keep every footer in this
+order. Triangle is the first article and therefore has no Previous link.
+Geometry Dash is the final article and its Next link returns readers to the
+complete WebGPU examples gallery.
 
 ## Add an article
 

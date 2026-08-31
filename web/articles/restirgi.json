@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU ReSTIR Global Illumination in Rust and WGSL",
+  "description": "Build ReSTIR global illumination with WebGPU, Rust, wgpu, and WGSL. Reuse indirect path reservoirs with visibility, Jacobians, temporal history, and denoising.",
+  "breadcrumbName": "ReSTIR global illumination",
+  "image": "restirgi.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Animated Jax character crossing the Crytek Sponza atrium with warm WebGPU ReSTIR global illumination and reservoir controls visible."
+}

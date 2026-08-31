@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Parallax Occlusion Mapping in Rust with wgpu",
+  "description": "Build parallax occlusion mapping in WebGPU with Rust and wgpu using a glTF plane, tangent-space lighting, layered height sampling, and KTX textures.",
+  "breadcrumbName": "WebGPU parallax occlusion mapping",
+  "image": "parallaxmapping.jpg",
+  "imageWidth": 960,
+  "imageHeight": 540,
+  "imageAlt": "Oblique WebGPU view of rocky cobblestones with simulated depth from parallax occlusion mapping."
+}

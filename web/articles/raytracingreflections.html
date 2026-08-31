@@ -1,0 +1,144 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 40</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Accumulate as many as four specular ray segments in one compute invocation, tint throughput by each material, map an uncompressed KTX texture onto two spheres, and resolve the result into a filterable WebGPU storage texture.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Ray-traced reflections demo at a glance">
+      <div><dt>Maximum segments</dt><dd>4</dd></div>
+      <div><dt>Scene objects</dt><dd>11</dd></div>
+      <div><dt>KTX mip levels</dt><dd>11</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#iterate-reflections">Iterate reflection rays in compute</a></li>
+        <li><a href="#load-grate">Decode and upload the KTX texture</a></li>
+        <li><a href="#scene-materials">Define geometry and reflective materials</a></li>
+        <li><a href="#texture-spheres">Map texture coordinates onto spheres</a></li>
+        <li><a href="#accumulate-bounces">Accumulate local light and throughput</a></li>
+        <li><a href="#frame-resources">Dispatch, present, and resize</a></li>
+        <li><a href="#controls-limitations">Controls and limitations</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="iterate-reflections" tabindex="-1">Iterate reflection rays without recursive shader calls</h2>
+    <p>The <a href="../raytracingshadows/#about">previous ray-traced shadows example</a> stopped after direct lighting and one visibility query. Reflections instead keep a ray origin, direction, RGB throughput, and accumulated color inside one invocation. A fixed WGSL loop finds the nearest surface, adds its local contribution, updates throughput, and reflects the ray. This is iterative ray tracing; <code>MAX_RECURSION</code> names the four-segment limit even though WGSL never calls the function recursively.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/2b586aa32f290477fe3db51479e56c15ae0121e4">introducing reflections commit</a> added the original <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracingreflections.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracingreflections_compute.wgsl">compute WGSL</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracingreflections_present.wgsl">present WGSL</a>, and initial screenshots. The immediately following <a href="https://github.com/PooyaEimandar/webgpu/commit/97eacee8e3510eb4807c34ca7faedd1f4e53b1d6">texture-support commit</a> added KTX loading, two textured spheres, and the current capture. The <a href="https://github.com/PooyaEimandar/webgpu/commit/8c9abf21bcb429756f93dbdf970a0044552acad3">camera-basis fallback</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a> are later changes. The demo uses <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/raytracingreflections.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A highly reflective central sphere mirrors a textured pair, four colored primitives, a checkerboard floor, and colored walls. The current 1280&times;720 image arrived with texture support and is stored as a 48,507-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracingreflections.jpg">JPEG</a> and 24,410-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracingreflections.webp">WebP</a>. The displayed frame rate is capture context, not a portable benchmark.</figcaption>
+    </figure>
+
+    <h2 id="load-grate" tabindex="-1">Decode and upload an uncompressed 11-level KTX 1 texture</h2>
+    <p>Before entering the render loop, native code reads <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/gratefloor_rgba.ktx"><code>gratefloor_rgba.ktx</code></a> from disk and WebAssembly fetches the copied relative URL. The local decoder validates the 12-byte KTX 1 identifier, little-endian marker, unsigned-byte type, one face, no array layers, and no volume depth. It accepts plain RGBA8 and this file's integer RGBA8UI header, then uploads the bytes as normalized <code>Rgba8Unorm</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="reflection-assets-caption" tabindex="0">
+      <table>
+        <caption id="reflection-assets-caption">Ray-traced reflection inputs and their current repository metadata</caption>
+        <thead><tr><th scope="col">Input</th><th scope="col">Delivery</th><th scope="col">Stored bytes</th><th scope="col">Decoded layout</th><th scope="col">Provenance and license</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>gratefloor_rgba.ktx</code></th><td>Runtime disk read or browser fetch</td><td>5,592,540</td><td>1024&times;1024 through 1&times;1; 11 RGBA8 levels; 5,592,404 texel bytes</td><td>First recorded by the texture-support commit; the file and repository provide no asset-specific author or license metadata</td></tr>
+          <tr><th scope="row"><code>raytracingreflections_compute.wgsl</code></th><td>Embedded text</td><td>8,613</td><td>281 lines</td><td>Repository source history</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>Embedded bytes</td><td>122,752</td><td>TrueType overlay font</td><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL Open Font License 1.1</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The sampler uses linear minification, magnification, and mip filtering with clamp-to-edge addressing. However, the current compute shader calls <code>textureSampleLevel(..., 0.0)</code>, so only the 1024&times;1024 base level contributes. The ten lower levels are uploaded but never selected. The texture is linear <code>Rgba8Unorm</code>, not <code>Rgba8UnormSrgb</code>; no automatic sRGB-to-linear conversion occurs.</p>
+
+    <h2 id="scene-materials" tabindex="-1">Define eleven analytic objects and per-object reflectivity</h2>
+    <p>Every 64-byte object stores geometry, box extents, RGB plus reflectivity, and type/feature IDs. The scene contains four spheres, three axis-aligned boxes, and four planes. The center sphere has reflectivity 0.88. The floor uses 0.35; colored boxes range from 0.08 to 0.18; two small spheres are marked for texturing; and the three room walls have zero reflectivity.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="reflection-scene-caption" tabindex="0">
+      <table>
+        <caption id="reflection-scene-caption">Reflection scene groups and shader behavior</caption>
+        <thead><tr><th scope="col">Group</th><th scope="col">Count</th><th scope="col">Color source</th><th scope="col">Reflectivity</th><th scope="col">Intersection</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Spheres</th><td>4</td><td>Base RGB; 2 multiply the grate sample</td><td>0.08&ndash;0.88</td><td>Two-root quadratic</td></tr>
+          <tr><th scope="row">Boxes</th><td>3</td><td>Solid cyan, yellow, and orange</td><td>0.08&ndash;0.18</td><td>Axis-aligned slab test</td></tr>
+          <tr><th scope="row">Floor</th><td>1</td><td>Procedural two-tone checker</td><td>0.35</td><td>Infinite plane</td></tr>
+          <tr><th scope="row">Walls</th><td>3</td><td>Blue-gray, red, and green</td><td>0</td><td>Infinite planes</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>All eleven objects are linearly scanned for every segment; there is no spatial hierarchy. The maximum per-pixel intersection workload is therefore 44 analytic tests before early termination. Unlike the preceding article, this shader does not cast a separate shadow ray.</p>
+
+    <h2 id="texture-spheres" tabindex="-1">Convert a sphere normal into animated texture coordinates</h2>
+    <p>The sphere normal supplies latitude and longitude. U repeats twice around the sphere, V covers 1.6 repeats, both coordinates use <code>fract</code>, and animation time scrolls U slowly. Manual wrapping means the sampler's clamp mode never sees coordinates outside the unit square.</p>
+    <pre tabindex="0" aria-label="Generate animated spherical texture coordinates in WGSL"><code><span class="code-keyword">let</span> u = atan2(normal.z, normal.x) * INV_TWO_PI + 0.5;
+<span class="code-keyword">let</span> v = asin(clamp(normal.y, -1.0, 1.0)) * INV_PI + 0.5;
+<span class="code-keyword">return</span> vec2&lt;f32&gt;(
+  fract(u * 2.0 + uniforms.params.w * 0.04),
+  fract((1.0 - v) * 1.6),
+);</code></pre>
+    <p>The sampled texel is scaled by 1.35 and mixed with a dark 0.18 fallback according to alpha, then multiplied by the sphere's base color. This is decorative modulation rather than a glTF material or physically based texture workflow.</p>
+
+    <h2 id="accumulate-bounces" tabindex="-1">Accumulate local lighting and color-tinted reflection throughput</h2>
+    <p>For each hit, a moving point light supplies diffuse and Blinn-style specular lighting. Diffuse is clamped to at least 0.6, keeping every surface bright. The shader adds the non-reflected share locally, stops on materials at or below 0.01 reflectivity, or continues from an origin offset by 0.004:</p>
+    <pre tabindex="0" aria-label="Accumulate iterative reflections in WGSL"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> bounce = 0u; bounce &lt; 4u; bounce = bounce + 1u) {
+  <span class="code-keyword">let</span> hit = intersect(ray_o, ray_d, MAX_LEN);
+  <span class="code-keyword">if</span> (hit.object_id == -1) {
+    color = color + throughput * background(ray_d);
+    <span class="code-keyword">break</span>;
+  }
+  <span class="code-keyword">let</span> reflectivity = clamp(hit.reflectivity, 0.0, 0.96);
+  color = color + throughput * shade_hit(ray_o, ray_d, hit) * (1.0 - reflectivity);
+  throughput = throughput * mix(vec3&lt;f32&gt;(reflectivity), hit.color, 0.18);
+  ray_d = reflect(ray_d, hit.normal);
+}</code></pre>
+    <p>Mixing 18% surface color into throughput creates colored reflections. It is an artistic rule rather than Fresnel reflectance or an energy-conserving BRDF. A ray that remains reflective through the fourth segment contributes no environment after the loop ends, so deeper paths are truncated rather than resolved to a background.</p>
+
+    <h2 id="frame-resources" tabindex="-1">Dispatch, present, and recreate size-dependent bindings</h2>
+    <p>At a 1280&times;720 surface, the 1,024-pixel cap produces a 1024&times;576 trace target and 64&times;36 workgroups: 589,824 active invocations. The result is linearly sampled by a procedural full-screen triangle, then a third pass loads the surface to draw diagnostics. Resizing rebuilds the storage texture and both bind groups only when its capped dimensions change.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="reflection-resources-caption" tabindex="0">
+      <table>
+        <caption id="reflection-resources-caption">Core logical GPU payload at 1024&times;576, excluding descriptors and driver overhead</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Layout</th><th scope="col">Bytes</th><th scope="col">Update path</th><th scope="col">Role</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Ray target</th><td>1024&times;576 RGBA8</td><td>2,359,296</td><td>Compute writes each frame</td><td>Trace output</td></tr>
+          <tr><th scope="row">Grate texture</th><td>11-level RGBA8 mip chain</td><td>5,592,404 texels</td><td>Uploaded once</td><td>Two sphere materials</td></tr>
+          <tr><th scope="row">Scene storage</th><td>11 &times; 64-byte records</td><td>704</td><td>Uploaded once</td><td>Geometry and materials</td></tr>
+          <tr><th scope="row">Uniform buffer</th><td>4 &times; <code>vec4</code></td><td>64</td><td>Written each frame</td><td>Light, camera, target, time</td></tr>
+          <tr><th scope="row">Total listed GPU payload</th><td>&mdash;</td><td><strong>7,952,468</strong></td><td>&mdash;</td><td>About 7.58 MiB</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="controls-limitations" tabindex="-1">Controls and limitations</h2>
+    <p>The camera is fixed at <code>(0, 1.35, 5.4)</code>, looking near <code>(0, 0.8, -0.9)</code> with a 43-degree field of view. There are no input controls. Light position and texture U offset animate automatically. The overlay reports timing, device, 11 objects, two textured spheres, four reflection segments, texture dimensions, and trace dimensions.</p>
+    <p>The renderer has no shadow rays, triangle meshes, acceleration structure, Fresnel term, rough reflections, refraction, anti-aliasing, temporal accumulation, denoiser, HDR target, tone mapper, or sRGB conversion. All materials are hand-authored constants. The KTX decoder is intentionally narrow and the texture's asset-specific license is undocumented in this repository, which should be resolved before redistributing it outside the project.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native ray-traced reflections example"><code>cargo run --example raytracingreflections</code></pre>
+    <p>Build and serve WebAssembly:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU ray-traced reflections example"><code>scripts/build-wasm.sh --release raytracingreflections
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/raytracingreflections/</code>. Keep <code>assets/textures/gratefloor_rgba.ktx</code> at the copied relative path. Useful experiments include selecting mip levels from ray differentials, adding shadow visibility to <code>shade_hit</code>, introducing roughness, or replacing the analytic scan with triangle and BVH traversal.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracingreflections.rs">Read the ray-traced reflections source &nearr;</a>
+      <a href="../raytracingshadows/">&larr; Previous: WebGPU ray-traced shadows</a>
+      <a href="../raytracinggltf/">Next: WebGPU glTF ray tracing &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

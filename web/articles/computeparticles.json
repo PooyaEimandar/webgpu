@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Compute Particles in Rust: 262,144 GPU Billboards",
+  "description": "Build a WebGPU compute particle system in Rust and wgpu: update 262,144 particles, ping-pong storage buffers, and render additive textured billboards.",
+  "breadcrumbName": "WebGPU compute particles",
+  "image": "computeparticles.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "WebGPU compute particles forming dense cyan, magenta, yellow, and green ribbons around a moving repulsor."
+}

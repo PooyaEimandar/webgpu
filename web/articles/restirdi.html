@@ -1,0 +1,185 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 44</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Trace the Crytek Sponza atrium and an animated 11,960-triangle Jax character, stream twelve local-light candidates into a 48-byte reservoir per pixel, reuse survivors across time and neighboring pixels, and reconstruct the noisy HDR estimate with temporal accumulation and four a-trous passes.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU ReSTIR direct illumination at a glance">
+      <div><dt>Static triangles</dt><dd>262,266</dd></div>
+      <div><dt>Default DI candidates</dt><dd>12 per pixel</dd></div>
+      <div><dt>Normal compute passes</dt><dd>8 per frame</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#resample-direct-light">Resample direct-light candidates</a></li>
+        <li><a href="#load-two-scenes">Load Sponza and animated Jax</a></li>
+        <li><a href="#trace-primary-rays">Trace primary rays and motion</a></li>
+        <li><a href="#stream-di-candidates">Stream local-light candidates</a></li>
+        <li><a href="#reuse-reservoirs">Reuse reservoirs across time and space</a></li>
+        <li><a href="#shade-filter-present">Shade, denoise, and present</a></li>
+        <li><a href="#resources-controls">Resources, controls, and frame flow</a></li>
+        <li><a href="#limits">Understand the limits</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="resample-direct-light" tabindex="-1">Resample direct-light candidates instead of shading every light</h2>
+    <p>The <a href="../metropolis/#about">previous Metropolis renderer</a> combines a broad GPU-driven feature set. This example isolates one harder lighting problem: choosing a useful local-light sample for every visible point without keeping every candidate. Each pixel streams weighted point- and spot-light samples into one reservoir. Temporal reprojection contributes a prior-frame survivor, spatial reuse contributes compatible neighboring survivors, and a final visibility test is reserved for the selected sample.</p>
+    <p>The finite sun follows a separate deterministic disk estimator. The ReSTIR DI reservoir therefore chooses among four point and four spot lights, not all nine configured lights. This separation avoids spending stochastic reservoir strata on the dominant source and supplies a stable soft-shadow coverage guide for accumulation and denoising.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">introducing Metropolis and ReSTIR commit</a> added both wrappers, the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/renderer.rs">renderer</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/scene.rs">scene loader</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/restir/accel.rs">BVH code</a>, three shaders, model assets, and captures. The later <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">geometry and presentation update</a> revised the shared implementation. The small <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/restirdi.rs"><code>restirdi</code> wrapper</a> selects <code>RestirMode::DirectIllumination</code>; rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/restirdi.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The 1280&times;720 capture shows Jax crossing the Sponza atrium, a soft floor shadow, and the full egui panel. It is stored as a 298,874-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.jpg">JPEG</a> and 115,138-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.webp">WebP</a>. The panel records tuned values&mdash;16 candidates, eight neighbors, radius 36, and history 64&mdash;rather than the current 12, 2, 12, and 20 defaults. Its Apple M2 Max timing and 1080&times;678 ray target describe that capture only.</figcaption>
+    </figure>
+
+    <h2 id="load-two-scenes" tabindex="-1">Load a static Sponza BVH and refit animated Jax bounds</h2>
+    <p>The loader reads Sponza's glTF, binary geometry, 69 referenced textures, and committed BVH. The static scene contains 262,266 triangles, 25 materials, and 524,531 BVH nodes&mdash;one leaf per triangle in a full binary hierarchy. Every compact node is 32 bytes. Its header records magic <code>RSTBVH01</code>, format version 1, node stride, triangle and node counts, and a geometry fingerprint, so a stale hierarchy is rejected instead of silently pairing with different geometry.</p>
+    <p>Jax adds one material and 11,960 animated triangles. Rust builds its 23,919-node topology once, advances skeletal animation every update, and at most every 1/30 second regenerates posed triangles and refits bounds without changing child indices. Before the new pose is uploaded, the prior 128-byte triangle records are packed two per 16-texel row in an <code>Rgba32Float</code> texture. The primary shader uses that pose to generate object motion for temporal reprojection.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirdi-assets-caption" tabindex="0">
+      <table>
+        <caption id="restirdi-assets-caption">ReSTIR DI model, texture, shader, and font inputs</caption>
+        <thead><tr><th scope="col">Input</th><th scope="col">Stored bytes</th><th scope="col">Runtime treatment</th><th scope="col">Role or provenance</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sponza.gltf"><code>sponza.gltf</code></a> + <code>sponza.bin</code></th><td>166,406 + 9,528,220</td><td>262,266 triangles; 25 materials</td><td>Crytek Sponza geometry and material graph</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sponza.bvh"><code>sponza.bvh</code></a></th><td>16,785,024</td><td>524,531 versioned 32-byte nodes</td><td>Prebuilt static SAH hierarchy</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/tree/main/assets/textures/sponza">Sponza texture set</a></th><td>38,292,133</td><td>69 files resampled into material arrays</td><td>Model files use the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/licenses/sponza.md">CryEngine Limited License Agreement</a></td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a> + <code>jax.bin</code> + <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png">base color</a></th><td>68,324 + 1,957,752 + 13,008</td><td>11,960 skinned triangles; one appended material</td><td>Dynamic occluder and receiver; no separate Jax license is documented here</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir.wgsl"><code>restir.wgsl</code></a></th><td>80,724</td><td>Primary, DI temporal, spatial, and DI shade entries</td><td>Ray traversal, reservoirs, lighting, and accumulation</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir_atrous.wgsl">A-trous WGSL</a> + <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/restir_present.wgsl">present WGSL</a></th><td>12,123 + 12,846</td><td>Four wavelet dispatches + full-screen triangle</td><td>Variance filtering, reconstruction, and ACES fit</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn font</a></th><td>122,752</td><td>Embedded into the executable</td><td>egui controls; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Native loads the Sponza resources in parallel filesystem threads. WebAssembly fetches the batch concurrently inside a temporary Worker and then starts <code>sib::render</code> asynchronously. Both paths consume the same prebuilt static BVH; the browser does not rebuild a half-million-node hierarchy at startup.</p>
+
+    <h2 id="trace-primary-rays" tabindex="-1">Trace primary rays and write a 64-byte G-buffer</h2>
+    <p>The camera uses a 55-degree perspective projection with 0.05 and 120 near and far planes. Each frame applies one point from a 16-step Halton(2,3) jitter sequence, reconstructs a world ray, and tests the static and dynamic BVHs. Traversal uses an explicit 128-entry stack, visits the nearer child first, and alpha-tests non-opaque material samples at mip zero. The closest hit is expanded into world position, geometric or normal-mapped normal, base color, roughness, metallic value, triangle index, and object class.</p>
+    <p>Four <code>vec4</code> values form each 64-byte G-buffer record. The fourth vector stores previous-frame UV, triangle index, and validity. Static motion comes from the previous view-projection matrix. A Jax hit also reconstructs the same barycentric point from the prior-pose triangle texture before projecting it, so camera motion and skeletal motion both participate in reprojection.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirdi-layout-caption" tabindex="0">
+      <table>
+        <caption id="restirdi-layout-caption">Core ReSTIR DI storage layouts</caption>
+        <thead><tr><th scope="col">Record or resource</th><th scope="col">Stride or format</th><th scope="col">Fields or count</th><th scope="col">Purpose</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Triangle</th><td>128 bytes</td><td>3 positions, 3 normals, UVs, material and object flag</td><td>Static and animated ray geometry</td></tr>
+          <tr><th scope="row">BVH node</th><td>32 bytes</td><td>AABB + two child or leaf words</td><td>Software ray traversal</td></tr>
+          <tr><th scope="row">G-buffer pixel</th><td>64 bytes</td><td>Position/depth, normal/roughness, albedo/metallic, reprojection data</td><td>Reuse, filtering, and presentation guides</td></tr>
+          <tr><th scope="row">Reservoir pixel</th><td>48 bytes</td><td>Sample position/normal/radiance, target, weight sum, packed metadata</td><td>One selected local-light sample</td></tr>
+          <tr><th scope="row">Reservoir metadata</th><td>32 bits</td><td>8-bit kind, 16-bit count, 8-bit age</td><td>Light index, represented sample count, temporal age</td></tr>
+          <tr><th scope="row">Scene uniforms</th><td>256 bytes</td><td>2 matrices, camera/time, counts, resolution, 5 settings vectors</td><td>One complete queue write per rendered frame</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="stream-di-candidates" tabindex="-1">Stream twelve unshadowed local-light candidates into one reservoir</h2>
+    <p>For a valid surface, the DI candidate pass randomly chooses among light indices 1 through 8: four finite point emitters and four disk-shaped spot emitters. Each candidate samples a position on its source, evaluates the unoccluded GGX metallic-roughness BRDF contribution, converts it to a luminance target, and multiplies by eight to account for uniform light selection. The default loop considers twelve candidates; the UI exposes 1 through 16, while the shader clamps programmatic input to 32.</p>
+    <pre tabindex="0" aria-label="Stream a weighted ReSTIR candidate into one WGSL reservoir"><code><span class="code-keyword">let</span> previous_weight = reservoir.weight_sum;
+<span class="code-keyword">let</span> total_weight = previous_weight + candidate_weight;
+<span class="code-keyword">if</span> (xi * total_weight &lt; candidate_weight) {
+  reservoir.sample_position = sample.sample_position;
+  reservoir.sample_normal = sample.sample_normal;
+  reservoir.radiance = sample.radiance;
+  reservoir.target_value = sample.target_value;
+}
+reservoir.weight_sum = total_weight;
+reservoir.count += candidate_count;</code></pre>
+    <p>The actual WGSL packs count and age into <code>metadata</code> rather than exposing a <code>count</code> field. Candidate generation does not cast a shadow ray. Temporal and spatial re-evaluation also use an unshadowed target. Final shading tests only the surviving local-light sample, avoiding separate random visibility decisions at every reuse stage.</p>
+
+    <h2 id="reuse-reservoirs" tabindex="-1">Reproject history, reject mismatches, and rank reciprocal neighbors</h2>
+    <p>Temporal reuse begins at the stored previous UV. It rejects invalid history, static/dynamic class changes, material changes, normal disagreement, and excessive position separation. Dynamic hits must retain the same triangle index. If a newly visible static point reprojects onto Jax's old footprint, a dual-motion fallback follows the occluder's prior displacement once more and accepts only compatible background. The old DI sample is refreshed against the current light before its target and reuse weight are recomputed.</p>
+    <p>The temporal result and twelve fresh candidates pass through an 8&times;8 workgroup boiling filter. A contribution weight above ten times the active workgroup average has its weight cleared before it can spread. The normal history cap is 20 represented samples; animating lights shortens the effective DI cap to six.</p>
+    <p>Spatial reuse generates eight reciprocal XOR neighbors that rotate over frames and remain within the default 12-pixel radius. It scores their depth, normal, roughness, metallic, albedo, and static/dynamic compatibility, then merges the best two valid reservoirs. Reciprocal offsets broaden coverage without atomics or cross-pixel output writes. The standard merge normalization is preserved:</p>
+    <pre tabindex="0" aria-label="Reweight a reused ReSTIR direct-light sample in WGSL"><code><span class="code-keyword">let</span> weight = sample.target_value * history.weight_sum
+  / max(history.target_value, 0.000001);
+reservoir_stream(
+  &amp;result,
+  sample,
+  weight,
+  reservoir_count(history),
+  random(&amp;seed),
+);</code></pre>
+
+    <h2 id="shade-filter-present" tabindex="-1">Resolve visibility, accumulate HDR lighting, and denoise irradiance</h2>
+    <p>The shade pass converts the reservoir into <code>contribution * weight_sum / (count * selected_target)</code>, clamps its luminance to 4.5, and samples the selected emitter two to four times according to ray scale. The sun is evaluated independently with twice that base count. At native scale it begins with eight low-discrepancy disk samples and, only at a mixed penumbra pixel, adds eight more. Emission and adjustable environment-derived ambient fill complete the DI signal.</p>
+    <p>Before filtering, the shader divides lighting by <code>max(albedo, 0.06)</code>. It reprojects the prior HDR value and luminance moments, applies visibility, coverage, variance, and motion reactivity, caps history, and stores demodulated lighting plus history count in one <code>Rgba16Float</code> target. Four 5&times;5 a-trous dispatches use strides 1, 2, 4, and 8. Their depth, normal, metallic, static/dynamic, luminance, and shadow-coverage guides limit bleeding; high variance relaxes filtering, while later stable pixels can skip work.</p>
+    <p>A three-vertex full-screen pass removes the Halton offset, combines Catmull-Rom reconstruction with geometry-aware filtering at edges, remodulates albedo, performs a restrained variance-aware sharpen, and applies the shared ACES filmic fit. This is the only core raster draw. The traced scene itself is compute generated.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirdi-passes-caption" tabindex="0">
+      <table>
+        <caption id="restirdi-passes-caption">Default ReSTIR DI frame order</caption>
+        <thead><tr><th scope="col">Order</th><th scope="col">Pass</th><th scope="col">Dispatch or draw</th><th scope="col">Main output</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Primary visibility</td><td><code>ceil(width/8) &times; ceil(height/8)</code></td><td>Current G-buffer</td></tr>
+          <tr><th scope="row">2</th><td>DI candidates + temporal</td><td>Same 8&times;8 grid</td><td>Temporal reservoir buffer</td></tr>
+          <tr><th scope="row">3</th><td>Spatial reuse</td><td>Same 8&times;8 grid</td><td>Current/history reservoir buffer</td></tr>
+          <tr><th scope="row">4</th><td>DI shade + temporal accumulation</td><td>Same 8&times;8 grid</td><td>HDR output + moments</td></tr>
+          <tr><th scope="row">5&ndash;8</th><td>A-trous strides 1, 2, 4, 8</td><td>Four same-size dispatches</td><td>Denoise ping/pong; final pong</td></tr>
+          <tr><th scope="row">9</th><td>Present</td><td>3 vertices, 1 instance</td><td>Swapchain color</td></tr>
+          <tr><th scope="row">After core</th><td>Light gizmos, joystick overlay, egui</td><td>Optional or generated draws</td><td>Loaded swapchain color</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="resources-controls" tabindex="-1">Budget per-pixel history and tune the renderer live</h2>
+    <p>Two 64-byte G-buffers, three 48-byte reservoir buffers, and six <code>Rgba16Float</code> textures&mdash;two HDR, two denoise, and two moment targets&mdash;consume 320 logical bytes per ray pixel before alignment and descriptors. The target preserves surface aspect ratio, caps the largest dimension at 1080, then applies the 0.35-to-1.0 ray scale. Resizing or changing scale rebuilds all size-dependent resources and clears history. At 1080&times;608, those listed frame resources alone occupy 210,124,800 bytes, about 200.4 MiB.</p>
+    <p>The geometry buffer reserves 35,100,928 bytes for 274,226 triangle records. Static and dynamic BVHs reserve 17,550,400 bytes, and the previous-pose texture reserves 1,530,880 bytes. The 26-layer base-color, normal, and metallic-roughness arrays generate complete CPU mip chains and contain 54,525,848 logical texel bytes. These figures describe declared payload, not measured VRAM after driver padding, egui, the surface, staging, or implementation overhead.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="restirdi-controls-caption" tabindex="0">
+      <table>
+        <caption id="restirdi-controls-caption">Current ReSTIR DI defaults and exposed ranges</caption>
+        <thead><tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">UI range or choices</th><th scope="col">Effect</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Candidates / neighbors / radius</th><td>12 / 2 / 12 px</td><td>1&ndash;16 / 1&ndash;8 / 2&ndash;36</td><td>Fresh work and spatial reuse breadth</td></tr>
+          <tr><th scope="row">History cap</th><td>20</td><td>1&ndash;64</td><td>Reservoir and radiance memory length</td></tr>
+          <tr><th scope="row">Temporal / spatial reuse</th><td>On / on</td><td>Checkboxes</td><td>Enable either reuse stage</td></tr>
+          <tr><th scope="row">Jax / lights / gizmos</th><td>On / off / off</td><td>Checkboxes</td><td>Scene motion and light diagnostics</td></tr>
+          <tr><th scope="row">Sun / point / spot intensity</th><td>5.25 / 28 / 72</td><td>0&ndash;12 / 0&ndash;100 / 0&ndash;180</td><td>Source radiance controls</td></tr>
+          <tr><th scope="row">Denoise / exposure / ambient</th><td>On / 0.95 / 0.38</td><td>Toggle / 0.25&ndash;3 / 0&ndash;1</td><td>Reconstruction and final brightness</td></tr>
+          <tr><th scope="row">Ray scale</th><td>1.0</td><td>Fast 0.65, Balanced 0.85, Native 1.0; slider 0.35&ndash;1</td><td>Trace resolution and visibility samples</td></tr>
+          <tr><th scope="row">Debug view</th><td>Off</td><td>Off, Albedo, Reservoir light, Stable direct, Ambient</td><td>Isolates terms; non-off views bypass denoising</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Use W/A/S/D to move and the arrow keys to look. Mouse or touch dragging creates a movement stick on the left half and a look stick on the right. The camera moves at 3.5 units per second and looks at 1.45 radians per second; frame delta is clamped to 1/15 second. UI interaction consumes input before the joystick. Changing any non-scale setting invalidates history, and “Reset history” does the same explicitly.</p>
+    <p>Native requests <code>TIMESTAMP_QUERY</code> and reports the eight compute-pass timings through three asynchronous readback buffers. The WebAssembly configuration requests no timestamp feature, so GPU timing can be unavailable while the rendering path remains the same. Every normal frame writes the 256-byte uniform block and all 64 reserved light records (4,096 bytes); a 30 Hz Jax pose update additionally writes prior triangles, current triangles, and refit BVH nodes.</p>
+
+    <h2 id="limits" tabindex="-1">Understand the estimator's deliberate limits</h2>
+    <p>This is a software ray tracer in portable compute shaders, not hardware ray tracing. Every primary, shadow, and reuse visibility ray traverses separate static and dynamic BVHs with a fixed 128-node stack. The renderer has no adaptive ray queue, compaction, hardware traversal, or out-of-core scene path. Large per-pixel history buffers make native resolution costly, and GI in the next article adds many more ray traversals.</p>
+    <p>The output is intentionally stabilized rather than mathematically unbiased. Luminance clamps, a boiling filter, finite history, deterministic sun sampling, ambient fill, temporal neighborhood clamps, demodulation bounds, and a-trous filtering all trade strict Monte Carlo convergence for an interactive image. Alpha-mask and alpha-blend materials both become a cutoff test during traversal, and that test samples mip zero. The texture LOD is a distance heuristic rather than a ray differential.</p>
+    <p>Reservoir metadata limits represented count to 65,535 and age to 255, although the UI history cap is at most 64. Animated-light history is shorter still. The capture's high candidate and neighbor counts do not represent current defaults or a measured recommendation. Device timing, memory residency, browser limits, and visual stability will vary substantially across adapters.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run ReSTIR DI natively from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU ReSTIR direct illumination example"><code>cargo run --example restirdi</code></pre>
+    <p>Build and serve the WebAssembly page:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU ReSTIR direct illumination example"><code>scripts/build-wasm.sh --release restirdi
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/restirdi/</code> in a browser with WebGPU support. Keep the Sponza, Jax, texture, and BVH asset paths intact. Useful experiments include plotting reservoir age, comparing reuse stages independently, measuring ray scale against the 320-byte-per-pixel history cost, replacing the alpha cutoff with stochastic transparency, or validating the estimator against a small offline reference.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/restirdi.rs">Read the ReSTIR direct illumination source &nearr;</a>
+      <a href="../metropolis/">&larr; Previous: WebGPU Metropolis renderer</a>
+      <a href="../restirgi/">Next: WebGPU ReSTIR global illumination &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

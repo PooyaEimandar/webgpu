@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Cascaded Shadow Mapping in Rust and wgpu",
+  "description": "Build cascaded shadow mapping in Rust and WebGPU with four 2048×2048 depth layers, practical frustum splits, orthographic light matrices, and nine-tap PCF.",
+  "breadcrumbName": "WebGPU cascaded shadow mapping",
+  "image": "shadowmappingcascade.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Five colored teapots receding across a long floor, each casting a directional shadow under four-cascade WebGPU shadow mapping."
+}

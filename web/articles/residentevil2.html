@@ -1,0 +1,159 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 46</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Combine three pre-rendered camera plates with a GPU-skinned glTF character, classic tank controls, automatic camera cuts, and a live collision-space debugger.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Resident Evil fixed-camera WebGPU demo at a glance">
+      <div><dt>Fixed cameras</dt><dd>3</dd></div>
+      <div><dt>Skin joints</dt><dd>52</dd></div>
+      <div><dt>Character triangles</dt><dd>17,173</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#compose-fixed-camera-scene">Compose a fixed-camera scene</a></li>
+        <li><a href="#load-scene-assets">Load the camera plates and Claire</a></li>
+        <li><a href="#crop-backgrounds">Crop each background to the viewport</a></li>
+        <li><a href="#stage-character">Stage a 3D character over a 2D plate</a></li>
+        <li><a href="#drive-animation">Connect tank controls to animation</a></li>
+        <li><a href="#shade-character">Skin, shade, and ground the character</a></li>
+        <li><a href="#debug-collision-space">Debug the collision space</a></li>
+        <li><a href="#record-frame">Record the frame</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="compose-fixed-camera-scene" tabindex="-1">Compose a fixed-camera survival-horror scene in WebGPU</h2>
+    <p>The <a href="../restirgi/#about">previous ReSTIR GI article</a> reconstructs indirect light from GPU reservoirs. This example changes scale and intent: it studies how a classic fixed-camera game can combine bundled 2D backgrounds with an interactive 3D character. The renderer picks one of three camera plates, stages Claire at a stable screen position, and cuts to a side view when her collision-space X coordinate crosses a camera boundary.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/dabca148f6b919f3438a6159d4c808bcf5904d83">Resident Evil 2 sample commit</a> introduced the complete example, its three WGSL shaders, bundled model and camera assets, screenshot, tests, and gallery entry. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/residentevil2.rs">Rust source</a> runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> and shares the repository's <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs">skinned glTF loader</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a>, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">virtual joystick</a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/residentevil2.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The front-gate capture shows Claire composited over the rainy R.P.D. entrance, with the GPU/FPS, camera, and model-credit text visible in the upper-left. The virtual sticks are inactive, and the current collapsible collision window is not present in this 1280&times;720 image.</figcaption>
+    </figure>
+
+    <h2 id="load-scene-assets" tabindex="-1">Load three camera plates and one animated glTF scene</h2>
+    <p>Startup loads three JPEG backgrounds as one batch and Claire's local glTF scene with its external binary and six referenced images. Native builds read the same relative paths from disk; WebAssembly fetches them below the site's <code>assets</code> directory before entering the render loop. Missing backgrounds, an empty drawable scene, or a model without the required <code>Idle</code>, <code>Slow Run</code>, and <code>Walking Backward</code> clips produce a descriptive error instead of a partially initialized frame.</p>
+    <p>The Claire asset contains 216 nodes, five meshes, five materials, one 52-joint skin, and three animation clips. Its five triangle primitives contribute 11,044 stored vertices and 51,519 indices, or 17,173 indexed triangles. Each 76-byte vertex carries position, normal, UV, RGB color, four joint indices, and four weights. The loader merges the primitives into shared buffers while retaining each index range, base-color image, sampler, and factor for five material draws.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="resident-assets-caption" tabindex="0">
+      <table>
+        <caption id="resident-assets-caption">Resident Evil 2 example runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">Stored size</th><th scope="col">Encoded dimensions or contents</th><th scope="col">Runtime role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>camera_01.jpg</code></th><td>539,238 bytes</td><td>1672&times;941 JPEG</td><td>Front gate background</td></tr>
+          <tr><th scope="row"><code>camera_02.jpg</code></th><td>586,675 bytes</td><td>1672&times;941 JPEG</td><td>Security overlook background</td></tr>
+          <tr><th scope="row"><code>camera_03.jpg</code></th><td>516,820 bytes</td><td>1672&times;941 JPEG</td><td>East approach background</td></tr>
+          <tr><th scope="row"><code>scene.gltf</code> + <code>scene.bin</code></th><td>2,732,859 bytes</td><td>216 nodes; 5 meshes; 52 joints; 3 clips</td><td>Claire geometry, skeleton, and animation</td></tr>
+          <tr><th scope="row">Six glTF images</th><td>793,178 bytes</td><td>Five base-color images plus one metallic-roughness image</td><td>Five base-color material bindings; metallic-roughness is not sampled</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>122,752 bytes</td><td>Embedded TrueType</td><td>GPU, FPS, camera, and attribution overlay</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The bundled character is <a href="https://sketchfab.com/3d-models/claire-redfield-the-darkside-chronicles-8016829b88aa4cd089e7e2c0c93d898f">“Claire Redfield - The Darkside Chronicles”</a> by <a href="https://sketchfab.com/many-bees">many-bees</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. The canvas names many-bees and the CC BY 4.0 license; this article supplies the full asset-page links, and the repository includes the asset's <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/claire/license.txt">license file</a>.</p>
+    <p>The repository does not document a separate source or license for the three bundled R.P.D. camera plates. Their reuse terms are therefore unknown; verify their provenance and permission before redistributing or publishing those JPEGs outside this repository.</p>
+
+    <h2 id="crop-backgrounds" tabindex="-1">Crop each fixed-camera plate to cover the viewport</h2>
+    <p>The background pipeline creates a full-screen triangle from <code>vertex_index</code>, so it needs no vertex buffer. A 16-byte uniform stores the source image size and current surface size. The fragment shader compares their aspect ratios and narrows the visible UV interval along one axis, applying cover-style cropping without stretching the pre-rendered scene:</p>
+    <pre tabindex="0" aria-label="Crop a fixed-camera background to cover the WebGPU surface"><code><span class="code-keyword">if</span> (view_aspect &gt; image_aspect) {
+    <span class="code-keyword">let</span> visible_height = image_aspect / view_aspect;
+    uv.y = (uv.y - 0.5) * visible_height + 0.5;
+} <span class="code-keyword">else</span> {
+    <span class="code-keyword">let</span> visible_width = view_aspect / image_aspect;
+    uv.x = (uv.x - 0.5) * visible_width + 0.5;
+}</code></pre>
+    <p>After sampling, an exponential curve <code>1 - exp(-rgb * 2.4)</code> raises the plate's exposure. Resizing rewrites all three aspect uniforms; it does not decode or upload the images again. Only the active camera's texture is bound and drawn each frame.</p>
+
+    <h2 id="stage-character" tabindex="-1">Stage a 3D character over a 2D camera plate</h2>
+    <p>The simulation keeps a collision-space position inside X from &minus;4.15 to 4.15 and Z from &minus;3.2 to 3.15. That position selects a camera, but it is not used directly as Claire's rendered translation. For each fixed view, Rust converts a desired normalized screen X and feet Y into view space at the character's current camera depth, transforms the result back to world space, and scales the mesh with depth and field of view. This lets movement drive camera cuts while keeping Claire legible against plates that do not contain true scene geometry.</p>
+    <p>The front camera maps collision-space X across roughly &minus;0.72 to 0.72 NDC. Entering a side zone requires X beyond &plusmn;3.2; returning to the front requires crossing back inside &plusmn;2.7. That 0.5-unit hysteresis prevents rapid camera flicker near a boundary. In a side view the character enters near the opposite screen edge and moves toward an inner X of 0.10 as she approaches the world limit.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="resident-cameras-caption" tabindex="0">
+      <table>
+        <caption id="resident-cameras-caption">Three fixed perspective cameras</caption>
+        <thead>
+          <tr><th scope="col">Camera</th><th scope="col">Eye</th><th scope="col">Target</th><th scope="col">Vertical FOV</th><th scope="col">Activation</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Front gate</th><td>(5.8, 3.25, 7.4)</td><td>(0, 0.85, 0.35)</td><td>46&deg;</td><td>Central X zone</td></tr>
+          <tr><th scope="row">Security overlook</th><td>(&minus;5.4, 6.8, 4.7)</td><td>(&minus;0.7, 0.55, &minus;0.15)</td><td>49&deg;</td><td>X &lt; &minus;3.2; exit at &minus;2.7</td></tr>
+          <tr><th scope="row">East approach</th><td>(7.1, 2.75, &minus;0.7)</td><td>(0.2, 0.75, &minus;1.1)</td><td>44&deg;</td><td>X &gt; 3.2; exit at 2.7</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="drive-animation" tabindex="-1">Connect tank controls to three named animation clips</h2>
+    <p>The shared joystick exposes a movement axis and a look axis. On desktop, W/S moves forward and backward, A/D turns, and the left/right arrow keys add turning through the look axis. Mouse or touch starts a virtual stick on the half of the canvas where the pointer begins: the left stick supplies movement and the right stick supplies look. Active sticks are drawn by a small alpha-blended GPU overlay.</p>
+    <p>Horizontal input changes yaw at 2.45 radians per second. Vertical input moves along Claire's facing vector at up to 2.15 world units per second, with frame delta capped at 1/15 second. Forward selects <code>Slow Run</code>, backward selects <code>Walking Backward</code>, and a 0.04 dead zone selects <code>Idle</code>. Locomotion clip speed follows the vertical input magnitude while idle continues at normal speed. Changing between idle, forward, and backward motion restarts the selected named clip; turning alone does not. All three clips loop through the shared CPU animation sampler.</p>
+
+    <h2 id="shade-character" tabindex="-1">Skin, shade, and ground Claire</h2>
+    <p>Rust evaluates the active glTF animation and writes a fixed 128-matrix joint palette every update; the first 52 matrices are used. The vertex shader forms one linear blend from four joint matrices, transforms the position, and applies the same blended transform to the normal. Five indexed draws reuse the merged vertex and index buffers while binding each primitive's base-color texture and factor.</p>
+    <p>The fragment shader discards alpha below 0.42 for hair cards, then combines a warm directional key, cool blue fill, Blinn-style specular highlight, and rim term. It intentionally ignores the glTF metallic-roughness texture and does not reproduce physically based material response. The character pipeline writes a single-sampled <code>Depth32Float</code> attachment with <code>LessEqual</code> comparison.</p>
+    <p>A separate six-index quad supplies a soft contact shadow. Its fragment alpha falls from 0.42 at the center toward zero at the ellipse edge, and standard alpha blending darkens the plate below Claire. Depth comparison is <code>Always</code> with writes disabled, so this is a staged grounding cue rather than a light-space shadow map or geometry-aware receiver.</p>
+
+    <h2 id="debug-collision-space" tabindex="-1">Debug collision space independently from rendered staging</h2>
+    <p>The collapsible egui panel can show Claire's animated render AABB, the clamped collision pivot, and a top-down map of the rectangular world limits. When bounding volumes are enabled, the example CPU-skins every vertex, builds an axis-aligned bound from the finite posed positions, projects its 12 edges through the active camera, and paints them over the scene. This is deliberately debug-only work; leaving bounding volumes hidden avoids the CPU pose extraction.</p>
+    <p>The cyan box describes the staged render mesh, while the yellow pivot and red blocking strips describe gameplay space. Keeping both views visible makes an otherwise subtle design decision explicit: the example simulates a small 2D navigation rectangle, then composes the actor separately for each fixed camera rather than colliding against reconstructed plate geometry.</p>
+
+    <h2 id="record-frame" tabindex="-1">Record the background, world, overlay, and GUI work</h2>
+    <p>A frame uses four ordered render-pass groups. The first clears the surface and draws the active full-screen background. The second loads color, clears depth, draws the contact shadow, then draws the five character primitives. The third loads color for the text and virtual-stick geometry. The final egui pass loads color again for the debug window and projected debug shapes.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="resident-passes-caption" tabindex="0">
+      <table>
+        <caption id="resident-passes-caption">Resident Evil 2 frame composition</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Pass</th><th scope="col">Submission</th><th scope="col">Depth</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Fixed camera background</td><td>3 procedural vertices</td><td>None</td><td>Cover-cropped active JPEG plate</td></tr>
+          <tr><th scope="row">2</th><td>World</td><td>6 shadow indices + 51,519 character indices</td><td>Cleared <code>Depth32Float</code></td><td>Contact ellipse and five skinned material draws</td></tr>
+          <tr><th scope="row">3</th><td>Overlay</td><td>Text mesh + active joystick geometry</td><td>None</td><td>Attribution, GPU/FPS status, and controls</td></tr>
+          <tr><th scope="row">4</th><td>egui</td><td>Framework-managed draw data</td><td>None</td><td>Collision panel and optional projected bounds</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native fixed-camera example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU Resident Evil 2 example"><code>cargo run --example residentevil2</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU Resident Evil 2 example"><code>scripts/build-wasm.sh --release residentevil2
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/residentevil2/</code> in a browser with WebGPU support. Use W/S to move and A/D or the left/right arrow keys to turn, or drag virtual sticks with a pointer. The model, binary, material images, and three camera plates must remain at their current relative asset paths.</p>
+    <p>This is a rendering and interaction study rather than a reconstructed R.P.D. level. The backgrounds have no depth, normals, collision meshes, or camera-calibration metadata. Claire cannot move behind foreground objects, receive plate lighting, cast shadows onto pre-rendered surfaces, or become occluded by the scene. The contact ellipse always overlays the background, and the fixed screen-staging rules are authored for these three views.</p>
+    <p>The glTF shader uses linear blend skinning and a compact artistic lighting model. There is no inverse-transpose normal matrix, PBR material evaluation, environment lighting, antialiasing, temporal accumulation, GPU animation, or animation blending. Collision is only a clamped rectangle; the debug AABB is visualized but not used for collision response.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Author camera calibration, depth, and foreground masks so Claire can pass behind objects in the plates.</li>
+      <li>Replace the rectangular limits with navigation polygons and trigger volumes for camera cuts.</li>
+      <li>Blend transitions between idle, run, and backward clips.</li>
+      <li>Reconstruct approximate plate lighting and shadows, then compare the composite across all three cameras.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/residentevil2.rs">Read the Resident Evil 2 source &nearr;</a>
+      <a href="../restirgi/">&larr; Previous: WebGPU ReSTIR global illumination</a>
+      <a href="../geometrydash/">Next: WebGPU Geometry Dash game &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

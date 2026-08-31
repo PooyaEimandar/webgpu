@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU PBR Image-Based Lighting in Rust with wgpu",
+  "description": "Build PBR image-based lighting in WebGPU with Rust and wgpu using an irradiance cubemap, roughness mip chain, split-sum BRDF LUT, and GGX shading.",
+  "breadcrumbName": "WebGPU PBR image-based lighting",
+  "image": "pbribl.jpg",
+  "imageWidth": 960,
+  "imageHeight": 540,
+  "imageAlt": "Ten gold spheres with changing roughness and metallic reflections across a suspension bridge cubemap."
+}

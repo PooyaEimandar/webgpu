@@ -1,17 +1,6 @@
-struct GpuLight {
-    position_range: vec4<f32>, // xyz world position, w range
-    color_type: vec4<f32>,     // rgb colour×intensity, w type (0 point, 1 spot)
-    direction: vec4<f32>,      // xyz spot direction, w cos(outer)
-    cone: vec4<f32>,           // x cos(inner)
-}
+//!include light
 
-struct ClusterParams {
-    inv_projection: mat4x4<f32>,
-    view: mat4x4<f32>,
-    depth: vec4<f32>,  // x near, y far, z light_count
-    grid: vec4<f32>,   // x tilesX, y tilesY, z slices
-    screen: vec4<f32>, // x width, y height
-}
+//!include cluster
 
 const MAX_PER_CLUSTER: u32 = 64u;
 

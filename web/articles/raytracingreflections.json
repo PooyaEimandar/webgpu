@@ -1,0 +1,9 @@
+{
+  "title": "Ray-Traced Reflections in WebGPU with Rust and WGSL",
+  "description": "Build WebGPU ray-traced reflections with Rust and WGSL. Texture analytic spheres from KTX, accumulate four ray segments, and present a storage texture.",
+  "breadcrumbName": "Ray-traced reflections",
+  "image": "raytracingreflections.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Reflective chrome sphere, textured spheres, colorful boxes, and a checkerboard floor ray traced inside a red, green, and gray room."
+}

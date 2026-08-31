@@ -1,0 +1,221 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 37</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Stage 256 source positions at a time in workgroup memory, evaluate all 150,994,944 particle pairs, integrate 12,288 bodies in place, and expose the attraction and billboard parameters through a live egui panel.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU N-body simulation at a glance">
+      <div><dt>Particles</dt><dd>12,288</dd></div>
+      <div><dt>Pair terms per frame</dt><dd>150,994,944</dd></div>
+      <div><dt>Shared tile per workgroup</dt><dd>4 KiB</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#tile-all-pairs">Tile an all-pairs simulation</a></li>
+        <li><a href="#load-particle-assets">Load two particle textures</a></li>
+        <li><a href="#seed-six-clusters">Seed six particle clusters</a></li>
+        <li><a href="#calculate-forces">Calculate 151 million pair terms</a></li>
+        <li><a href="#integrate-in-place">Integrate one shared particle buffer</a></li>
+        <li><a href="#render-particles">Render projected billboards</a></li>
+        <li><a href="#tune-simulation">Tune the simulation live</a></li>
+        <li><a href="#record-four-passes">Record four passes</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="tile-all-pairs" tabindex="-1">Tile an all-pairs N-body calculation in workgroup memory</h2>
+    <p>The <a href="../computecullandlod/#about">previous compute culling and LOD example</a> uses compute work to prepare only the mesh draws needed for a camera view. Compute N-body applies the same programmable stage to simulation instead. Every body contributes attraction to every target, and one storage buffer remains in place. A calculate pass reads positions and writes velocities; a second compute pass integrates those new velocities into positions. The render pass then reads the same buffer as vertex-stage storage.</p>
+    <p>A direct all-pairs shader would issue one global position load for each of 12,288&sup2; interactions. This shader instead has each 256-thread workgroup load one 256-position tile into 4 KiB of shared memory. All 256 target threads reuse that tile before advancing. Tiling reduces source-position storage loads by a factor of 256 while preserving the full quadratic arithmetic.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/301b7920be243360dc51f24ecb4b08c2dba24e14">introducing Compute N-body commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computenbody.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computenbody_compute.wgsl">compute WGSL</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computenbody_render.wgsl">render WGSL</a>, screenshots, build registration, README entry, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">gallery registration</a>. It reused the existing particle textures. Current code later received the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">direct WebGPU projection</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/de16e06e35263457f2b71db9ab55b4f2376f21f8">seed-shape and finite-distance fixes</a>, and <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible settings window</a>. The shared loader's <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">later batch update</a> supplies the current concurrent browser fetch. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/computenbody.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Six colored systems stretch, orbit, and overlap in the fixed 3D view. The unchanged 1280&times;720 capture is available as a 108,874-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computenbody.jpg">JPEG</a> and 62,104-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computenbody.webp">WebP</a>. It came with the introducing commit, predates the four source changes listed above, shows tuned rather than default controls, and is not a performance benchmark.</figcaption>
+    </figure>
+
+    <h2 id="load-particle-assets" tabindex="-1">Load two uncompressed KTX 1 textures</h2>
+    <p>Before entering <code>sib::render</code>, the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a> requests <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle01_rgba.ktx"><code>particle01_rgba.ktx</code></a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_gradient_rgba.ktx"><code>particle_gradient_rgba.ktx</code></a> as one batch. Native gives each request a thread. The current WebAssembly path sends both URLs to one temporary Worker and fetches them concurrently with <code>Promise.all</code>.</p>
+    <p>The example's local decoder accepts little-endian KTX 1 data with uncompressed unsigned-byte RGBA8, one face, no array, and no volume depth. It converts a zero image height to one, copies every encoded mip into a CPU RGBA vector, and uploads <code>Rgba8Unorm</code>. Both inputs have one mip, so the configured linear mip filter has no lower level to select.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nbody-assets-caption" tabindex="0">
+      <table>
+        <caption id="nbody-assets-caption">Compute N-body runtime assets and embedded inputs</caption>
+        <thead>
+          <tr><th scope="col">Input</th><th scope="col">Delivery</th><th scope="col">Stored bytes</th><th scope="col">Encoded layout</th><th scope="col">Uploaded or compiled result</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>particle01_rgba.ktx</code></th><td>Runtime request</td><td>16,484</td><td>64&times;64 RGBA8; 1 mip</td><td>16,384-byte <code>Rgba8Unorm</code></td><td>Opaque grayscale radial sprite</td></tr>
+          <tr><th scope="row"><code>particle_gradient_rgba.ktx</code></th><td>Runtime request</td><td>1,124</td><td>256&times;0 header; RGBA8; 1 mip</td><td>1,024 bytes at 256&times;1</td><td>Cyclic particle color</td></tr>
+          <tr><th scope="row"><code>computenbody_compute.wgsl</code></th><td>Embedded text</td><td>2,445</td><td>85 lines</td><td>Calculate + integrate pipelines</td><td>Force accumulation and integration</td></tr>
+          <tr><th scope="row"><code>computenbody_render.wgsl</code></th><td>Embedded text</td><td>2,807</td><td>89 lines</td><td>Billboard graphics pipeline</td><td>Projection, texturing, color</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn font</a></th><td>Embedded bytes</td><td>122,752</td><td>TrueType; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td><td>egui-managed font atlas</td><td>Settings and diagnostics</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two runtime files total 17,608 stored bytes and upload 17,408 texel bytes. Both are linear RGBA8 rather than sRGB, and both alpha channels are fully opaque. They are exact byte matches for the same <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/textures/particle01_rgba.ktx">particle sprite</a> and <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/textures/particle_gradient_rgba.ktx">gradient</a> in Sascha Willems' Vulkan-Assets repository. Its <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/README.md">README</a> gives no general asset or per-file license, so this article does not assign definitive authorship or licensing to the textures.</p>
+
+    <h2 id="seed-six-clusters" tabindex="-1">Seed six clusters with heavy and ordinary bodies</h2>
+    <p>A deterministic linear congruential generator starts from <code>0x4d2f_6a31</code>. Rust creates 2,048 particles around each of six seed locations: &plusmn;5 on X, &plusmn;5 on Z, Y&nbsp;=&nbsp;4, and Y&nbsp;=&nbsp;&minus;8. The first record in every cluster begins at 1.5 times its seed location with mass 90,000. The remaining 2,047 first choose an exact random-direction 0.75 offset, then multiply absolute world-space Y by <code>2 - 0.75&sup2; = 1.4375</code>. Their final positions are therefore not on a 0.75-radius shell, and the two Y-axis clouds shift relative to their nominal seeds. They receive masses from 37.5 to 75 and tangential velocities plus jitter; rotation direction alternates between clusters.</p>
+    <p>These six heavy bodies are not pinned attractors. They occupy the same buffer, contribute to every target, receive forces, and integrate like the other 12,282 records. The cluster index divided by six initializes each body's gradient phase in <code>vel.w</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nbody-resources-caption" tabindex="0">
+      <table>
+        <caption id="nbody-resources-caption">Compute N-body initialization and fixed logical GPU resources</caption>
+        <thead>
+          <tr><th scope="col">Resource or group</th><th scope="col">Elements</th><th scope="col">Layout</th><th scope="col">Logical bytes</th><th scope="col">Update path</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Six heavy bodies</th><td>1 per cluster</td><td>Mass 90,000</td><td>Inside particle buffer</td><td>GPU every frame</td><td>Dominant moving sources</td></tr>
+          <tr><th scope="row">Ordinary bodies</th><td>2,047 per cluster</td><td>Mass 37.5&ndash;75</td><td>Inside particle buffer</td><td>GPU every frame</td><td>Orbiting and interacting particles</td></tr>
+          <tr><th scope="row">Particle buffer</th><td>12,288 records</td><td><code>pos: vec4</code> + <code>vel: vec4</code>; 32 bytes</td><td>393,216</td><td>Two in-place compute passes</td><td>XYZ + mass; velocity + phase</td></tr>
+          <tr><th scope="row">Uniform buffer</th><td>2 matrices + 3 vectors</td><td>176 bytes</td><td>176</td><td>One queue write per normal frame</td><td>Camera, surface, simulation, rendering</td></tr>
+          <tr><th scope="row">Sprite texture</th><td>4,096 texels</td><td>RGBA8</td><td>16,384</td><td>Uploaded once</td><td>Billboard intensity</td></tr>
+          <tr><th scope="row">Gradient texture</th><td>256 texels</td><td>RGBA8</td><td>1,024</td><td>Uploaded once</td><td>Group color cycle</td></tr>
+          <tr><th scope="row">Fixed total</th><td>Buffer + uniform + texels</td><td>&mdash;</td><td><strong>410,800</strong></td><td>&mdash;</td><td>0.3918 MiB before overhead</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed total excludes the 4 KiB shared array allocated per resident calculate workgroup, bind-group and sampler descriptors, presentation surface, egui resources, embedded font, staging behavior, and driver alignment. “Reset particles” regenerates the deterministic CPU vector and writes all 393,216 bytes back into the storage buffer without reallocating it.</p>
+
+    <h2 id="calculate-forces" tabindex="-1">Calculate 150,994,944 pair terms with 48 tiled workgroups</h2>
+    <p>The calculate pass dispatches 48 workgroups of 256 threads, exactly covering all 12,288 targets. Every workgroup walks 48 source tiles. Each lane loads one <code>vec4</code> containing XYZ and mass, all lanes synchronize, and each target accumulates 256 attraction terms from shared memory. A second barrier prevents the next tile from overwriting positions while another lane still reads them.</p>
+    <pre tabindex="0" aria-label="Tile N-body source positions through workgroup memory in WGSL"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> tile_start = 0u;
+     tile_start &lt; particle_count;
+     tile_start = tile_start + 256u) {
+    <span class="code-keyword">let</span> source_index = tile_start + local_id.x;
+    <span class="code-keyword">if</span> (source_index &lt; particle_count) {
+        shared_positions[local_id.x] = particles[source_index].pos;
+    } <span class="code-keyword">else</span> {
+        shared_positions[local_id.x] = vec4&lt;f32&gt;(0.0);
+    }
+    workgroupBarrier();
+
+    <span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; 256u; i = i + 1u) {
+        <span class="code-keyword">let</span> other = shared_positions[i];
+        <span class="code-keyword">let</span> delta = other.xyz - position.xyz;
+        <span class="code-keyword">let</span> dist_sq = max(dot(delta, delta) + soften, 1.0e-6);
+        acceleration += gravity * delta * other.w / pow(dist_sq, power);
+    }
+    workgroupBarrier();
+}</code></pre>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nbody-tiling-caption" tabindex="0">
+      <table>
+        <caption id="nbody-tiling-caption">Source-level calculate-pass workload for 12,288 bodies</caption>
+        <thead>
+          <tr><th scope="col">Quantity</th><th scope="col">Per target or workgroup</th><th scope="col">Per frame</th><th scope="col">Logical data</th><th scope="col">Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Target workgroups</th><td>256 targets</td><td>48</td><td>&mdash;</td><td>Exact coverage; no inactive lane</td></tr>
+          <tr><th scope="row">Source tiles</th><td>48 tiles</td><td>2,304 workgroup tiles</td><td>4 KiB shared per workgroup</td><td>Entire source array reused for each target group</td></tr>
+          <tr><th scope="row">Pair terms</th><td>12,288</td><td><strong>150,994,944</strong></td><td>One <code>pow</code> per term</td><td>Includes zero-contribution self terms</td></tr>
+          <tr><th scope="row">Tiled source loads</th><td>12,288 <code>vec4</code></td><td>589,824 loads</td><td>9,437,184 bytes = 9 MiB</td><td>Source position and mass from storage</td></tr>
+          <tr><th scope="row">Untiled comparison</th><td>12,288 loads per target</td><td>150,994,944 loads</td><td>2,415,919,104 bytes = 2.25 GiB</td><td>Logical position payload avoided by 256-way reuse</td></tr>
+          <tr><th scope="row">Barriers</th><td>96 per workgroup</td><td>4,608 workgroup barrier points</td><td>&mdash;</td><td>Load/read safety around every tile</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The 9 MiB figure counts tiled source-position loads only. Adding initial target position and velocity reads, calculate velocity stores, integrate position and velocity reads, and integrate position stores brings the two compute shaders to 10,616,832 logical storage bytes, or 10.125 MiB, per frame. Of that, 393,216 bytes are shader storage writes. These are source-level counts, not measured memory traffic or execution time. Caches, transactions, compiler transformations, occupancy, and the cost of 151 million dynamic <code>pow</code> evaluations determine physical performance. Tiling attacks global reads; it does not reduce O(N&sup2;) force arithmetic.</p>
+    <p>The force is an adjustable visual law: <code>gravity * delta * mass / (distance_squared + soften)^power</code>. Softening is added directly to squared distance rather than being squared itself. With default power 0.75 the law is not Newton's inverse-square acceleration, which would require an exponent of 1.5 when multiplying by the unnormalized delta; the UI stops at 1.4. Below power 0.5, including part of the exposed range, unsoftened force magnitude increases with distance. The 1e&minus;6 floor added in the later fix prevents a zero-over-zero self term from becoming NaN even if softening is set outside the UI range.</p>
+
+    <h2 id="integrate-in-place" tabindex="-1">Integrate updated velocity in a second compute pass</h2>
+    <p>The calculate pass writes only <code>vel</code>, while all workgroups continue to read <code>pos</code>. That field separation makes one in-place buffer safe without ping-ponging. A distinct integrate pass provides global ordering, then adds the updated velocity to position using the same time step. This is a split, semi-implicit Euler update.</p>
+    <p>Current WGSL adds the full velocity <code>vec4</code> to the full position <code>vec4</code>. XYZ behaves as expected, but <code>vel.w</code> is the animated gradient phase and <code>pos.w</code> is mass. The phase therefore also increases mass by <code>delta_t * vel.w</code> every active frame. At default timing, an average phase near 0.5 adds roughly 0.025 mass units per real second. Because mass controls both attraction strength and billboard size, the simulation slowly changes those properties even though Rust initialized them as fixed values. Resetting particles restores the original masses.</p>
+    <p>The uniform time step is zero while paused. Otherwise it is <code>clamp(frame_delta * 0.05 * time_scale, 0, 1/120)</code>. At the default time scale, simulation time advances at 5% of wall time, and the gradient phase advances about 0.005 per real second for a roughly 200-second cycle. Pause and time scale zero freeze numerical state, but both compute passes still dispatch and the calculate pass still evaluates every pair.</p>
+
+    <h2 id="render-particles" tabindex="-1">Render 12,288 projected textured billboards</h2>
+    <p>The graphics pipeline has no vertex or index buffer. One instanced call emits six procedural corners per particle: 73,728 vertex invocations and 24,576 triangles. The vertex shader reads position, mass, and phase from storage. A fixed 60&deg; perspective camera sits 14 units from the origin at 75&deg; yaw and 26&deg; pitch, with near and far planes of 0.1 and 512.</p>
+    <p>Projected mass and depth produce a physical point size, multiplied by the Particle size control and clamped from 1 to 128 surface pixels. The six 90,000-mass bodies reach the upper clamp. Each quad remains screen-aligned. There is no depth attachment, depth test, culling, or multisampling, so every covered fragment blends regardless of which system is nearer.</p>
+    <p>The fragment shader multiplies the radial sprite by the phase-selected gradient and brightness. RGB uses additive one-plus-one blending, so alpha would not gate RGB even if the sprite contained variable alpha. Alpha uses source one and destination one-minus-source-alpha. Because the KTX sprite alpha is opaque everywhere and the surface clears with alpha one, final surface alpha remains one. Dark sprite corners still execute and add near-black RGB because the shader has no discard. With every body on screen at the 128&times;128 size clamp, the loose upper bound is 201,326,592 fragment candidates before clipping and subpixel rasterization.</p>
+
+    <h2 id="tune-simulation" tabindex="-1">Tune seven controls without rebuilding GPU resources</h2>
+    <p>The live egui panel is fixed-width, non-resizable, and collapsible. Changing a control rewrites the same 176-byte uniform without rebuilding pipelines, bindings, textures, or buffers. “Reset params” restores every default, including unpausing. “Reset particles” preserves controls and replaces particle state with the deterministic initial vector.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nbody-controls-caption" tabindex="0">
+      <table>
+        <caption id="nbody-controls-caption">Compute N-body live controls and current defaults</caption>
+        <thead>
+          <tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">UI range</th><th scope="col">Shader effect</th><th scope="col">Workload effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Paused</th><td>Off</td><td>Off / on</td><td>Sets time step to zero</td><td>No dispatch or pair-work reduction</td></tr>
+          <tr><th scope="row">Time scale</th><td>1</td><td>0&ndash;4</td><td>Scales time before the 1/120 cap</td><td>No dispatch-count change</td></tr>
+          <tr><th scope="row">Gravity</th><td>0.002</td><td>0.0001&ndash;0.006; logarithmic</td><td>Scales every attraction term</td><td>Same 150,994,944 terms</td></tr>
+          <tr><th scope="row">Force power</th><td>0.75</td><td>0.35&ndash;1.4</td><td>Exponent on softened distance squared</td><td>One dynamic <code>pow</code> per pair</td></tr>
+          <tr><th scope="row">Soften</th><td>0.05</td><td>0.005&ndash;0.35; logarithmic</td><td>Offsets distance squared</td><td>Reduces close-force singularity</td></tr>
+          <tr><th scope="row">Particle size</th><td>1</td><td>0.25&ndash;3</td><td>Scales projected billboard size</td><td>Changes fragment overdraw</td></tr>
+          <tr><th scope="row">Brightness</th><td>1</td><td>0.2&ndash;4</td><td>Scales fragment RGB</td><td>No geometry or compute change</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>egui owns input; there is no camera, pointer-force, or keyboard control outside the panel. Its displayed frame time and FPS average CPU or event-loop delivery rather than GPU timestamps. The screenshot shows time scale 2.20, power 0.80, soften 0.070, and brightness 2.45, not the defaults above.</p>
+
+    <h2 id="record-four-passes" tabindex="-1">Record two compute passes and two render passes</h2>
+    <p>The calculate and integrate entry points run in separate compute passes. A particle pass clears the presentation surface and draws every body, then the egui pass loads that color target and renders the settings panel. All graphics work is single-sample.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="nbody-passes-caption" tabindex="0">
+      <table>
+        <caption id="nbody-passes-caption">Compute N-body frame graph and submitted work</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Pass</th><th scope="col">Submission</th><th scope="col">Reads</th><th scope="col">Writes</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Calculate</td><td>48 &times; 256 compute invocations</td><td>Positions, masses, velocities, uniform</td><td>Velocity <code>vec4</code></td><td>All-pairs attraction accumulated</td></tr>
+          <tr><th scope="row">2</th><td>Integrate</td><td>48 &times; 256 compute invocations</td><td>Updated velocity + position + uniform</td><td>Position <code>vec4</code></td><td>State advanced in place</td></tr>
+          <tr><th scope="row">3</th><td>Particle render</td><td>6 vertices &times; 12,288 instances</td><td>Particles, uniform, 2 textures</td><td>Cleared presentation surface</td><td>24,576 additive triangles; no depth</td></tr>
+          <tr><th scope="row">4</th><td>egui</td><td>Framework-managed GUI</td><td>Font atlas and GUI buffers</td><td>Loaded presentation surface</td><td>Controls and diagnostics</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A controls-stable frame performs one 176-byte example uniform queue write before any egui uploads. Projection and the fixed model-view matrix are recalculated and included every frame even though only aspect ratio can change the projection. A control change causes another 176-byte uniform write during GUI rendering; because it is queued before the main encoder submission, the later values affect that submitted frame. Reset particles adds one 393,216-byte buffer write before submission, so the compute passes can immediately advance the reset state once unless paused. The renderer records the same four passes in all three cases.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU Compute N-body example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU Compute N-body example"><code>cargo run --example computenbody</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU Compute N-body example"><code>scripts/build-wasm.sh --release computenbody
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/computenbody/</code> in a browser with WebGPU support. Both targets load the same two KTX files before calling <code>sib::render</code>, then run the same tiled calculate, integrate, billboard, and GUI passes.</p>
+    <p>The algorithm remains O(N&sup2;). Tiling saves global reads but does not reduce interaction count, and every pair uses a general <code>pow</code>. There is no Barnes&ndash;Hut tree, fast multipole method, neighbor cutoff, adaptive body count, subgroup optimization, GPU timing, or capability-based workload selection. Doubling particle count would approximately quadruple pair arithmetic. The fixed 256 appears in Rust dispatch math, both WGSL workgroup attributes, the shared-array length, and the tile step; those values must stay synchronized.</p>
+    <p>The force exponent is artistic rather than Newtonian, and single-precision semi-implicit Euler integration has no adaptive step or energy correction. Force terms accumulate in a fixed tile order without compensated summation. Bodies do not collide, merge, conserve a fixed system energy, or leave trails in a history buffer. Close approaches depend strongly on gravity, exponent, softening, and the capped time step. Pausing does not skip the expensive calculate pass.</p>
+    <p>The full-<code>vec4</code> integrate operation couples gradient phase into mass and projected size. That drift is small for the six 90,000-mass bodies but meaningful over time for ordinary 37.5&ndash;75 masses. Updating only <code>pos.xyz</code>, keeping mass in a read-only field, or separating render phase would preserve the intended quantities.</p>
+    <p>The fixed camera cannot orbit, pan, or zoom. Additive billboards have no depth test, sorting, culling, indirect draw, soft-particle intersection, HDR target, exposure, tone mapping, or MSAA. Their opaque sprite alpha means black corners still execute fragment work. One-mip linear textures and a non-sRGB gradient further favor a compact demo over a calibrated rendering pipeline.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Update only position XYZ, keep mass fixed, and compare trajectories before and after the correction.</li>
+      <li>Replace all-pairs evaluation with Barnes&ndash;Hut or a hierarchical approximation, then chart error against frame time.</li>
+      <li>Use an approximate inverse-power path for common exponents and profile it against dynamic <code>pow</code>.</li>
+      <li>Add camera controls, depth-aware billboards, HDR composition, GPU timestamps, and a runtime particle-count selector.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computenbody.rs">Read the Compute N-body source &nearr;</a>
+      <a href="../computecullandlod/">&larr; Previous: WebGPU compute culling and LOD</a>
+      <a href="../computeraytracing/">Next: WebGPU compute shader ray tracing &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

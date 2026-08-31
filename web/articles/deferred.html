@@ -1,0 +1,212 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 30</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Skin an animated glTF character and draw a checkerboard floor into world-position, world-normal, and albedo G-buffer targets, then evaluate six colored point lights over every output pixel with one fullscreen triangle.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU deferred shading demo at a glance">
+      <div><dt>G-buffer color targets</dt><dd>3</dd></div>
+      <div><dt>Deferred lights</dt><dd>6</dd></div>
+      <div><dt>Geometry-pass triangles</dt><dd>11,962</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#defer-lighting">Defer lighting to a fullscreen pass</a></li>
+        <li><a href="#load-jax-assets">Load three Jax assets</a></li>
+        <li><a href="#animate-jax-skin">Animate a 46-joint skin</a></li>
+        <li><a href="#fill-gbuffer">Fill three G-buffer targets</a></li>
+        <li><a href="#budget-gbuffer">Budget full-resolution attachments</a></li>
+        <li><a href="#compose-six-lights">Compose six moving lights</a></li>
+        <li><a href="#record-two-passes">Record two render passes</a></li>
+        <li><a href="#control-camera">Control the first-person camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="defer-lighting" tabindex="-1">Defer lighting to a fullscreen pass</h2>
+    <p>The <a href="../multisamplingalphatocoverage/#about">previous WebGPU alpha-to-coverage example</a> converts oak-leaf texture alpha into four-sample coverage across an instanced grove, then resolves those samples into the surface. Deferred shading changes the frame's organization by separating visibility and material capture from lighting. The first pass writes information about the nearest floor or character fragment into multiple render targets. The second pass reads those targets and calculates every light after geometry has been rasterized.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/5f1bc5ac180630a7bc3b5da71fb57d15b77193ff">introducing deferred shading commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferred.rs">Rust example</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/deferred.wgsl">WGSL shader</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/deferred.jpg">screenshot</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">web registration</a>, and reusable <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs">skinned glTF loader</a>. The three Jax files had arrived earlier in the <a href="https://github.com/PooyaEimandar/webgpu/commit/a65ec584ad446059707f4c0c9d1f14171540aa7a">Jax asset update</a>. The current source includes a <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modernized WebAssembly entry point</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">direct WebGPU perspective projection</a>, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/b5c162571514843771ceb98d7e50861aaedfff68">safe-normalize fix</a> for cleared background normals. Loader updates later added a <a href="https://github.com/PooyaEimandar/webgpu/commit/34b0e557b82aefaf30a5ab426386a5a613f2acd7">hierarchy-depth guard and stable first material</a> plus <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">per-primitive material records</a>. This demo still uses the merged mesh's first material and texture, which is correct for Jax's single primitive. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/deferred.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Jax walks across a procedural checkerboard while red, yellow, green, blue, warm, and white lights illuminate the character and floor. The current 1280&times;720 <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/deferred.jpg">JPEG</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/deferred.webp">WebP</a> screenshots are unchanged from the introducing commit.</figcaption>
+    </figure>
+
+    <h2 id="load-jax-assets" tabindex="-1">Load three Jax assets</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a> first reads <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>. The loader resolves its external buffer and image paths, then loads <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png"><code>jax_base_color.png</code></a> in separate one-item resource batches. Native builds read local files; WebAssembly fetches the glTF and uses temporary asset Workers for the two dependent batches before starting the renderer.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-assets-caption" tabindex="0">
+      <table>
+        <caption id="deferred-assets-caption">Deferred shading runtime assets and compiled inputs</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Input</th><th scope="col">File bytes</th><th scope="col">Encoded contents</th><th scope="col">Decoded or uploaded representation</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><code>jax.gltf</code></td><td>68,324</td><td>JSON with 146 accessor declarations</td><td>59 nodes, one mesh, one skin, one animation</td><td>References geometry, animation, material, and texture</td></tr>
+          <tr><th scope="row">2</th><td><code>jax.bin</code></td><td>1,957,752</td><td>Binary data backing 146 buffer views</td><td>Mesh attributes, indices, inverse binds, and keyframes</td><td>Geometry and skeletal animation data</td></tr>
+          <tr><th scope="row">3</th><td><code>jax_base_color.png</code></td><td>13,008</td><td>1024&times;1024 RGB8 PNG</td><td>4,194,304-byte RGBA8 image</td><td>One-mip sRGB character texture</td></tr>
+          <tr><th scope="row">Compiled</th><td><code>deferred.wgsl</code></td><td>7,964</td><td>233 lines of WGSL</td><td>Three render pipelines</td><td>Floor MRT, skinned MRT, and composition stages</td></tr>
+          <tr><th scope="row">Compiled</th><td>Vazirmatn font</td><td>122,752</td><td>TrueType font</td><td>Framework-managed glyph resources</td><td>Title, GPU, FPS, and G-buffer overlay</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three runtime files total 2,039,084 stored bytes, about 1.9446 MiB. The glTF contains one scene, 59 nodes, one mesh and triangle primitive, one material, texture, image, sampler, skin, and animation. It has no vertex-color attribute, so the loader supplies white. The material's base-color factor is also white, metallic is zero, and the default one-sided material lets the character pipeline cull back faces.</p>
+    <p>The decoded image is uploaded as a single-sample, one-mip <code>Rgba8UnormSrgb</code> texture. Its sampler repeats U and V, clamps W, and uses linear magnification and minification. With no lower-resolution mips, distant texture detail can still alias. The generated floor has no file request or texture.</p>
+
+    <h2 id="animate-jax-skin" tabindex="-1">Animate a 46-joint skin on the GPU</h2>
+    <p>The <code>Walking_1</code> clip spans one second and contains 138 channels: translation, rotation, and scale for each of 46 joints. Rust advances the active first animation every update, caps its delta at 1/15 second, wraps at the clip boundary, rebuilds the joint palette, and writes the complete 8,192-byte storage buffer. Jax uses 46 of its 128 reserved matrices.</p>
+    <pre tabindex="0" aria-label="Blend four Jax joint matrices in the deferred vertex shader"><code><span class="code-keyword">let</span> skin =
+    input.joint_weights.x * joints.matrices[u32(input.joint_indices.x)] +
+    input.joint_weights.y * joints.matrices[u32(input.joint_indices.y)] +
+    input.joint_weights.z * joints.matrices[u32(input.joint_indices.z)] +
+    input.joint_weights.w * joints.matrices[u32(input.joint_indices.w)];</code></pre>
+    <p>The skinned vertex shader applies that weighted matrix to positions and normals, then applies a model transform. A uniform scale of 1.75, 20&deg; Y rotation, and translation to Z&nbsp;=&nbsp;&minus;2 place the animated bind-pose minimum on the floor at Y&nbsp;=&nbsp;&minus;1.12. The floor spans X&nbsp;=&nbsp;&minus;8.5 through 8.5 and Z&nbsp;=&nbsp;&minus;10 through 5.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-geometry-caption" tabindex="0">
+      <table>
+        <caption id="deferred-geometry-caption">Deferred shading geometry and explicit GPU buffers</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Elements or size</th><th scope="col">Stride</th><th scope="col">GPU bytes</th><th scope="col">Update cadence</th><th scope="col">Submitted work</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Jax vertices</th><td>35,880</td><td>76 bytes</td><td>2,726,880</td><td>Uploaded once</td><td>Position, normal, UV, color, four joints, four weights</td></tr>
+          <tr><th scope="row">Jax indices</th><td>35,880 <code>u32</code></td><td>4 bytes</td><td>143,520</td><td>Uploaded once</td><td>11,960 triangles in one indexed draw</td></tr>
+          <tr><th scope="row">Floor geometry</th><td>4 vertices + 6 <code>u32</code> indices</td><td>40-byte vertex</td><td>184</td><td>Uploaded once</td><td>2 triangles in one indexed draw</td></tr>
+          <tr><th scope="row">Joint palette</th><td>128 matrices; 46 used</td><td>64 bytes</td><td>8,192</td><td>Fully rewritten every frame</td><td>Read by Jax's vertex stage</td></tr>
+          <tr><th scope="row">Jax uniforms</th><td>View-projection, model, base color</td><td>144-byte block</td><td>144</td><td>Rewritten every frame</td><td>Character transform and material</td></tr>
+          <tr><th scope="row">Floor uniforms</th><td>Transforms + three instance slots</td><td>224-byte block</td><td>224</td><td>Rewritten every frame</td><td>Only instance slot zero is drawn</td></tr>
+          <tr><th scope="row">Composition uniforms</th><td>Six lights, view position, parameters</td><td>224-byte block</td><td>224</td><td>Rewritten every frame</td><td>Fullscreen lighting state</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>These explicit buffers total 2,879,368 bytes. Adding the 4,194,304-byte material texture produces 7,073,672 fixed logical bytes before G-buffer attachments and overlay resources. The character's source vertex and index buffers remain unchanged; animation moves vertices in WGSL through the updated joint palette.</p>
+
+    <h2 id="fill-gbuffer" tabindex="-1">Fill three G-buffer targets in one MRT pass</h2>
+    <p>The geometry pass binds three color attachments at once. Both floor and character fragments write world position, normalized world normal, and material data. The floor shader builds a checker pattern from world-space X and Z. Its albedo alpha is 0.08. Jax samples the sRGB texture, multiplies RGB by its vertex and material colors, and writes a fixed alpha of 0.45. The composition shader later interprets that alpha channel as specular strength rather than transparency.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-gbuffer-caption" tabindex="0">
+      <table>
+        <caption id="deferred-gbuffer-caption">Full-resolution Deferred G-buffer attachments</caption>
+        <thead>
+          <tr><th scope="col">Attachment</th><th scope="col">Format</th><th scope="col">Bytes per pixel</th><th scope="col">Stored value</th><th scope="col">End-of-pass action</th><th scope="col">Composition use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">World position</th><td><code>Rgba16Float</code></td><td>8</td><td>World XYZ + 1</td><td>Store</td><td>Light distance and direction</td></tr>
+          <tr><th scope="row">World normal</th><td><code>Rgba16Float</code></td><td>8</td><td>Normalized world XYZ + 1</td><td>Store</td><td>Diffuse and reflected-light directions</td></tr>
+          <tr><th scope="row">Albedo/specular</th><td><code>Rgba8Unorm</code></td><td>4</td><td>Linear RGB + specular strength</td><td>Store</td><td>Ambient, diffuse, and specular terms</td></tr>
+          <tr><th scope="row">Depth</th><td><code>Depth32Float</code></td><td>4</td><td>Nearest geometry depth</td><td>Discard</td><td>Not bound or sampled</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Every attachment has the surface width and height, one layer, one mip, and one sample. The color textures support both <code>RENDER_ATTACHMENT</code> and <code>TEXTURE_BINDING</code>. Composition reads exact texels with <code>textureLoad</code>, so the nearest samplers created alongside those textures are not bound. Depth is also created with texture-binding usage and a comparison sampler, but this example only uses it for visibility in the geometry pass and discards it afterward.</p>
+    <p>The two floating-point targets store world values at half-float precision. That keeps this scene compact but loses precision as coordinates grow. A larger renderer can often reconstruct position from depth and camera matrices, avoiding the eight-byte position target at the cost of reconstruction math.</p>
+
+    <h2 id="budget-gbuffer" tabindex="-1">Budget 24 bytes per output pixel</h2>
+    <p>Position, normal, albedo, and depth total 24 logical bytes per physical pixel. At the screenshot's 1280&times;720 resolution, the G-buffer occupies 22,118,400 bytes, or 21.09375 MiB, before row alignment and implementation-specific texture overhead. The three sampled color targets account for 18,432,000 bytes; depth adds 3,686,400 bytes.</p>
+    <p>Resizing recreates all four attachments at the new surface size and rebuilds the composition bind group so its views point at the replacements. It also updates camera matrices and text placement. Geometry, the material texture, joint storage, and pipelines remain allocated.</p>
+
+    <h2 id="compose-six-lights" tabindex="-1">Compose six colored lights in one fullscreen draw</h2>
+    <p>A buffer-free vertex shader generates a fullscreen triangle from <code>vertex_index</code>. The fragment shader loads the three G-buffer color texels, adds 2.5% ambient albedo, and loops over all six lights. Five move on phase-shifted paths driven by a five-second cycle; one yellow light stays fixed near the floor.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-lights-caption" tabindex="0">
+      <table>
+        <caption id="deferred-lights-caption">Six lights evaluated by every deferred composition fragment</caption>
+        <thead>
+          <tr><th scope="col">Light</th><th scope="col">Linear RGB</th><th scope="col">Motion</th><th scope="col">Y</th><th scope="col">Attenuation numerator</th><th scope="col">Visible role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">White</th><td><code>(1.5, 1.5, 1.5)</code></td><td>Radius-5 orbit</td><td>0</td><td>3.75</td><td>Neutral moving illumination</td></tr>
+          <tr><th scope="row">Red</th><td><code>(1, 0, 0)</code></td><td>Radius-2 orbit centered at X&nbsp;=&nbsp;&minus;4</td><td>0</td><td>15</td><td>Strong red pool across the left floor</td></tr>
+          <tr><th scope="row">Blue</th><td><code>(0, 0, 2.5)</code></td><td>Radius-2 orbit centered at X&nbsp;=&nbsp;4</td><td>&minus;1</td><td>5</td><td>Blue highlight from the right</td></tr>
+          <tr><th scope="row">Yellow</th><td><code>(1, 1, 0)</code></td><td>Fixed at <code>(0, -0.9, 0.5)</code></td><td>&minus;0.9</td><td>2</td><td>Small center-floor pool</td></tr>
+          <tr><th scope="row">Green</th><td><code>(0, 1, 0.2)</code></td><td>Phase-shifted radius-5 path</td><td>&minus;0.5</td><td>5</td><td>Green moving floor light</td></tr>
+          <tr><th scope="row">Warm</th><td><code>(1, 0.7, 0.3)</code></td><td>Counter-rotating radius-10 path</td><td>&minus;1</td><td>25</td><td>Wide orange illumination</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <pre tabindex="0" aria-label="Evaluate one point light in the WebGPU deferred composition shader"><code><span class="code-keyword">let</span> attenuation = light_radius / (distance * distance + 1.0);
+<span class="code-keyword">let</span> n_dot_l = max(dot(normal, light_vector), 0.0);
+<span class="code-keyword">let</span> diffuse = light_color * albedo.rgb * n_dot_l * attenuation;
+
+<span class="code-keyword">let</span> reflected = reflect(-light_vector, normal);
+<span class="code-keyword">let</span> specular = light_color * albedo.a
+    * pow(max(dot(reflected, view_vector), 0.0), 16.0)
+    * attenuation;</code></pre>
+    <p>The uniform calls the attenuation numerator a radius, but the shader does not apply a hard cutoff. Every light affects every surface pixel through <code>radius / (distance&sup2; + 1)</code>. Cleared background pixels contain a zero normal and albedo; <code>safe_normalize</code> substitutes a fixed normal to avoid NaNs, while zero albedo keeps the final background black.</p>
+    <p>WGSL also contains position, normal, albedo, and specular diagnostic views selected by <code>debug_target</code> values one through four. Rust always uploads zero and exposes no UI for changing it, so the live demo only shows composed lighting.</p>
+
+    <h2 id="record-two-passes" tabindex="-1">Record two render passes and three scene draws</h2>
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-passes-caption" tabindex="0">
+      <table>
+        <caption id="deferred-passes-caption">Deferred shading render passes and explicit draw work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draws</th><th scope="col">Submitted triangles</th><th scope="col">Depth behavior</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">G-buffer</th><td>Position + normal + albedo + depth</td><td>Floor, then skinned Jax</td><td>2 + 11,960 = 11,962</td><td><code>LessEqual</code>, writes enabled; discard after pass</td><td>Stored surface attributes for visible geometry</td></tr>
+          <tr><th scope="row">Composition and overlay</th><td>Single-sample presentation surface; no depth</td><td>Fullscreen triangle, text, optional joystick geometry</td><td>1 explicit composition triangle + framework-managed overlay</td><td>No depth attachment</td><td>Six-light shading plus title, GPU, FPS, and controls</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The floor pipeline uses no culling. Jax is not marked double-sided, so its pipeline culls back faces. Both geometry pipelines are single-sample triangle lists with no blending. The composition pipeline is also single-sample and overwrites the surface with opaque output. Excluding overlay implementation details, a frame records two passes, three explicit draws, and 11,963 submitted triangles.</p>
+    <p>The second pass clears the surface dark blue, but the fullscreen triangle covers it and returns black for empty G-buffer pixels. The 21 px Vazirmatn text and joystick geometry render afterward in that same pass. The overlay shows “Deferred shading,” GPU information, FPS, and “G-buffer: position, normal, albedo.”</p>
+
+    <h2 id="control-camera" tabindex="-1">Control the first-person camera</h2>
+    <p>The demo is interactive through the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">joystick and first-person camera helper</a>. It starts at <code>(0, 1.35, 5)</code> with zero yaw and a slight &minus;0.04-radian downward pitch. Projection uses a 60&deg; right-handed field of view with near and far planes of 0.1 and 256.</p>
+    <ul>
+      <li>Use W and S to move forward and backward, and A and D to move left and right at four world units per second.</li>
+      <li>Use the arrow keys to look at 1.6 radians per second.</li>
+      <li>Press and drag on the left half of the canvas to move or the right half to look. Mouse and touch share 44 px virtual sticks.</li>
+    </ul>
+    <p>Pitch is clamped to &plusmn;1.45 radians, input axes clamp to unit length, and the update delta is capped at 1/15 second. Losing focus resets input. There is no collision, camera reset, animation pause, light control, or G-buffer diagnostic selector.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU deferred shading example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU deferred shading example"><code>cargo run --example deferred</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU deferred shading example"><code>scripts/build-wasm.sh --release deferred
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/deferred/</code> in a browser with WebGPU support. Both targets load the same three Jax files before calling <code>sib::render</code>, build the same merged mesh and joint palette, and execute the same geometry and composition passes.</p>
+    <p>This compact renderer pays 24 bytes per output pixel and stores world position rather than reconstructing it from depth. It evaluates all six lights for every fullscreen fragment with no tiled, clustered, stencil-volume, or compute culling. There are no shadows, ambient occlusion, emissive contribution, normal mapping, physically based BRDF, HDR intermediate, exposure, or tone mapping. Bright sums clamp in the presentation target.</p>
+    <p>Transparent geometry is not supported: the G-buffer pipelines do not blend, Jax writes a fixed 0.45 specular value instead of material or texture alpha, and composition always outputs alpha one. The material base-color factor is baked into loader vertex color and multiplied again in the deferred character shader; Jax's white factor hides that double application. Normals use the blended skin and model matrices directly instead of inverse transpose, which is safe for the current uniform outer scale but not general nonuniform scaling. Specular is not gated by a positive <code>N dot L</code>.</p>
+    <p>The skinned pipeline layout also carries the floor uniform layout in group zero even though Jax's shader entry points use group one. Its draw sets only group one after the floor draw has left a compatible group zero bound. Reordering or isolating that draw would require binding group zero explicitly or removing the unused layout.</p>
+    <p>The animation helper interpolates translations and scales linearly and rotations spherically without retaining glTF sampler interpolation modes. Jax declares 91 STEP and 47 LINEAR channels, but all are smoothed, so playback does not preserve the file's declared STEP transitions. The demo also keeps the CPU scene and cloned image data after GPU upload because it retains the scene for animation.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Reconstruct position from depth, compare full and compact G-buffer layouts, and measure bandwidth at several resolutions.</li>
+      <li>Add tiled or clustered light lists, then compare six lights with hundreds of culled lights.</li>
+      <li>Expose the existing diagnostic targets and controls for animation, light count, attenuation, and camera reset.</li>
+      <li>Add HDR lighting, tone mapping, shadows, material-aware PBR data, and a separate forward path for transparent objects.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferred.rs">Read the Deferred shading source &nearr;</a>
+      <a href="../multisamplingalphatocoverage/">&larr; Previous: WebGPU alpha-to-coverage</a>
+      <a href="../deferredmultisampling/">Next: WebGPU deferred multisampling &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

@@ -1,0 +1,161 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 15</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load 12 plant meshes, repeat each 2,048 times, and let a 240-byte command buffer supply the indexed draw parameters for a 24,576-object WebGPU scene.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Indirect draw demo at a glance">
+      <div><dt>Plant objects</dt><dd>24,576</dd></div>
+      <div><dt>Indirect commands</dt><dd>12</dd></div>
+      <div><dt>Command buffer</dt><dd>240 B</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#from-instancing-to-indirect">Move draw arguments into a buffer</a></li>
+        <li><a href="#load-plant-assets">Load and flatten the plant assets</a></li>
+        <li><a href="#build-instance-groups">Build 12 groups of plant instances</a></li>
+        <li><a href="#encode-indirect-commands">Encode indexed indirect commands</a></li>
+        <li><a href="#issue-indirect-draws">Issue the 12 indirect draws</a></li>
+        <li><a href="#texture-and-light-plants">Texture and light alpha-cutout foliage</a></li>
+        <li><a href="#ground-sky-and-depth">Compose the ground, sky, and depth pass</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="from-instancing-to-indirect" tabindex="-1">Move draw arguments into a buffer</h2>
+    <p>The <a href="../instancing/#about">WebGPU instancing example</a> passes an index range and instance range directly to <code>draw_indexed</code>. Indirect drawing keeps the same indexed, instanced work, but moves those arguments into a GPU-readable buffer. A render pass selects a byte offset, and WebGPU reads the draw parameters from that record.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/49096c775bfc19702ebd7238f2119a767b87ab78">original indirect draw commit</a> introduced the complete jungle scene. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/indirectdraw.rs">Rust example</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/indirectdraw.wgsl">WGSL shader</a>, and five scene assets keep the same rendering design. Later changes improved concurrent browser loading, error reporting, and projection setup. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> with a fixed camera and no keyboard, pointer, touch, or animation controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/indirectdraw.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1920" height="1080" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Twelve plant submeshes form a dense jungle of 24,576 objects. The overlay reports the exact 12 indirect plant draws used to submit them.</figcaption>
+    </figure>
+
+    <h2 id="load-plant-assets" tabindex="-1">Load and flatten the plant assets</h2>
+    <p>Before renderer initialization, the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a> reads five bundled resources. Native builds use worker threads; WebAssembly creates a worker and fetches the same five URLs concurrently with <code>Promise.all</code>. The glTF files embed their binary buffers as Base64 data URIs, so they do not trigger additional requests.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="indirect-assets-caption" tabindex="0">
+      <table>
+        <caption id="indirect-assets-caption">Indirect draw runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">File size</th><th scope="col">Runtime role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plants.gltf"><code>plants.gltf</code></a></th><td>502,730 bytes</td><td>12 nodes, meshes, primitives, and materials</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plane_circle.gltf"><code>plane_circle.gltf</code></a></th><td>10,876 bytes</td><td>25-unit ground disc</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sphere.gltf"><code>sphere.gltf</code></a></th><td>141,450 bytes</td><td>Inside-facing gradient sky</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/texturearray_plants_rgba.ktx"><code>texturearray_plants_rgba.ktx</code></a></th><td>16,777,336 bytes</td><td>12 foliage layers with 10 mip levels</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/ground_dry_rgba.ktx"><code>ground_dry_rgba.ktx</code></a></th><td>1,398,236 bytes</td><td>Repeating ground texture with 10 mip levels</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The five files total 18,830,628 bytes, about 17.96 MiB. The plant loader takes the first triangle primitive from each scene node, applies the node transform, flips the Y axis and UV V coordinate, and folds vertex color together with the material base-color factor. It appends everything to one 9,372-vertex, 26,610-index mesh while retaining 12 index ranges. Those ranges contain 8,870 template triangles in total.</p>
+    <p>The same loader flattens every primitive from the ground and sky files. The ground contributes 191 vertices and 192 indices, or 64 triangles. The sphere contributes 2,399 vertices and 13,536 indices, or 4,512 triangles. Every GPU mesh uses a 44-byte vertex record containing position, normal, UV, and RGB color at shader locations 0 through 3.</p>
+
+    <h2 id="build-instance-groups" tabindex="-1">Build 12 groups of plant instances</h2>
+    <p>Each plant type receives 2,048 records. <code>InstanceData</code> stores a three-component position, three rotation values, one scale, and a signed <code>i32</code> texture layer in a 32-byte stride. Shader locations 4 through 7 use <code>VertexStepMode::Instance</code>, so one record applies to every vertex of one plant.</p>
+    <p>A deterministic linear congruential generator starts from <code>0x1d1e_c7a5</code>. It places every instance on the XZ plane inside a 25-unit radius, chooses a scale from 1 to 3, and supplies a Y rotation from 0 to &pi;. Each group stores its draw index from 0 through 11 as the texture layer. The 12 contiguous groups contain 24,576 records and occupy a static 786,432-byte vertex buffer.</p>
+    <p>The current vertex shader scales a plant, adds its instance position, and then applies the transposed rotation matrix. That ordering rotates the translated position around the origin as well as orienting the mesh. The buffer never changes after initialization, so the jungle remains still while only the FPS overlay is refreshed.</p>
+
+    <h2 id="encode-indirect-commands" tabindex="-1">Encode indexed indirect commands</h2>
+    <p>WebGPU defines five values for an indexed indirect draw. The Rust structure mirrors their exact 20-byte memory layout:</p>
+    <pre tabindex="0" aria-label="WebGPU indexed indirect command layout"><code>#[repr(C)]
+<span class="code-keyword">struct</span> DrawIndexedIndirectCommand {
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: i32,
+    first_instance: u32,
+}</code></pre>
+    <p>Initialization creates one record for each plant index range. <code>index_count</code> and <code>first_index</code> select that species inside the concatenated mesh; <code>instance_count</code> is always 2,048; <code>base_vertex</code> and <code>first_instance</code> are zero. Twelve records produce a 240-byte buffer with <code>INDIRECT | COPY_DST</code> usage.</p>
+    <p>The <code>COPY_DST</code> flag would allow later command updates, but this example never rewrites the buffer. Its commands are generated by Rust once, not by a compute shader, visibility pass, or GPU counter.</p>
+
+    <h2 id="issue-indirect-draws" tabindex="-1">Issue the 12 indirect draws</h2>
+    <p>The render pass binds the shared plant mesh once. For each plant type, it moves the instance stream to that type's 65,536-byte group and advances the indirect-command offset by 20 bytes:</p>
+    <pre tabindex="0" aria-label="Issue indexed indirect plant draws"><code><span class="code-keyword">for</span> draw_index <span class="code-keyword">in</span> 0..draw_count {
+    pass.set_vertex_buffer(
+        1,
+        instance_buffer.slice(draw_index <span class="code-keyword">as</span> u64 * instance_group_stride..),
+    );
+    pass.draw_indexed_indirect(
+        indirect_buffer,
+        draw_index <span class="code-keyword">as</span> u64 * indirect_stride,
+    );
+}</code></pre>
+    <p>This is 12 indirect API calls from a CPU loop, not one multi-draw command. Indirection changes where each call reads its draw arguments; it does not reduce this example to one plant draw. Across all species, the GPU consumes 54,497,280 index references and submits 18,165,760 plant triangles per frame.</p>
+    <p>The design is a useful starting point for GPU-driven rendering because a compute pass could compact visible instances and update each command's <code>instance_count</code>. The current example performs no frustum culling, occlusion culling, level-of-detail selection, compaction, or indirect-count execution. All 24,576 plants are submitted every frame.</p>
+
+    <h2 id="texture-and-light-plants" tabindex="-1">Texture and light alpha-cutout foliage</h2>
+    <p><code>texturearray_plants_rgba.ktx</code> is an uncompressed KTX1 texture with 12 512&times;512 RGBA layers and a complete 10-level mip chain down to 1&times;1. Rust validates the header and copies all 16,777,200 texel bytes into an <code>Rgba8Unorm</code> <code>texture_2d_array</code>. It is linear rather than sRGB, uses linear minification and magnification, selects mip levels with nearest filtering, and clamps at the layer edges.</p>
+    <p>The signed layer stored in each instance selects the corresponding plant image. The fragment shader discards texels whose alpha is below 0.5, then combines 65% ambient light with Lambert diffuse lighting from <code>(0, -5, 0)</code>. It writes opaque color without blending. Plant culling is disabled so thin, alpha-cutout leaves remain visible from both sides.</p>
+    <pre tabindex="0" aria-label="Sample and alpha test a plant texture layer"><code><span class="code-keyword">let</span> layer = i32(input.uv_layer.z);
+<span class="code-keyword">let</span> color = textureSample(
+    plants_texture,
+    plants_sampler,
+    input.uv_layer.xy,
+    layer,
+);
+
+<span class="code-keyword">if</span> (color.a &lt; 0.5) {
+    discard;
+}</code></pre>
+
+    <h2 id="ground-sky-and-depth" tabindex="-1">Compose the ground, sky, and depth pass</h2>
+    <p>Three pipelines share one bind group containing a 128-byte projection/view uniform, the plant texture array and sampler, plus the ground texture and sampler. The scene uses triangle lists, one sample, no color blending, and a <code>Depth32Float</code> attachment:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="indirect-pipelines-caption" tabindex="0">
+      <table>
+        <caption id="indirect-pipelines-caption">Indirect draw scene pipelines</caption>
+        <thead>
+          <tr><th scope="col">Pipeline</th><th scope="col">Submission</th><th scope="col">Triangles</th><th scope="col">Depth write</th><th scope="col">Cull mode</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sky sphere</th><td>1 direct indexed draw</td><td>4,512</td><td>No</td><td>Front</td></tr>
+          <tr><th scope="row">Ground disc</th><td>1 direct indexed draw</td><td>64</td><td>Yes</td><td>Back</td></tr>
+          <tr><th scope="row">Plant field</th><td>12 indexed indirect draws</td><td>18,165,760</td><td>Yes</td><td>None</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The sky renders first from inside its front-face-culled sphere and removes translation from the view matrix, keeping the gradient centered on the camera. The circular ground repeats its single-layer 512&times;512 KTX texture 32 times across its UVs. Ground and plants then write depth with <code>LessEqual</code>. Together, the scene submits 18,170,336 triangles in 14 draw calls before a second color-load pass composites the text overlay.</p>
+    <p>The fixed camera uses a 60&deg; perspective projection with near and far planes of 0.1 and 512, view rotations of &minus;12&deg; around X and 159&deg; around Y, and a translation of <code>(0.4, 1.25, 0)</code>. Resizing recreates depth and rewrites only the projection/view uniform. There is no scene animation; the regular update path changes the overlay's GPU name, estimated FPS, object count, and indirect-draw count. The FPS value comes from CPU frame sampling rather than a GPU timestamp query.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU indirect draw example"><code>cargo run --example indirectdraw</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU indirect draw example"><code>scripts/build-wasm.sh --release indirectdraw
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/indirectdraw/</code> in a browser with WebGPU support. The page downloads the five model and texture files described above. WGSL and the Vazirmatn overlay font are compiled into the WebAssembly binary, while the article and screenshot remain readable without WebGPU.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Add a compute pass that tests plant bounds against the camera frustum, compacts visible instances, and writes the 12 indirect command counts.</li>
+      <li>Partition the field into spatial cells so occlusion or distance tests can skip groups instead of submitting every plant.</li>
+      <li>Replace the projected spherical placement formula with an area-uniform disc distribution and compare density near the center and edge.</li>
+      <li>Add wind animation, normal-aware foliage lighting, or alpha-to-coverage multisampling while keeping the indirect submission path.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/indirectdraw.rs">Read the indirect draw source &nearr;</a>
+      <a href="../instancing/">&larr; Previous: WebGPU asteroid instancing</a>
+      <a href="../pipelines/">Next: WebGPU multiple render pipelines &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

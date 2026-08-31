@@ -148,6 +148,7 @@ def render_example(example: str, build_id: str, web_root: Path = WEB_ROOT) -> st
 
     values = {
         "__EXAMPLE__": example,
+        "__EXAMPLE_LABEL__": html.escape(example, quote=True),
         "__BUILD_ID__": quote(build_id, safe=""),
         "__PAGE_HEAD__": f"<title>webgpu {example}</title>",
         "__PAGE_CLASS__": "",
@@ -199,6 +200,15 @@ def render_example(example: str, build_id: str, web_root: Path = WEB_ROOT) -> st
             str(article_path),
         )
         values.update({
+            "__EXAMPLE_LABEL__": html.escape(
+                re.sub(
+                    r"^WebGPU\s+",
+                    "",
+                    metadata.get("breadcrumbName", example),
+                    flags=re.IGNORECASE,
+                ),
+                quote=True,
+            ),
             "__PAGE_HEAD__": article_head(example, metadata, has_breadcrumbs=has_breadcrumbs),
             "__PAGE_CLASS__": "has-article",
             "__ARTICLE__": article,

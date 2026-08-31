@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
-    render_pass, shader, texture, wgpu, winit,
+    render_pass, texture, wgpu, winit,
 };
 use std::sync::{
     Arc,
@@ -12,6 +12,7 @@ use crate::{
     gltf_skin::SkinnedGltfScene,
     joystick::{FpsCamera, JoystickOverlay, VirtualJoystick},
     light_gizmo::{LightGizmo, LightGizmoRenderer},
+    shader_include,
 };
 
 use super::{
@@ -1519,17 +1520,17 @@ impl Example for RestirExample {
                     },
                 ],
             });
-        let compute_shader = shader::wgsl_module(
+        let compute_shader = shader_include::module_from(
             &context.device,
             Some("ReSTIR reservoir shader"),
             RESTIR_SHADER,
         );
-        let present_shader = shader::wgsl_module(
+        let present_shader = shader_include::module_from(
             &context.device,
             Some("ReSTIR presentation shader"),
             PRESENT_SHADER,
         );
-        let atrous_shader = shader::wgsl_module(
+        let atrous_shader = shader_include::module_from(
             &context.device,
             Some("ReSTIR a-trous shader"),
             ATROUS_SHADER,

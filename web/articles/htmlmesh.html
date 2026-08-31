@@ -1,0 +1,207 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 09</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Rasterize a small HTML document into 1024&times;576 RGBA pixels, upload those pixels to WebGPU, draw them on a tilted plane, and map pointer, touch, wheel, and keyboard input back into page coordinates.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="HTML mesh demo at a glance">
+      <div><dt>Page texture</dt><dd>1024&times;576</dd></div>
+      <div><dt>Shatter tiles</dt><dd>2,304</dd></div>
+      <div><dt>Refresh choices</dt><dd>15 / 30 / 60 fps</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#put-html-on-a-plane">Put HTML on a WebGPU plane</a></li>
+        <li><a href="#rasterize-the-document">Rasterize the document into RGBA pixels</a></li>
+        <li><a href="#upload-page-texture">Upload the page texture</a></li>
+        <li><a href="#ray-map-input">Ray-map input into page coordinates</a></li>
+        <li><a href="#shatter-the-plane">Switch from one quad to 2,304 shards</a></li>
+        <li><a href="#compare-runtime-backends">Compare native and WebAssembly backends</a></li>
+        <li><a href="#render-passes-and-controls">Inspect passes and controls</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="put-html-on-a-plane" tabindex="-1">Put HTML on a WebGPU plane</h2>
+    <p>The <a href="../textmesh/#about">previous 3D text mesh example</a> converts font outlines into vertices. HTML Mesh takes a different route: a browser or canvas rasterizer produces ordinary page pixels, and WebGPU treats the result as one sampled texture. The GPU never parses HTML, executes JavaScript, or lays out CSS.</p>
+    <p>The bundled <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/htmlmesh/page.html"><code>page.html</code></a> is a 2,295-byte document with a heading, a 280&times;76 button, a counter, CSS, and a short click handler. The <a href="https://github.com/PooyaEimandar/webgpu/commit/2e72fe231df1afd4da44af7f27e04f17f9149849">original HTML Mesh commit</a> introduced the page, renderer, shader, and screenshots. A later <a href="https://github.com/PooyaEimandar/webgpu/commit/140aaae5aacbef465a149698fe36054c995179dc">shatter-effect commit</a> added the tiled geometry and shader motion. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/htmlmesh.rs">Rust example</a> runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/htmlmesh.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="633" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The memory document is visible as a slightly rotated 16:9 plane. The egui panel reports the raster backend and lets you change the source, input routing, refresh rate, and shatter effect.</figcaption>
+    </figure>
+
+    <p>The plane keeps the page&rsquo;s 16:9 aspect ratio: its half-height is 1 and its half-width is <code>1024 / 576</code>. A fixed camera at <code>(0, 0.12, 4.25)</code> looks near the origin through a 46&deg; perspective projection. The model rotates &minus;14&deg; around Y and 4&deg; around X, which makes both the 3D placement and the inverse hit-test visible without adding camera controls.</p>
+
+    <h2 id="rasterize-the-document" tabindex="-1">Rasterize the document into RGBA pixels</h2>
+    <p><code>HtmlSurface</code> owns a <strong>2,359,296-byte</strong> CPU pixel vector: <code>1024 * 576 * 4</code>. It also tracks the active source, a counter, hover/press/focus state, state and bitmap generations, pending work, and whether the GPU texture is dirty. Initialization draws a small software fallback before an asynchronous backend can replace it.</p>
+    <p>The word <q>HTML</q> covers several different implementations here. The current backends are deliberately explicit:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="html-raster-backends-caption" tabindex="0">
+      <table>
+        <caption id="html-raster-backends-caption">HTML Mesh raster sources in the current native and WebAssembly builds</caption>
+        <thead>
+          <tr><th scope="col">Build and source</th><th scope="col">Raster path</th><th scope="col">Interaction path</th><th scope="col">Practical boundary</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">WebAssembly memory page</th><td><code>DOMParser</code> extracts selected text and state; Canvas 2D paints the known card design</td><td>Rust hit-tests the bundled button and regenerates the canvas image</td><td>It is a styled summary, not a general HTML/CSS renderer, and the page script is not executed</td></tr>
+          <tr><th scope="row">WebAssembly URL</th><td>The local server drives a persistent headless browser, returns an initial PNG, then JPEG refreshes</td><td>Ray-mapped events go through <code>/api/htmlmesh/input</code> to the browser session</td><td>Requires this repository&rsquo;s loopback-only server API and a supported browser executable</td></tr>
+          <tr><th scope="row">Native macOS</th><td>A hidden 1024&times;576 <code>wry</code> child webview is captured through WKWebView</td><td>Evaluated JavaScript dispatches DOM pointer, wheel, touch, and keyboard events</td><td>Snapshot capture in this source is implemented specifically for macOS</td></tr>
+          <tr><th scope="row">Native non-macOS</th><td>The <code>wry</code> page can be created, but the texture snapshot function reports that capture is unavailable</td><td>Forwarding code exists, but fresh page pixels cannot reach the texture through this backend</td><td>A portable capture implementation is still needed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>For the WebAssembly memory path, the inline JavaScript parses the markup, reads the first heading, button, and status, summarizes selected body text, and paints a fixed card on a Canvas 2D context. Arbitrary CSS layout, images, transforms, video, and page scripts are therefore not reproduced by that path. The native macOS webview and the server-side browser URL path do execute real page content.</p>
+    <p>The WebAssembly URL endpoints live in the current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/main.rs">local server source</a>. Requests are accepted only when the HTTP <code>Host</code> and any <code>Origin</code> header identify loopback, because the API can navigate a browser and inject input. This is a local demo service, not a general public screenshot API.</p>
+
+    <h2 id="upload-page-texture" tabindex="-1">Upload the page texture</h2>
+    <p>The example creates one sampled 2D texture with linear minification and magnification. When <code>texture_dirty</code> is set, <code>upload_html_if_dirty</code> copies the complete CPU image with a 4,096-byte row pitch:</p>
+    <pre tabindex="0" aria-label="Upload the HTML surface to its WebGPU texture"><code>context.queue.write_texture(
+    wgpu::TexelCopyTextureInfo {
+        texture: &amp;html_texture.texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+    },
+    &amp;html.rgba,
+    wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(SURFACE_WIDTH * 4),
+        rows_per_image: Some(SURFACE_HEIGHT),
+    },
+    html_texture.size,
+);</code></pre>
+    <p>Every accepted snapshot therefore uploads the full 2.25 MiB logical image; there is no dirty rectangle, compression on the GPU copy, mip chain, or partial update. Choosing a 15, 30, or 60 fps live refresh target can request roughly 33.75, 67.5, or 135 MiB/s of unpadded CPU-to-texture payload before transport, browser capture, and driver overhead. A pending capture prevents overlapping refresh work, so those buttons are targets rather than guaranteed rates.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="html-gpu-resources-caption" tabindex="0">
+      <table>
+        <caption id="html-gpu-resources-caption">HTML Mesh geometry, buffers, texture, and update cadence</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Logical size</th><th scope="col">Usage</th><th scope="col">Update cadence</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Plain plane</th><td>4 vertices + 6 <code>u32</code> indices; 184 bytes</td><td>2 triangles when shatter is off</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Shatter plane</th><td>9,216 vertices + 13,824 indices; 423,936 bytes</td><td>4,608 independent triangles grouped into 2,304 tiles</td><td>Uploaded once even when disabled</td></tr>
+          <tr><th scope="row">Uniform buffer</th><td>160 bytes</td><td>View-projection, model, camera, animation, enable flag, and tile grid</td><td>Fully rewritten before every rendered frame and on resize</td></tr>
+          <tr><th scope="row">HTML texture</th><td>1024&times;576 RGBA; 2,359,296 logical bytes</td><td>Fragment-shader page color</td><td>Fully rewritten only when a raster result becomes dirty</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface width &times; height, <code>Depth32Float</code></td><td>Depth-tests the plane</td><td>Recreated on resize</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>One bind group exposes the uniform buffer at binding 0, page texture at binding 1, and sampler at binding 2. The fragment shader samples a single texel color, adds directional diffuse and a view-dependent Fresnel accent, and outputs alpha blending. The pipeline has depth writes with <code>LessEqual</code>, no face culling, one sample, and no post-processing target.</p>
+
+    <h2 id="ray-map-input" tabindex="-1">Ray-map input into page coordinates</h2>
+    <p>A tilted page needs more than scaling window coordinates. <code>pointer_uv</code> converts the cursor from framebuffer pixels to normalized device coordinates, unprojects near and far points with the inverse view-projection matrix, and forms a world-space ray. It then transforms that ray by the inverse plane model and intersects local Z&nbsp;=&nbsp;0:</p>
+    <pre tabindex="0" aria-label="Intersect a cursor ray with the local HTML plane"><code><span class="code-keyword">let</span> model_inverse = plane_model().inverse();
+<span class="code-keyword">let</span> local_origin = model_inverse.transform_point3(ray_origin);
+<span class="code-keyword">let</span> local_direction = model_inverse.transform_vector3(ray_direction);
+<span class="code-keyword">let</span> t = -local_origin.z / local_direction.z;
+<span class="code-keyword">let</span> hit = local_origin + local_direction * t;
+
+Some(glam::Vec2::new(
+    (hit.x / PLANE_HALF_WIDTH + 1.0) * 0.5,
+    1.0 - (hit.y / PLANE_HALF_HEIGHT + 1.0) * 0.5,
+))</code></pre>
+    <p>The UV is converted to a clamped 1024&times;576 page position. Mouse clicks, one active touch, wheel deltas, selected keyboard keys, and text can then be forwarded to the active document. The egui panel receives each window event first, so operating the panel does not also click the page behind it.</p>
+    <p>The bundled memory fallback exposes only one hit rectangle, from pixel <code>(372, 250)</code> to <code>(652, 326)</code>, matching the button. Its unused state model still contains name, toggle, and slider variants, but <code>elements()</code> returns only the button. Tab always focuses that button; Enter or Space activates it; clicking increments a saturating <code>u32</code> counter.</p>
+    <p>Hit testing always uses the original flat model. When the shatter animation displaces visible tiles, input does not follow each moved shard. That mismatch is useful to understand before treating the technique as a production 3D browser surface.</p>
+
+    <h2 id="shatter-the-plane" tabindex="-1">Switch from one quad to 2,304 shards</h2>
+    <p>The shatter option switches buffers, not pipelines. Rust subdivides the same 16:9 rectangle into 64 columns and 36 rows. Every tile owns four vertices and six indices, so adjacent tiles deliberately do not share vertices. Each vertex carries position, UV, normal, and the tile-center <code>shard</code> coordinate in a 40-byte stride.</p>
+    <p>The vertex shader hashes that tile coordinate, weights tiles near the top of the page, and repeats a rising motion with a per-tile phase offset:</p>
+    <pre tabindex="0" aria-label="Animate the HTML Mesh shard positions in WGSL"><code><span class="code-keyword">let</span> top_weight = 1.0 - smoothstep(0.0, 0.62, input.shard.y);
+<span class="code-keyword">let</span> seed = hash2(input.shard * vec2&lt;f32&gt;(37.0, 91.0));
+<span class="code-keyword">let</span> rise = fract(uniforms.effect.x * 0.42 + seed * 0.31);
+<span class="code-keyword">let</span> lift = top_weight * rise;
+
+local_position.x += enabled * x_dir * lift * 0.18;
+local_position.y += enabled * lift * 0.72;
+local_position.z += enabled * z_dir * lift * 0.16;</code></pre>
+    <p>Animation time advances in seconds only while shatter is enabled. The <code>fract(time * 0.42 + ...)</code> term repeats about every 2.38 seconds, with deterministic offsets from each tile&rsquo;s seed. Fragment shading adds green crack lines near tile boundaries in the upper region and fades those tiles. The current fade multiplier is 0.88, so alpha remains at least 0.12; the shader&rsquo;s <code>alpha &lt; 0.02</code> discard guard is not reached with these values.</p>
+
+    <h2 id="compare-runtime-backends" tabindex="-1">Compare native and WebAssembly backends</h2>
+    <p>The rendering pipeline is shared, but page acquisition differs substantially. Native startup reads <code>assets/htmlmesh/page.html</code> synchronously and creates a <code>wry</code> child webview. On macOS, WKWebView snapshots are converted to 1024&times;576 RGBA, including channel conversion and resizing where necessary. Page loads schedule a capture after 120 ms; pointer and keyboard changes normally schedule one after 16 ms, while unpressed pointer moves use 33 ms.</p>
+    <p>WebAssembly fetches the same page asset asynchronously. Memory mode uses the local Canvas 2D painter. URL mode calls the local server, which starts or reuses one headless Chromium-family browser session for the requested URL and dimensions. Up to 16 pending inputs are retained; adjacent text events are joined and consecutive mouse moves are replaced by the newest one.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="html-controls-caption" tabindex="0">
+      <table>
+        <caption id="html-controls-caption">HTML Mesh egui controls and defaults</caption>
+        <thead>
+          <tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">What it changes</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Shatter effect</th><td>Off</td><td>Selects the 2-triangle plane or 4,608-triangle tiled mesh and enables shader motion</td></tr>
+          <tr><th scope="row">Enable IO</th><td>On</td><td>Allows ray-mapped pointer, touch, wheel, and keyboard forwarding</td></tr>
+          <tr><th scope="row">Texture refresh</th><td>30 fps</td><td>Selects a 15, 30, or 60 fps target for live URL snapshots</td></tr>
+          <tr><th scope="row">Load memory HTML</th><td>Active at startup</td><td>Returns to the bundled document and resets the live-source timer</td></tr>
+          <tr><th scope="row">URL + Go</th><td><code>https://example.com</code></td><td>Loads an HTTP(S) URL; an omitted scheme is normalized to HTTPS</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Neither backend embeds a browser framebuffer directly in WebGPU memory. Captures pass through CPU-visible encoded or RGBA pixels, then a full <code>queue.write_texture</code>. Video, rapid animation, and high-frequency scrolling therefore amplify browser capture, transport, decode, and upload cost.</p>
+
+    <h2 id="render-passes-and-controls" tabindex="-1">Inspect passes and controls</h2>
+    <p>A rendered frame first updates a dirty HTML texture, rewrites the 160-byte uniform, and draws one selected mesh. It then asks egui to prepare and render its panel while preserving the scene color.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="html-passes-caption" tabindex="0">
+      <table>
+        <caption id="html-passes-caption">HTML Mesh render passes and submitted geometry</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draw work</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">HTML plane</th><td>Cleared surface color + surface-size depth</td><td>1 indexed draw: 6 indices normally or 13,824 with shatter enabled</td><td>Textured page with lighting, alpha, and optional shard displacement</td></tr>
+          <tr><th scope="row">egui</th><td>Loads surface color; no depth</td><td>Renderer-generated paint batches; draw count varies with clipped UI primitives</td><td>Performance, backend status, errors, mesh controls, and source controls</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The example records two render passes in its main encoder. Egui may also return auxiliary command buffers while updating its own textures and buffers. There is no fixed glyph-draw count, no MSAA resolve, and no intermediate scene color target.</p>
+    <p>Resizing rebuilds only the surface-size depth texture and projection uniform. The source texture remains 1024&times;576, so its browser page resolution and memory cost do not follow window size.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU HTML Mesh example"><code>cargo run --example htmlmesh</code></pre>
+    <p>On macOS this path can capture the live <code>wry</code> page. Other native targets currently need their own webview-to-RGBA implementation for live texture updates.</p>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and use the repository server:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU HTML Mesh example"><code>scripts/build-wasm.sh --release htmlmesh
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/htmlmesh/</code> in a WebGPU-capable browser. The memory page works with the Canvas 2D summary rasterizer. URL capture additionally needs a supported Chromium-family executable; the server error suggests setting <code>WEBGPU_HTMLMESH_BROWSER</code> when automatic discovery fails. The loopback guard intentionally prevents that API from becoming a remote service.</p>
+    <p>Useful source experiments include:</p>
+    <ul>
+      <li>Upload dirty rectangles instead of 2.25 MiB on every small page change, then measure bandwidth at each refresh target.</li>
+      <li>Replace the fixed Canvas 2D memory painter with a general raster path and compare the resulting CSS coverage.</li>
+      <li>Make hit testing follow displaced shard geometry, or disable page interaction while the shatter effect is active.</li>
+      <li>Add mipmaps and anisotropic filtering, then view the plane at steeper angles.</li>
+      <li>Implement native capture outside macOS and keep the same <code>HtmlSurface</code> texture contract.</li>
+    </ul>
+    <p>This example is a bridge between browser rendering and GPU composition, not an embeddable browser engine. Its fixed resolution, whole-image transfers, platform-specific capture, and local headless-browser service are the main constraints to solve before using the idea for production UI.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/htmlmesh.rs">Read the HTML Mesh source &nearr;</a>
+      <a href="../textmesh/">&larr; Previous: WebGPU 3D text mesh</a>
+      <a href="../gltf/">Next: WebGPU glTF 2.0 &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

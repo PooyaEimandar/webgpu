@@ -1,0 +1,236 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 32</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render animated Jax from three moving light cameras, preserve the resulting depth maps, fill a world-space G-buffer, and apply nine-tap percentage-closer filtering while eight colored spotlights illuminate the final fullscreen pass.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU deferred shadows demo at a glance">
+      <div><dt>Shadow maps</dt><dd>3 &times; 1024&sup2;</dd></div>
+      <div><dt>Spotlights</dt><dd>8</dd></div>
+      <div><dt>PCF taps per shadowed light</dt><dd>9</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#add-shadows">Add three shadowed spotlights</a></li>
+        <li><a href="#load-jax-assets">Load three Jax assets</a></li>
+        <li><a href="#animate-shadow-caster">Animate the shadow caster</a></li>
+        <li><a href="#render-shadow-maps">Render three depth maps</a></li>
+        <li><a href="#fill-gbuffer">Fill the single-sample G-buffer</a></li>
+        <li><a href="#filter-shadows">Filter shadows during composition</a></li>
+        <li><a href="#record-five-passes">Record five render passes</a></li>
+        <li><a href="#control-camera">Control the first-person camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="add-shadows" tabindex="-1">Add three shadowed spotlights to deferred shading</h2>
+    <p>The <a href="../deferredmultisampling/#about">previous Deferred Multisampling example</a> keeps four coverage samples for each G-buffer pixel and manually averages their lighting. Deferred Shadows returns to one sample per pixel and spends its extra work elsewhere: three light-space depth passes record Jax's moving silhouette before the ordinary geometry pass. The fullscreen shader can then test whether each visible floor or character point lies behind that silhouette from a light's point of view.</p>
+    <p>The first three of eight spotlights own shadow maps. Five additional spotlights contribute color without shadow tests. This is classic shadow mapping inside a deferred renderer: visibility is generated from the caster first, while lighting and shadow lookup wait until world position, normal, and material data are available in the G-buffer.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/24b478ba1c91b8957c25aa6ddac7b87a29c681e5">introducing Deferred Shadows commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferredshadows.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/deferredshadows.wgsl">WGSL shader</a>, README entry, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">gallery registration</a>. Its build-script registration had landed nine seconds earlier with Deferred Multisampling. A later <a href="https://github.com/PooyaEimandar/webgpu/commit/d097b099d109c48f0dc7028d837f4d7e2bd65a43">screenshot and explicit-LOD comparison update</a> added the current images and changed shadow lookups to <code>textureSampleCompareLevel</code>. Current Rust also has the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">direct WebGPU projection</a>. The shader's <a href="https://github.com/PooyaEimandar/webgpu/commit/a1783f9ce64b2e6e59c8eb1f45f0423117ee8365">safe-normalize fix</a> protects cleared background normals. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/deferredshadows.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Red, blue, warm, green, cyan, magenta, orange, and violet spotlights overlap across the checkerboard. Jax casts shadows for the first three lights. The current 1280&times;720 <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/deferredshadows.jpg">JPEG</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/deferredshadows.webp">WebP</a> arrived in the later screenshot commit and predate the safe-normalize change.</figcaption>
+    </figure>
+
+    <h2 id="load-jax-assets" tabindex="-1">Load three Jax assets before starting the renderer</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs">skinned glTF loader</a> first read <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>. They then load a one-item buffer batch containing <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a>, followed by a one-item image batch containing <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png"><code>jax_base_color.png</code></a>. Native startup performs those two one-item batches sequentially. WebAssembly dispatches a temporary asset Worker for each batch in the same sequence.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-assets-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-assets-caption">Deferred Shadows runtime assets and compiled inputs</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Input</th><th scope="col">Stored bytes</th><th scope="col">Encoded structure</th><th scope="col">Decoded or uploaded representation</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><code>jax.gltf</code></td><td>68,324</td><td>JSON with 146 accessor declarations</td><td>59 nodes, one mesh, one skin, one animation</td><td>References scene, geometry, skin, animation, and material</td></tr>
+          <tr><th scope="row">2</th><td><code>jax.bin</code></td><td>1,957,752</td><td>Binary data backing 146 buffer views</td><td>Attributes, indices, inverse binds, and keyframes</td><td>Mesh and skeletal animation payload</td></tr>
+          <tr><th scope="row">3</th><td><code>jax_base_color.png</code></td><td>13,008</td><td>1024&times;1024 RGB8 PNG</td><td>4,194,304-byte RGBA8 image</td><td>One-mip sRGB character texture</td></tr>
+          <tr><th scope="row">Compiled</th><td><code>deferredshadows.wgsl</code></td><td>12,553</td><td>350 lines of WGSL</td><td>Shadow, floor MRT, skinned MRT, and composition pipelines</td><td>Depth capture, G-buffer output, lighting, and PCF</td></tr>
+          <tr><th scope="row">Compiled</th><td>Vazirmatn font</td><td>122,752</td><td>TrueType font</td><td>Framework-managed glyph resources</td><td>Title, GPU, FPS, light, map, and G-buffer overlay</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three runtime files total 2,039,084 stored bytes, about 1.9446 MiB. Jax contains one scene, 59 nodes, one mesh and triangle primitive, one material, texture, image, sampler, skin, and animation. Its primitive supplies 35,880 vertices and 35,880 source <code>u16</code> indices but no vertex color, so the loader supplies white. The material base-color factor is white, metallic factor is zero, and the default one-sided setting enables face culling.</p>
+    <p>The RGB PNG decodes into a 4,194,304-byte RGBA8 image and uploads as one-mip <code>Rgba8UnormSrgb</code>. Its sampler repeats U and V, clamps W, and uses linear magnification and minification. It has no lower-resolution mips. The three files came from the <a href="https://github.com/PooyaEimandar/webgpu/commit/a65ec584ad446059707f4c0c9d1f14171540aa7a">repository's Jax asset update</a> and remain unchanged; the repository contains no separate provenance or license file for them.</p>
+
+    <h2 id="animate-shadow-caster" tabindex="-1">Animate one 46-joint shadow caster</h2>
+    <p>The one-second <code>Walking_1</code> clip carries 138 channels: translation, rotation, and scale for every one of 46 joints. Rust advances the first animation, caps its delta at 1/15 second, wraps at the clip boundary, rebuilds the joint palette, and rewrites all 128 reserved matrices. The same joint palette deforms Jax in three shadow passes and once in the G-buffer pass.</p>
+    <p>A generated floor contributes four 40-byte vertices and six <code>u32</code> indices without another file request. It spans X&nbsp;=&nbsp;&minus;8.5 to 8.5, Z&nbsp;=&nbsp;&minus;10 to 5, and sits at Y&nbsp;=&nbsp;&minus;1.12. Jax uses a 1.75 uniform scale, 20&deg; Y rotation, and translation to Z&nbsp;=&nbsp;&minus;2, with its bind-pose minimum aligned to the floor.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-buffers-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-buffers-caption">Deferred Shadows scene geometry and explicit GPU buffers</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Elements</th><th scope="col">Stride or block</th><th scope="col">Logical bytes</th><th scope="col">Update cadence</th><th scope="col">Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Jax vertices</th><td>35,880</td><td>76 bytes</td><td>2,726,880</td><td>Uploaded once</td><td>Three shadow draws + one G-buffer draw</td></tr>
+          <tr><th scope="row">Jax indices</th><td>35,880 <code>u32</code></td><td>4 bytes</td><td>143,520</td><td>Uploaded once</td><td>11,960 triangles per indexed draw</td></tr>
+          <tr><th scope="row">Floor geometry</th><td>4 vertices + 6 indices</td><td>40-byte vertex</td><td>184</td><td>Uploaded once</td><td>2 triangles in the G-buffer pass</td></tr>
+          <tr><th scope="row">Joint palette</th><td>128 matrices; 46 used</td><td>64-byte matrix</td><td>8,192</td><td>Fully rewritten every frame</td><td>GPU skinning in all four Jax draws</td></tr>
+          <tr><th scope="row">Camera-facing uniforms</th><td>Jax + floor</td><td>144 + 224 bytes</td><td>368</td><td>Rewritten every frame</td><td>Main-camera geometry transforms</td></tr>
+          <tr><th scope="row">Shadow uniforms</th><td>3 light cameras</td><td>144 bytes each</td><td>432</td><td>Rewritten every frame</td><td>Jax model and light view-projection</td></tr>
+          <tr><th scope="row">Composition uniforms</th><td>8 lights, camera, parameters</td><td>928-byte block</td><td>928</td><td>Rewritten every frame</td><td>Lighting, light matrices, shadows, and debug state</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The explicit buffers total 2,880,504 bytes. Adding the 4,194,304-byte character texture produces 7,074,808 fixed logical bytes before shadow maps, G-buffer attachments, surface, and overlays. The palette and six uniform buffers write 9,920 bytes per frame. Later loader changes added a <a href="https://github.com/PooyaEimandar/webgpu/commit/34b0e557b82aefaf30a5ab426386a5a613f2acd7">hierarchy-depth guard and stable first material</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">per-primitive material records</a>; this one-primitive asset still fits the example's first-material path.</p>
+
+    <h2 id="render-shadow-maps" tabindex="-1">Render three 1024-square depth maps every frame</h2>
+    <p>Each shadowed spotlight gets a separate 1024&times;1024 <code>Depth32Float</code> texture with one sample, one mip, and one layer. A 100&deg; perspective camera looks from the animated light position toward its target with near and far planes of 0.1 and 64. The render loop clears each depth texture to one, draws Jax, and stores the result. The floor is a receiver but is not submitted as a shadow caster.</p>
+    <p>Because the current shadow pipeline includes <code>fs_shadow</code>, it also binds one shared 1024&times;1024 <code>Rgba8Unorm</code> color target. That fragment returns zero; each pass clears and discards the color. Jax's one-sided material switches the shadow pipeline to front-face culling. Depth comparison is <code>LessEqual</code>, with slope-scale bias 0.25 and zero constant or clamp bias.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-maps-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-maps-caption">Deferred shadow-map resources and filtering rules</caption>
+        <thead>
+          <tr><th scope="col">Resource or rule</th><th scope="col">Count or extent</th><th scope="col">Format or value</th><th scope="col">Logical bytes</th><th scope="col">Producer behavior</th><th scope="col">Composition behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Shadow depth textures</th><td>3 &times; 1024&times;1024</td><td><code>Depth32Float</code>; 1 sample; 1 mip</td><td>12,582,912</td><td>Clear 1; render Jax; store</td><td>Bound as three separate depth textures</td></tr>
+          <tr><th scope="row">Throwaway color</th><td>1 &times; 1024&times;1024</td><td><code>Rgba8Unorm</code>; 1 sample; 1 mip</td><td>4,194,304</td><td>Clear black; write zero; discard</td><td>Never bound or read</td></tr>
+          <tr><th scope="row">Light cameras</th><td>3 perspective views</td><td>100&deg;; aspect 1; 0.1&ndash;64</td><td>Inside uniforms</td><td>Updated for moving lights</td><td>Project world position into shadow UV/depth</td></tr>
+          <tr><th scope="row">Raster bias</th><td>Each shadow draw</td><td>Slope 0.25; constant 0; clamp 0</td><td>&mdash;</td><td>Offsets stored caster depth</td><td>Reduces surface acne</td></tr>
+          <tr><th scope="row">Receiver bias</th><td>Each shadowed light</td><td><code>max(0.00022(1-N&middot;L), 0.00008)</code></td><td>&mdash;</td><td>&mdash;</td><td>Subtracts from comparison depth</td></tr>
+          <tr><th scope="row">PCF kernel</th><td>3&times;3 = 9 taps</td><td>Offsets 1.5 shadow texels apart</td><td>&mdash;</td><td>&mdash;</td><td>Averages comparison results; clamps visibility to 0.2</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three depth maps occupy 12 MiB and the reused color target adds 4 MiB, for 16 MiB of fixed shadow resources before driver-specific overhead. They are created once and do not resize with the window. The comparison sampler clamps at texture edges, uses nearest filtering, and applies <code>LessEqual</code>; softness comes from nine explicit comparison samples rather than sampler filtering.</p>
+
+    <h2 id="fill-gbuffer" tabindex="-1">Fill a 24-byte single-sample G-buffer per pixel</h2>
+    <p>After all three shadow passes, the main-camera geometry pass draws the two-triangle checkerboard and the 11,960-triangle skinned character. Their fragment shaders write world position, normalized world normal, and albedo with specular strength in alpha. Jax writes 0.45; the floor writes 0.08. A surface-sized depth texture handles visibility, then is discarded because composition reads stored world position instead.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-gbuffer-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-gbuffer-caption">Single-sample Deferred Shadows G-buffer at 1280 by 720</caption>
+        <thead>
+          <tr><th scope="col">Attachment</th><th scope="col">Format</th><th scope="col">Bytes per pixel</th><th scope="col">Logical bytes at 1280&times;720</th><th scope="col">End-of-pass action</th><th scope="col">Composition use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">World position</th><td><code>Rgba16Float</code></td><td>8</td><td>7,372,800</td><td>Store</td><td>Light vectors and shadow projection</td></tr>
+          <tr><th scope="row">World normal</th><td><code>Rgba16Float</code></td><td>8</td><td>7,372,800</td><td>Store</td><td>Diffuse, specular, and receiver bias</td></tr>
+          <tr><th scope="row">Albedo/specular</th><td><code>Rgba8Unorm</code></td><td>4</td><td>3,686,400</td><td>Store</td><td>Ambient, diffuse, and specular strength</td></tr>
+          <tr><th scope="row">Depth</th><td><code>Depth32Float</code></td><td>4</td><td>3,686,400</td><td>Discard</td><td>Not bound, sampled, or resolved</td></tr>
+          <tr><th scope="row">Total</th><td>Three colors + depth</td><td><strong>24</strong></td><td><strong>22,118,400</strong></td><td>Colors stored; depth discarded</td><td>21.09375 MiB before allocation overhead</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>At the screenshot resolution, fixed buffers, the base texture, shadow resources, and G-buffer total 45,970,424 logical bytes, about 43.841 MiB, before the presentation surface, glyphs, joystick, row alignment, and implementation overhead. Resizing recreates only the full-resolution G-buffer and its composition bind group; the three fixed-resolution shadow maps remain allocated.</p>
+
+    <h2 id="filter-shadows" tabindex="-1">Filter three shadowed lights during composition</h2>
+    <p>The single-sample fullscreen pipeline loads one position, normal, and albedo texel. It starts with 3.5% ambient albedo, then loops across all eight spotlights. Every light uses a 15&deg; inner cone, a 28&deg; outer cone, inverse-square-like <code>radius / (distance&sup2; + 1)</code> attenuation, Lambert diffuse, and reflect-vector specular with exponent 18. Only light indices zero through two call the shadow function.</p>
+    <p>This is not a controlled shadows-only comparison with the earlier Deferred pages. The original uses six lights, 2.5% ambient, and specular exponent 16; Deferred Multisampling uses six lights, 15% ambient, and exponent 8. This example changes the count, positions, colors, spotlight cones, ambient level, and exponent as well as adding shadow visibility.</p>
+    <pre tabindex="0" aria-label="Apply receiver bias and nine-tap shadow PCF in WGSL"><code><span class="code-keyword">let</span> ndotl = max(dot(normal, light_vector), 0.0);
+<span class="code-keyword">let</span> bias = max(0.00022 * (1.0 - ndotl), 0.00008);
+<span class="code-keyword">let</span> reference_depth = clamp(projected.z - bias, 0.0, 1.0);
+
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> y: i32 = -1; y &lt;= 1; y = y + 1) {
+    <span class="code-keyword">for</span> (<span class="code-keyword">var</span> x: i32 = -1; x &lt;= 1; x = x + 1) {
+        <span class="code-keyword">let</span> offset = vec2&lt;f32&gt;(f32(x), f32(y)) * texel;
+        visibility += sample_shadow_depth(light_index, uv + offset, reference_depth);
+    }
+}
+visibility /= 9.0;</code></pre>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-lights-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-lights-caption">Eight moving spotlights evaluated by Deferred Shadows</caption>
+        <thead>
+          <tr><th scope="col">Light</th><th scope="col">Linear RGB</th><th scope="col">Attenuation numerator</th><th scope="col">Motion or placement</th><th scope="col">Shadow lookup</th><th scope="col">Visible role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Red</th><td><code>(2.9, 0.08, 0.02)</code></td><td>34</td><td>High left, moving toward center</td><td>Map 0; up to 9 taps</td><td>Red cast shadow</td></tr>
+          <tr><th scope="row">Blue</th><td><code>(0.02, 0.25, 3.2)</code></td><td>32</td><td>High right, moving toward center</td><td>Map 1; up to 9 taps</td><td>Blue cast shadow</td></tr>
+          <tr><th scope="row">Warm</th><td><code>(2.3, 1.85, 0.45)</code></td><td>30</td><td>High rear, moving over center</td><td>Map 2; up to 9 taps</td><td>Warm cast shadow</td></tr>
+          <tr><th scope="row">Green</th><td><code>(0.02, 2.4, 0.18)</code></td><td>24</td><td>Low left rear</td><td>None</td><td>Green fill pool</td></tr>
+          <tr><th scope="row">Cyan</th><td><code>(0, 1.85, 2.6)</code></td><td>24</td><td>Low right rear</td><td>None</td><td>Cyan fill pool</td></tr>
+          <tr><th scope="row">Magenta</th><td><code>(2.55, 0.02, 2.45)</code></td><td>22</td><td>Low left front</td><td>None</td><td>Magenta fill pool</td></tr>
+          <tr><th scope="row">Orange</th><td><code>(2.6, 1.05, 0.02)</code></td><td>22</td><td>Low right front</td><td>None</td><td>Orange fill pool</td></tr>
+          <tr><th scope="row">Violet</th><td><code>(0.45, 0.08, 2.95)</code></td><td>18</td><td>Low camera side</td><td>None</td><td>Violet foreground fill</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A fragment inside all three shadow frusta executes at most 27 depth comparisons in the normal path. Points behind a light, outside its UV square, or outside depth zero through one return fully visible without sampling. Each nine-tap result clamps to at least 0.2, so a shadow suppresses at most 80% of that light rather than becoming fully black.</p>
+    <p>At 1280&times;720, the source expresses 18,432,000 logical G-buffer bytes loaded, 7,372,800 light evaluations, and at most 24,883,200 shadow comparisons per frame. These are source-level operation counts rather than measured memory bandwidth or GPU invocation totals; compiler optimization and texture caches can change the physical cost.</p>
+    <p>Rust's base light phase wraps every five seconds and all eight positions move. The green, magenta, and violet fill formulas multiply that phase by 1.4, 0.9, and 1.2, so they do not return to their starting values before the forced wrap and jump at the cycle boundary. WGSL has diagnostic views for position, normal, albedo, specular strength, and combined shadow visibility, plus a parameter that can disable shadows. Rust always uploads debug target zero and shadows enabled, and the UI exposes neither setting.</p>
+
+    <h2 id="record-five-passes" tabindex="-1">Record five passes and six explicit draws</h2>
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="deferred-shadows-passes-caption" tabindex="0">
+      <table>
+        <caption id="deferred-shadows-passes-caption">Deferred Shadows render passes and submitted work</caption>
+        <thead>
+          <tr><th scope="col">Passes</th><th scope="col">Attachments</th><th scope="col">Explicit draws</th><th scope="col">Submitted triangles</th><th scope="col">Depth and store behavior</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Shadow maps 0&ndash;2</th><td>One reused color + one distinct depth map per pass</td><td>Jax once per light</td><td>3 &times; 11,960 = 35,880</td><td>Front-face cull; store depth; discard color</td><td>Three light-space caster silhouettes</td></tr>
+          <tr><th scope="row">G-buffer</th><td>Position + normal + albedo + depth</td><td>Floor, then Jax</td><td>2 + 11,960 = 11,962</td><td>Back-face cull Jax; store colors; discard depth</td><td>Main-camera surface attributes</td></tr>
+          <tr><th scope="row">Composition and overlay</th><td>Single-sample presentation surface; no depth</td><td>Fullscreen triangle, text, optional joystick geometry</td><td>1 explicit composition triangle + framework overlay</td><td>Store opaque surface color</td><td>Eight-light shading, shadows, text, and controls</td></tr>
+          <tr><th scope="row">Frame total</th><td>5 render passes</td><td>6 explicit scene draws</td><td><strong>47,843</strong></td><td>All pipelines are single-sample</td><td>One presented frame</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The composition triangle overwrites the surface clear, producing black wherever cleared albedo contains zero. Text and optional joystick geometry render afterward in the same pass and are not depth-tested. The 21 px overlay reads “Deferred shadows,” GPU information, FPS, “lights: 8,” “shadow maps: 3 x 1024,” and the three G-buffer channels.</p>
+
+    <h2 id="control-camera" tabindex="-1">Control the first-person camera</h2>
+    <p>The example is interactive through the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">joystick and first-person camera helper</a>. It starts at <code>(0, 1.35, 5)</code> with zero yaw and a slight &minus;0.04-radian pitch. Projection uses a right-handed 60&deg; field of view with near and far planes of 0.1 and 256.</p>
+    <ul>
+      <li>Use W and S to move forward and backward, and A and D to move left and right at four world units per second.</li>
+      <li>Use the arrow keys to look at 1.6 radians per second.</li>
+      <li>Press and drag on the left half of the canvas to move or the right half to look. Mouse and touch share 44 px virtual sticks.</li>
+    </ul>
+    <p>Pitch clamps to &plusmn;1.45 radians, combined input clamps to unit length, and movement delta caps at 1/15 second. Focus loss resets input. There is no collision, reset, animation pause, light editor, shadow toggle, map preview, or debug-target selector.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU Deferred Shadows example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU Deferred Shadows example"><code>cargo run --example deferredshadows</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU Deferred Shadows example"><code>scripts/build-wasm.sh --release deferredshadows
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/deferredshadows/</code> in a browser with WebGPU support. Both targets load the same three Jax files before calling <code>sib::render</code>, then execute the same three shadow passes, G-buffer pass, and composition pass.</p>
+    <p>The renderer hard-codes three 1024-square maps and rerenders the entire animated Jax mesh into each one every frame. It has no shadow atlas or texture array, caster culling beyond rasterization, update caching, adaptive resolution, cascades, point-light cubemaps, or runtime quality controls. Only Jax casts and only three spotlights receive shadow visibility. The floor receives shadows but does not cast them. Setting the internal <code>RENDER_SHADOW_MAPS</code> constant false is not a complete toggle because composition still enables shadows and samples the unwritten maps.</p>
+    <p>The shared throwaway color target and zero-output fragment stage are unnecessary for opaque depth-only shadow rendering. A depth-only pipeline could remove that 4 MiB target and its color work. The manual 3&times;3 kernel costs up to 27 comparisons per composition fragment; those lookups still run inside a valid light frustum when the spotlight cone, <code>N dot L</code>, or albedo would make the contribution zero, and all eight light loops still run over background pixels. Bias, the 20% visibility floor, wide 100&deg; projections, and fixed resolution trade acne for peter-panning, light leaks, softness, and limited detail.</p>
+    <p>There is no transparency or alpha-tested shadow casting, although the current RGB texture has no alpha channel. The G-buffer stores world position instead of reconstructing it from depth, and its half-float position loses absolute precision as coordinates grow while the half-float normal target quantizes normalized directions. The base texture has no mip chain. The renderer has no HDR intermediate, exposure, tone mapping, ambient occlusion, emissive term, normal mapping, or physically based material model; bright light sums clamp at presentation.</p>
+    <p>Jax writes fixed 0.45 specular strength instead of material or texture alpha. Its white base-color factor hides a loader/shader double multiplication that would affect non-white materials. Normals are not inverse-transpose transformed, and specular is not gated by positive <code>N dot L</code>. The animation helper also smooths the glTF's 91 STEP and 47 LINEAR channels without retaining their declared interpolation modes, and the retained animated scene keeps CPU mesh and cloned image data after GPU upload.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Remove the shadow color attachment, use a depth-only pipeline, and measure the saved memory and fragment work.</li>
+      <li>Pack shadow maps into an array or atlas, expose resolution and PCF radius, and visualize each map.</li>
+      <li>Add caster culling and staggered shadow updates, then scale beyond three shadowed spotlights.</li>
+      <li>Compare receiver-plane bias, rotated PCF, variance shadows, and cascades for directional lights.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferredshadows.rs">Read the Deferred Shadows source &nearr;</a>
+      <a href="../deferredmultisampling/">&larr; Previous: WebGPU deferred multisampling</a>
+      <a href="../ssao/">Next: WebGPU screen-space ambient occlusion &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

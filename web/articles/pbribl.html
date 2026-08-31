@@ -1,0 +1,218 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 26</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load six Bridge2 cubemap faces, generate diffuse irradiance and a split-sum BRDF lookup on the CPU, then shade ten gold spheres with direct GGX light and roughness-selected environment reflections. The seven-level specular source is a box-filtered roughness mip approximation; it is not a GGX-prefiltered cubemap.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="PBR image-based lighting demo at a glance">
+      <div><dt>Sphere instances</dt><dd>10</dd></div>
+      <div><dt>Environment mips</dt><dd>7</dd></div>
+      <div><dt>Render passes</dt><dd>2</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#add-environment-lighting-to-pbr">Add environment lighting to PBR</a></li>
+        <li><a href="#load-bridge2-cubemap">Load the Bridge2 cubemap</a></li>
+        <li><a href="#build-gold-sphere-line">Build the gold sphere line</a></li>
+        <li><a href="#generate-environment-mips">Generate the environment mips</a></li>
+        <li><a href="#convolve-diffuse-irradiance">Convolve diffuse irradiance</a></li>
+        <li><a href="#integrate-split-sum-brdf">Integrate the split-sum BRDF</a></li>
+        <li><a href="#combine-direct-and-image-lighting">Combine direct and image lighting</a></li>
+        <li><a href="#render-skybox-and-spheres">Render the skybox and spheres</a></li>
+        <li><a href="#tone-map-surface-output">Tone-map the surface output</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="add-environment-lighting-to-pbr" tabindex="-1">Add environment lighting to PBR</h2>
+    <p>The <a href="../pbrtexture/#about">previous WebGPU PBR texture example</a> reads material properties from a glTF mesh and five texture maps. This example returns to procedural spheres so the lighting data stays visible. Direct lights still evaluate a Cook&ndash;Torrance-style BRDF, while a cubemap supplies diffuse illumination and direction-dependent reflections from the scene around each sphere.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/657a1bca82bacf4017c814077c7ed8391e2d4893">original PBR examples commit</a> introduced this example, its <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbribl.wgsl">WGSL shader</a>, the Bridge2 environment, screenshots, and web registration. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbribl.rs">Rust source</a> keeps the original two-pipeline design. A later <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">clip-space correction</a> removed an obsolete extra matrix, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/21636cd62fd68f378d72693382c2b9af1cbcf811">PBR preprocessing update</a> replaced nearest resizing and an approximate LUT with linear-space filtering, cosine-convolved irradiance, numerical GGX integration, and surface-aware output gamma. The <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">shared KTX asset update</a> later replaced the JPEG faces with the current uncompressed KTX1 files. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/pbribl.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="960" height="540" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Ten gold spheres cross the Bridge2 environment. From left to right, roughness falls from 0.995 to 0.1 while metallic rises from 0.005 to 0.9, changing both the diffuse response and reflected detail.</figcaption>
+    </figure>
+
+    <h2 id="load-bridge2-cubemap" tabindex="-1">Load six Bridge2 cubemap faces</h2>
+    <p>The demo makes six runtime asset requests through the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/skybox.rs">skybox loader</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a>. Each file in the <a href="https://github.com/PooyaEimandar/webgpu/tree/main/assets/textures/skybox/bridge2">Bridge2 directory</a> is a 1024&times;1024, single-face, single-mip KTX1 image containing uncompressed RGBA8 pixels.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbribl-assets-caption" tabindex="0">
+      <table>
+        <caption id="pbribl-assets-caption">PBR image-based lighting runtime cubemap requests</caption>
+        <thead>
+          <tr><th scope="col">Array layer</th><th scope="col">Direction</th><th scope="col">Asset</th><th scope="col">Dimensions</th><th scope="col">File bytes</th><th scope="col">Decoded bytes</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Positive X</td><td><code>posx.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+          <tr><th scope="row">1</th><td>Negative X</td><td><code>negx.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+          <tr><th scope="row">2</th><td>Positive Y</td><td><code>posy.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+          <tr><th scope="row">3</th><td>Negative Y</td><td><code>negy.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+          <tr><th scope="row">4</th><td>Positive Z</td><td><code>posz.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+          <tr><th scope="row">5</th><td>Negative Z</td><td><code>negz.ktx</code></td><td>1024&times;1024</td><td>4,194,372</td><td>4,194,304</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Together, the six requests transfer 25,166,232 bytes and decode to 25,165,824 RGBA bytes. The minimal <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/ktx.rs">KTX1 decoder</a> validates uncompressed RGBA8 or sRGBA8 input and extracts only the base image. It is not a general compressed KTX2 loader. The current assets declare <code>GL_RGBA8</code>, one face, and one mip apiece.</p>
+    <p>Native code reads the six local files concurrently on worker threads. WebAssembly creates a browser Worker, fetches all six URLs with <code>Promise.all</code>, and transfers their buffers back before starting the renderer. The 6,179-byte WGSL source and 122,752-byte Vazirmatn font are compiled into the program, so they are not additional runtime asset requests.</p>
+
+    <h2 id="build-gold-sphere-line" tabindex="-1">Build an instanced line of gold spheres</h2>
+    <p>Rust procedurally generates one radius-one sphere with 40 latitude segments and 56 longitude segments. A second vertex buffer supplies one position, roughness, gold color, and metallic value for each of ten instances. One indexed call can therefore draw the complete material line.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbribl-geometry-caption" tabindex="0">
+      <table>
+        <caption id="pbribl-geometry-caption">PBR IBL procedural geometry and explicit GPU buffers</caption>
+        <thead>
+          <tr><th scope="col">Data</th><th scope="col">Stride</th><th scope="col">Elements</th><th scope="col">Submitted triangles</th><th scope="col">Buffer bytes</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Sphere template</th><td>24-byte vertex</td><td>2,337 vertices + 13,440 <code>u32</code> indices</td><td>4,480 &times; 10 = 44,800</td><td>109,848</td><td>Position and normal reused by every material instance</td></tr>
+          <tr><th scope="row">Material instances</th><td>32 bytes</td><td>10 instances</td><td>Instanced with sphere</td><td>320</td><td>Position, roughness, color, and metallic</td></tr>
+          <tr><th scope="row">Skybox cube</th><td>12-byte vertex</td><td>8 vertices + 36 <code>u16</code> indices</td><td>12</td><td>168</td><td>High-resolution environment background</td></tr>
+          <tr><th scope="row">Scene uniforms</th><td>One block</td><td>288 bytes</td><td>Not geometry</td><td>288</td><td>Matrices, camera, lights, exposure, gamma, and maximum LOD</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The ten X positions run from &minus;10.75 through 8.6 in steps of 2.15. The first sphere uses metallic 0.005 and roughness 0.995. Each later instance adds 0.1 metallic and subtracts 0.1 roughness, ending at metallic 0.9 and roughness 0.1. Because those properties change together, the row demonstrates a combined transition rather than independently isolating either parameter.</p>
+    <p>Every instance uses gold base color <code>(1, 0.765557, 0.336057)</code>. The sphere model matrix applies a 90&deg; Y rotation, which does not change its rotationally symmetric silhouette. Explicit geometry, instance, and uniform buffers occupy 110,624 bytes in total, excluding text-overlay resources.</p>
+
+    <h2 id="generate-environment-mips" tabindex="-1">Generate a box-filtered roughness mip chain</h2>
+    <p>Initialization turns the six decoded faces into four sampled GPU textures. All are generated on the CPU and uploaded with <code>queue.write_texture</code>; the example records no preprocessing render or compute passes.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbribl-textures-caption" tabindex="0">
+      <table>
+        <caption id="pbribl-textures-caption">PBR image-based lighting textures</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Extent and mips</th><th scope="col">Format</th><th scope="col">Logical bytes</th><th scope="col">Creation or update</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Display skybox</th><td>1024&times;1024 &times; 6, one mip</td><td><code>Rgba8Unorm</code></td><td>25,165,824</td><td>6 uploads at initialization</td><td>Sharp background sampled at LOD 0</td></tr>
+          <tr><th scope="row">Roughness environment</th><td>64&times;64 &times; 6, seven mips down to 1&times;1</td><td><code>Rgba8Unorm</code></td><td>131,064</td><td>42 uploads at initialization</td><td>Reflection sampled at <code>roughness * 6</code></td></tr>
+          <tr><th scope="row">Diffuse irradiance</th><td>32&times;32 &times; 6, one mip</td><td><code>Rgba8Unorm</code></td><td>24,576</td><td>6 uploads at initialization</td><td>Cosine-weighted environment around the normal</td></tr>
+          <tr><th scope="row">BRDF LUT</th><td>64&times;64, one mip</td><td><code>Rgba8Unorm</code></td><td>16,384</td><td>1 upload at initialization</td><td>Split-sum specular scale and bias in red and green</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface width &times; height, one mip</td><td><code>Depth32Float</code></td><td>4 bytes per surface pixel</td><td>Created at initialization; recreated on resize</td><td>Depth-tests skybox and spheres</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The four fixed sampled images reserve 25,337,848 logical bytes before texture-object overhead and receive 55 initialization writes. The high-resolution display cube accounts for 24 MiB by itself. All four color textures use <code>TEXTURE_BINDING | COPY_DST</code>; none is a render attachment.</p>
+    <p><strong>The seven-level specular source is a box-filtered mip pyramid, not a GGX-prefiltered environment.</strong> Rust first area-averages each 1024&times;1024 face into a 64&times;64 base, then derives 32, 16, 8, 4, 2, and 1-pixel levels with chained 2&times;2 averages. The shader binding is named <code>prefiltered_map</code>, but its increasing blur comes from ordinary box downsampling. Sampling <code>roughness * 6</code> is a compact approximation to rough specular reflection rather than the GGX convolution normally paired with a split-sum LUT.</p>
+    <p>The CPU interprets source RGB bytes with gamma 2.2, filters in linear space, and encodes each result back to eight-bit values. The environment sampler clamps on every axis and uses linear minification, magnification, and mip filtering, so a fractional explicit LOD blends neighboring texels and mip levels. Each cube face is downsampled independently; the code does not filter across face boundaries.</p>
+
+    <h2 id="convolve-diffuse-irradiance" tabindex="-1">Convolve diffuse irradiance across the cube</h2>
+    <p>Diffuse image-based lighting needs the incoming environment integrated over the hemisphere around a surface normal. Rust first reduces every source face to 16&times;16 linear-space RGB. That creates 1,536 directional samples across the six faces.</p>
+    <pre tabindex="0" aria-label="Accumulate cosine-weighted cubemap samples for diffuse irradiance"><code><span class="code-keyword">let</span> weight = (1.0 + u * u + v * v).powf(-1.5);
+<span class="code-keyword">let</span> cosine = normal.dot(direction);
+
+<span class="code-keyword">if</span> cosine &gt; 0.0 {
+    radiance += color * weight * cosine;
+    total_weight += weight * cosine;
+}</code></pre>
+    <p>The factor <code>(1 + u&sup2; + v&sup2;)<sup>-1.5</sup></code> approximates the relative solid angle of a cube-face texel. For each of the 6,144 output texels in the six 32&times;32 faces, the loop checks all 1,536 directions and keeps the positive cosine hemisphere. That is 9,437,184 candidate dot products during initialization.</p>
+    <p>Dividing by the accumulated solid-angle and cosine weight keeps a constant environment unchanged. Unlike the per-face box mips, this diffuse convolution reads directions from all six source faces, then uploads one result into every layer of the irradiance cube.</p>
+
+    <h2 id="integrate-split-sum-brdf" tabindex="-1">Integrate a 64&times;64 split-sum BRDF LUT</h2>
+    <p>The second half of the specular approximation depends on view angle and roughness rather than the environment image. Rust generates a 64&times;64 lookup table whose X axis is <code>N dot V</code> and Y axis is roughness. Coordinates lie at texel centers, from 0.0078125 through 0.9921875.</p>
+    <p>Each texel evaluates 256 Hammersley points, importance-samples a GGX half vector, reflects the view vector, and accumulates Schlick Fresnel scale and bias. The complete table runs 1,048,576 sampling iterations. It uses <code>alpha = max(roughness * roughness, 0.0001)</code> and an image-lighting Smith term with <code>k = alpha * 0.5</code>.</p>
+    <p>The two integrated values are clamped, quantized to eight-bit red and green, and uploaded with blue 0 and alpha 255. A clamp-to-edge sampler linearly filters the LUT. This removes hundreds of integration samples from each rendered fragment, at the cost of 64&times;64 resolution and eight-bit precision.</p>
+
+    <h2 id="combine-direct-and-image-lighting" tabindex="-1">Combine direct GGX and split-sum image lighting</h2>
+    <p>The fragment shader clamps roughness and metallic to 0.005 through 1, then mixes dielectric reflectance 0.04 toward the gold base color according to metallic. Four fixed lights sit at X and Z combinations of &plusmn;15 and Y&nbsp;=&nbsp;&minus;7.5. Each contributes a normalized direction with no separate color, intensity, or distance attenuation.</p>
+    <pre tabindex="0" aria-label="Evaluate the direct GGX BRDF for one WebGPU light"><code><span class="code-keyword">let</span> f0 = mix(vec3&lt;f32&gt;(0.04), material_color, vec3&lt;f32&gt;(metallic));
+<span class="code-keyword">let</span> d = d_ggx(dot_nh, roughness);
+<span class="code-keyword">let</span> g = g_schlicksmith_ggx(dot_nl, dot_nv, roughness);
+<span class="code-keyword">let</span> f = f_schlick(dot_nv, f0);
+<span class="code-keyword">let</span> specular = d * f * g / max(4.0 * dot_nl * dot_nv, 0.001);
+<span class="code-keyword">let</span> kd = (vec3&lt;f32&gt;(1.0) - f) * (1.0 - metallic);
+
+<span class="code-keyword">return</span> (kd * material_color / PI + specular) * dot_nl;</code></pre>
+    <p>The normal-distribution function uses GGX with <code>alpha = roughness&sup2;</code>. Direct-light visibility uses Schlick-Smith with <code>k = (roughness + 1)&sup2; / 8</code>. One implementation detail matters when comparing this code with other Cook&ndash;Torrance shaders: its direct Fresnel call receives <code>N dot V</code>, not <code>V dot H</code>.</p>
+    <p>The image-lighting half samples three precomputed signals and recombines them:</p>
+    <pre tabindex="0" aria-label="Combine irradiance, roughness mips, and the split-sum BRDF LUT"><code><span class="code-keyword">let</span> brdf = textureSample(
+    brdf_lut, brdf_sampler, vec2&lt;f32&gt;(dot_nv, roughness)
+).rg;
+<span class="code-keyword">let</span> irradiance = textureSample(
+    irradiance_map, environment_sampler, normal
+).rgb;
+<span class="code-keyword">let</span> prefiltered = textureSampleLevel(
+    prefiltered_map,
+    environment_sampler,
+    reflection,
+    roughness * uniforms.params.z,
+).rgb;
+
+<span class="code-keyword">let</span> fresnel = f_schlick_roughness(dot_nv, f0, roughness);
+<span class="code-keyword">let</span> diffuse = irradiance * input.color;
+<span class="code-keyword">let</span> specular = prefiltered * (fresnel * brdf.x + brdf.y);
+<span class="code-keyword">let</span> kd = (vec3&lt;f32&gt;(1.0) - fresnel) * (1.0 - metallic);
+<span class="code-keyword">let</span> ambient = kd * diffuse + specular;</code></pre>
+    <p>Roughness-aware Schlick Fresnel reduces the grazing response as roughness increases. Multiplying diffuse by <code>1 - metallic</code> removes the diffuse lobe from a metal, while the split-sum scale and bias modulate the environment reflection. The shader adds this ambient result to the four direct contributions before tone mapping.</p>
+
+    <h2 id="render-skybox-and-spheres" tabindex="-1">Render the skybox and spheres in one scene pass</h2>
+    <p>Both pipelines share one 288-byte uniform and one seven-entry bind group. The group contains the uniform, irradiance cube, a shared environment sampler, BRDF LUT and sampler, box-filtered environment cube, and display skybox cube. The same environment sampler handles all three cube lookups; the separately created skybox and irradiance samplers remain unbound.</p>
+    <p>The uniform stores three 64-byte matrices, camera position, four light vectors, and four parameters: exposure 4.5, output gamma, maximum LOD 6, and an unused zero. It is initialized once and fully rewritten on resize, not every frame.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbribl-passes-caption" tabindex="0">
+      <table>
+        <caption id="pbribl-passes-caption">PBR image-based lighting render passes and explicit draws</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draw</th><th scope="col">Triangles</th><th scope="col">Depth behavior</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene</th><td>Surface color + surface-size depth</td><td>Skybox, then one 10-instance sphere draw</td><td>12 + 44,800 = 44,812</td><td><code>LessEqual</code>; skybox does not write, spheres write</td><td>Environment background and material line</td></tr>
+          <tr><th scope="row">Text overlay</th><td>Load surface color; no depth</td><td>Framework glyph draw</td><td>Framework-managed</td><td>No depth attachment</td><td>Title, device, FPS, material, and LUT size</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The scene pass clears color to <code>(0.02, 0.022, 0.028, 1)</code> and depth to 1. The skybox vertex shader removes camera translation and writes <code>clip.xyww</code>, placing its cube at far depth. It draws 36 indices first with depth writes disabled. The PBR pipeline then submits 13,440 indices across ten instances with depth writes enabled.</p>
+    <p>Both triangle-list pipelines use one sample, no face culling, no blending, and <code>Depth32Float</code> with <code>LessEqual</code>. Excluding framework text, each frame records two render passes, two explicit scene draws, 44,812 submitted triangles, and 134,436 index invocations. The overlay adds its instanced glyph draw in the second pass.</p>
+
+    <h2 id="tone-map-surface-output" tabindex="-1">Tone-map a fixed camera and environment</h2>
+    <p>WGSL feeds <code>ambient + direct</code> through the Uncharted 2 curve with exposure 4.5 and normalizes the result against a white value of 11.2. When the surface format is sRGB, the shader uses gamma 1 because the target performs the final encoding. A non-sRGB surface uses gamma 2.2 in the shader.</p>
+    <p>The camera remains at <code>(0.55, 0.85, 12)</code>, looks toward <code>(-0.7, 0.15, 0)</code>, and uses a 60&deg; right-handed perspective with near and far planes of 0.1 and 256. There are no keyboard, mouse, pointer, touch, camera, light, exposure, or material controls. The scene has no automatic animation.</p>
+    <p>Resizing recreates the surface-size depth texture, rewrites the 288-byte uniform for the new aspect ratio, and rebuilds overlay placement. The four fixed color textures and geometry buffers remain unchanged. The 22 px Vazirmatn overlay updates its CPU frame-rate estimate on a roughly 500 ms cadence; overlay preparation still runs every frame.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native PBR image-based lighting example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU PBR image-based lighting example"><code>cargo run --example pbribl</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU PBR image-based lighting example"><code>scripts/build-wasm.sh --release pbribl
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/pbribl/</code> in a browser with WebGPU support. Native loading is synchronous from the caller's perspective after its worker threads join. WebAssembly awaits the Worker-loaded faces and then starts <code>sib::render</code>. Both targets perform the same CPU preprocessing and run the same two render passes with no rendering fallback.</p>
+    <p>The example keeps every stage inspectable, but its environment data is LDR and quantized to <code>Rgba8Unorm</code>. CPU filtering decodes source bytes with gamma 2.2 and re-encodes the results; the sampled GPU textures are not sRGB formats, and WGSL applies no explicit source decode. The 64&times;64 BRDF LUT also has only eight bits per channel.</p>
+    <p>Startup transfers about 24 MiB of uncompressed cubemap files and rebuilds the display cube, box mip chain, irradiance, and LUT on every launch. Independent per-face mip filtering can leave seams. The scene has no HDR source, true GGX environment convolution, precomputed derived maps, light attenuation, shadows, ambient occlusion, normal mapping, material textures, or controls.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Precompute a floating-point HDR irradiance cube, GGX-filtered specular mip chain, and higher-precision BRDF LUT, then compare them with the current CPU-generated approximations.</li>
+      <li>Build a two-dimensional roughness and metallic grid so each parameter can vary independently.</li>
+      <li>Filter across cube-face boundaries and compare seam behavior at high roughness and grazing reflection angles.</li>
+      <li>Add camera, exposure, and environment controls, then introduce physically scaled lights, distance attenuation, shadows, and ambient occlusion.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbribl.rs">Read the PBR image-based lighting source &nearr;</a>
+      <a href="../pbrtexture/">&larr; Previous: WebGPU PBR texture</a>
+      <a href="../parallaxmapping/">Next: WebGPU parallax occlusion mapping &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

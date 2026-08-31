@@ -1,0 +1,247 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 25</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load the ornate Cerberus mesh and five material maps, reconstruct its tangent-space surface, and combine four-light GGX shading with CPU-generated image-based lighting.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="PBR Texture demo at a glance">
+      <div><dt>Material maps</dt><dd>5</dd></div>
+      <div><dt>Runtime assets</dt><dd>12</dd></div>
+      <div><dt>Bind entries</dt><dd>13</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#move-pbr-properties-into-textures">Move PBR properties into textures</a></li>
+        <li><a href="#load-cerberus-and-eleven-images">Load Cerberus and eleven images</a></li>
+        <li><a href="#normalize-and-upload-cerberus">Normalize and upload Cerberus</a></li>
+        <li><a href="#upload-five-material-maps">Upload five material maps</a></li>
+        <li><a href="#generate-image-based-lighting">Generate image-based lighting</a></li>
+        <li><a href="#bind-thirteen-pbr-resources">Bind thirteen PBR resources</a></li>
+        <li><a href="#shade-direct-light-with-ggx">Shade direct light with GGX</a></li>
+        <li><a href="#combine-split-sum-ibl">Combine split-sum IBL</a></li>
+        <li><a href="#render-skybox-model-and-controls">Render the model and controls</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="move-pbr-properties-into-textures" tabindex="-1">Move PBR properties into textures</h2>
+    <p>The <a href="../pbr/#about">previous PBR Basic example</a> varies constant metallic and roughness values across a generated sphere grid. PBR Texture applies those material properties per texel instead. One detailed glTF mesh receives separate albedo, tangent-space normal, ambient-occlusion, metallic, and roughness images, while a bridge cubemap supplies the background, diffuse environment light, and rough reflections.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/657a1bca82bacf4017c814077c7ed8391e2d4893">original PBR examples commit</a> introduced the Cerberus model, material images, shader, screenshot, and web registration. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbrtexture.rs">Rust example</a> and unchanged <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbrtexture.wgsl">WGSL shader</a> retain that rendering design. Later work <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">removed an obsolete clip-space correction</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/21636cd62fd68f378d72693382c2b9af1cbcf811">replaced approximate CPU preprocessing with gamma-aware mip filtering, cosine-convolved irradiance, numerical BRDF integration, and surface-aware output encoding</a>. The settings window <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">became collapsible</a>, and a shared <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">asset update replaced the bridge JPEGs with KTX faces</a>. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/pbrtexture.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="960" height="540" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Five authored textures preserve the engraved metal, wooden grip, brass details, and small surface relief of the Cerberus pistol. The same bridge environment appears behind the model and contributes diffuse and specular lighting.</figcaption>
+    </figure>
+
+    <h2 id="load-cerberus-and-eleven-images" tabindex="-1">Load Cerberus and eleven images</h2>
+    <p>The current demo makes twelve asset requests totaling 50,453,345 bytes, or about 48.12 MiB. The browser first awaits the model, then fetches the five PNG material maps concurrently in a Web Worker, followed by a second concurrent batch for six KTX cubemap faces. Native execution follows the same sequence with local filesystem reads and one thread per batched request.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbrtexture-assets-caption" tabindex="0">
+      <table>
+        <caption id="pbrtexture-assets-caption">PBR Texture runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset group</th><th scope="col">Files</th><th scope="col">Dimensions or contents</th><th scope="col">Encoded size</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/cerberus.gltf"><code>cerberus.gltf</code></a></th><td>1</td><td>One embedded buffer; one triangle primitive</td><td>2,372,173 bytes</td><td>Position, normal, tangent, UV, and indices</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/tree/main/assets/textures/cerberus">Cerberus PNG maps</a></th><td>5</td><td>Each 2048&times;2048 RGBA8</td><td>22,914,940 bytes</td><td>Albedo, normal, AO, metallic, and roughness</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/tree/main/assets/textures/skybox/bridge2">Bridge KTX faces</a></th><td>6</td><td>Each 1024&times;1024 RGBA8; one mip</td><td>25,166,232 bytes</td><td>Skybox and source environment</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a> decodes each PNG to RGBA8. The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/skybox.rs">Bridge2 loader</a> requests cubemap faces in positive-X, negative-X, positive-Y, negative-Y, positive-Z, negative-Z order, and the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/ktx.rs">KTX 1 decoder</a> extracts each uncompressed base mip. The WGSL source and 122,752-byte Vazirmatn font are compiled into the program rather than fetched separately.</p>
+    <p>The glTF JSON embeds its only 1,776,320-byte binary buffer as a Base64 data URI. It has one default scene, three nodes, one mesh, one material record, and one indexed triangle primitive. The example reads the geometry but deliberately ignores the glTF material record and applies its five separately requested images to the whole merged mesh.</p>
+
+    <h2 id="normalize-and-upload-cerberus" tabindex="-1">Normalize and upload Cerberus</h2>
+    <p>Rust traverses the default scene, multiplies parent and child transforms, and bakes them into vertex positions, normals, and tangents. It flattens the primitive into one interleaved vertex vector, converts the source 16-bit indices to <code>u32</code>, validates every index, and measures the transformed bounds.</p>
+    <p>The model matrix then translates the bounds center to the origin, scales the largest extent to six units, and rotates the result 90&deg; around Y. The final display bounds are approximately X&nbsp;=&nbsp;&plusmn;3, Y&nbsp;=&nbsp;&plusmn;1.268, and Z&nbsp;=&nbsp;&plusmn;0.625. The camera therefore sees the pistol side-on without embedding presentation scale or orientation into the source asset.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbrtexture-buffers-caption" tabindex="0">
+      <table>
+        <caption id="pbrtexture-buffers-caption">PBR Texture geometry and explicit GPU buffers</caption>
+        <thead>
+          <tr><th scope="col">Buffer</th><th scope="col">Items</th><th scope="col">Stride</th><th scope="col">GPU payload</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Cerberus vertices</th><td>32,814</td><td>48 bytes</td><td>1,575,072 bytes</td><td>Position, normal, UV, and tangent</td></tr>
+          <tr><th scope="row">Cerberus indices</th><td>100,623</td><td>4 bytes</td><td>402,492 bytes</td><td>33,541 mesh triangles</td></tr>
+          <tr><th scope="row">Skybox vertices</th><td>8</td><td>12 bytes</td><td>96 bytes</td><td>Cube positions</td></tr>
+          <tr><th scope="row">Skybox indices</th><td>36</td><td>2 bytes</td><td>72 bytes</td><td>12 background triangles</td></tr>
+          <tr><th scope="row">Scene uniforms</th><td>1</td><td>288 bytes</td><td>288 bytes</td><td>Matrices, camera, lights, and tone-map parameters</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>These buffers reserve 1,978,020 bytes. The custom loader accepts triangle primitives and Base64 data-URI buffers, but rejects external <code>.bin</code> files and GLB binary chunks. It also merges primitive boundaries, supplies simple fallback normals, UVs, and tangents when attributes are absent, and does not retain separate glTF materials or draw ranges.</p>
+
+    <h2 id="upload-five-material-maps" tabindex="-1">Upload five material maps</h2>
+    <p>Each material image becomes an independent one-mip <code>Rgba8Unorm</code> texture. One repeat-addressed sampler with linear minification and magnification serves all five shader bindings. Because there is no mip chain, the configured nearest mip filtering has no lower-resolution level to select.</p>
+    <p>WGSL raises albedo RGB to 2.2 to approximate conversion from authored display values into linear space. It remaps normal RGB from 0&ndash;1 to &minus;1&ndash;1 and transforms that vector through the per-vertex tangent, bitangent, and normal basis. AO, metallic, and roughness each come from the red channel of a separate RGBA image. Metallic is clamped to 0.005&ndash;1 and roughness to 0.045&ndash;1 to avoid singular endpoints.</p>
+    <pre tabindex="0" aria-label="Sample the five WebGPU PBR material textures"><code><span class="code-keyword">let</span> albedo = pow(
+    textureSample(albedo_map, material_sampler, input.uv).rgb,
+    vec3&lt;f32&gt;(2.2),
+);
+<span class="code-keyword">let</span> ao = textureSample(ao_map, material_sampler, input.uv).r;
+<span class="code-keyword">let</span> metallic = clamp(
+    textureSample(metallic_map, material_sampler, input.uv).r,
+    0.005, 1.0,
+);
+<span class="code-keyword">let</span> roughness = clamp(
+    textureSample(roughness_map, material_sampler, input.uv).r,
+    0.045, 1.0,
+);</code></pre>
+    <p>Five uncompressed 2048&times;2048 RGBA8 GPU images occupy exactly 83,886,080 bytes, or 80 MiB. Their decoded CPU vectors remain inside <code>PbrTextureAssets</code> after upload, retaining another 80 MiB of pixel data. Packing AO, roughness, and metallic into separate channels and releasing decoded images would substantially reduce this example's persistent memory.</p>
+
+    <h2 id="generate-image-based-lighting" tabindex="-1">Generate image-based lighting on the CPU</h2>
+    <p>Initialization turns the same six Bridge2 faces into three cube textures and a two-dimensional BRDF lookup table. This preparation runs on the CPU and uploads bytes with <code>queue.write_texture</code>; it records no preprocessing render or compute pass.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbrtexture-textures-caption" tabindex="0">
+      <table>
+        <caption id="pbrtexture-textures-caption">PBR Texture authored, generated, and depth images</caption>
+        <thead>
+          <tr><th scope="col">Texture</th><th scope="col">Format</th><th scope="col">Extent</th><th scope="col">Mips</th><th scope="col">Logical storage</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Five material maps</th><td><code>Rgba8Unorm</code></td><td>5 &times; 2048&times;2048</td><td>1</td><td>83,886,080 bytes</td><td>Surface properties</td></tr>
+          <tr><th scope="row">Display skybox</th><td><code>Rgba8Unorm</code></td><td>1024&times;1024 &times; 6</td><td>1</td><td>25,165,824 bytes</td><td>Visible bridge background</td></tr>
+          <tr><th scope="row">Reflection environment</th><td><code>Rgba8Unorm</code></td><td>64&times;64 &times; 6</td><td>7</td><td>131,064 bytes</td><td>Roughness-selected reflections</td></tr>
+          <tr><th scope="row">Diffuse irradiance</th><td><code>Rgba8Unorm</code></td><td>32&times;32 &times; 6</td><td>1</td><td>24,576 bytes</td><td>Cosine-weighted ambient diffuse</td></tr>
+          <tr><th scope="row">BRDF LUT</th><td><code>Rgba8Unorm</code></td><td>64&times;64</td><td>1</td><td>16,384 bytes</td><td>Split-sum specular scale and bias</td></tr>
+          <tr><th scope="row">Scene depth</th><td><code>Depth32Float</code></td><td>Surface size</td><td>1</td><td><code>width * height * 4</code></td><td>Depth-tests skybox and model</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed color images total 109,223,928 logical bytes, about 104.16 MiB. The display cube preserves 1024&times;1024 faces. The smaller reflection cube starts at 64&times;64 and repeatedly averages 2&times;2 texel blocks in a gamma-decoded working space to produce 32, 16, 8, 4, 2, and 1 pixel levels.</p>
+    <p>Those seven levels are a <strong>box-filtered roughness approximation</strong>. They are not a GGX-importance-sampled specular prefilter. The shader still selects <code>roughness * 6</code> as its fractional LOD, so rough surfaces receive smoother reflections, but the lobe does not match the GGX distribution used by direct lighting.</p>
+    <p>Diffuse preparation resamples every source face to 16&times;16, assigns cubemap solid-angle weights, and cosine-convolves 1,536 source directions into 6,144 output texels. That is 9,437,184 candidate direction tests. The BRDF generator runs 256 Hammersley GGX samples at each of 4,096 lookup texels, for 1,048,576 integration iterations before quantizing scale and bias into eight-bit red and green channels.</p>
+    <p>Color handling remains approximate. Cubemap pixels are decoded for filtering, re-encoded into bytes, uploaded as linear <code>Rgba8Unorm</code>, and sampled without a matching shader decode or sRGB texture view. The sampled environment therefore is not strictly linear, and its eight-bit LDR storage limits lighting range and BRDF precision.</p>
+
+    <h2 id="bind-thirteen-pbr-resources" tabindex="-1">Bind thirteen PBR resources</h2>
+    <p>One bind group serves the skybox and mesh pipelines. The uniform is visible to both vertex and fragment stages; every image and sampler is fragment-only. There are no dynamic offsets, immediate values, push constants, storage resources, or optional WebGPU features.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbrtexture-bindings-caption" tabindex="0">
+      <table>
+        <caption id="pbrtexture-bindings-caption">PBR Texture bind-group layout</caption>
+        <thead>
+          <tr><th scope="col">Binding</th><th scope="col">Resource</th><th scope="col">View or type</th><th scope="col">Shader use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Scene uniforms</td><td>288-byte uniform buffer</td><td>Transforms, camera, lights, exposure, gamma, and max LOD</td></tr>
+          <tr><th scope="row">1</th><td>Irradiance</td><td>Cube texture</td><td>Diffuse IBL</td></tr>
+          <tr><th scope="row">2</th><td>Environment sampler</td><td>Filtering sampler</td><td>Shared by all three cube textures</td></tr>
+          <tr><th scope="row">3</th><td>BRDF LUT</td><td>2D texture</td><td>Specular scale and bias</td></tr>
+          <tr><th scope="row">4</th><td>BRDF sampler</td><td>Filtering sampler</td><td>Clamped LUT lookup</td></tr>
+          <tr><th scope="row">5</th><td>Reflection environment</td><td>Cube texture</td><td>Explicit roughness LOD</td></tr>
+          <tr><th scope="row">6</th><td>Albedo</td><td>2D texture</td><td>Base color</td></tr>
+          <tr><th scope="row">7</th><td>Normal</td><td>2D texture</td><td>Tangent-space normal</td></tr>
+          <tr><th scope="row">8</th><td>AO</td><td>2D texture</td><td>Ambient visibility</td></tr>
+          <tr><th scope="row">9</th><td>Metallic</td><td>2D texture</td><td>Dielectric-to-metal blend</td></tr>
+          <tr><th scope="row">10</th><td>Roughness</td><td>2D texture</td><td>Microfacet spread and environment LOD</td></tr>
+          <tr><th scope="row">11</th><td>Material sampler</td><td>Filtering sampler</td><td>Shared by all five material maps</td></tr>
+          <tr><th scope="row">12</th><td>Display skybox</td><td>Cube texture</td><td>Visible environment</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The 288-byte uniform contains three matrices, the camera position, four light vectors, and one parameter vector. Its final vector stores exposure, an output gamma adjusted for the surface format, maximum reflection LOD 6, and one unused value. The whole block is rewritten before every frame, on resize, and again when an egui control changes.</p>
+    <p>Nine samplers are created with the nine color texture wrappers, but the bind group references only the environment, BRDF, and albedo samplers. The normal, AO, metallic, roughness, display-skybox, and irradiance sampler objects remain allocated without their own binding.</p>
+
+    <h2 id="shade-direct-light-with-ggx" tabindex="-1">Shade direct light with GGX and Schlick terms</h2>
+    <p>The fragment shader reconstructs the world normal, view vector, and dielectric-or-metal reflectance <code>F0</code>. Four fixed lights sit at every X/Z combination of &plusmn;15 with Y&nbsp;=&nbsp;&minus;7.5. Each loop normalizes the vector from the fragment to one position and evaluates a Cook&ndash;Torrance-shaped direct term:</p>
+    <pre tabindex="0" aria-label="Evaluate textured GGX direct lighting in WGSL"><code><span class="code-keyword">let</span> f0 = mix(vec3&lt;f32&gt;(0.04), albedo, vec3&lt;f32&gt;(metallic));
+<span class="code-keyword">let</span> d = d_ggx(dot_nh, roughness);
+<span class="code-keyword">let</span> g = g_schlicksmith_ggx(dot_nl, dot_nv, roughness);
+<span class="code-keyword">let</span> f = f_schlick(dot_nv, f0);
+<span class="code-keyword">let</span> specular = d * f * g /
+    max(4.0 * dot_nl * dot_nv, 0.001);
+<span class="code-keyword">let</span> kd = (vec3&lt;f32&gt;(1.0) - f) * (1.0 - metallic);
+
+<span class="code-keyword">return</span> (kd * albedo / PI + specular) * dot_nl;</code></pre>
+    <p>The distribution uses <code>alpha = roughness²</code>, the visibility term uses Schlick-GGX with <code>k = (roughness + 1)² / 8</code>, and the diffuse lobe is Lambertian. Metallic suppresses diffuse energy while moving <code>F0</code> from 0.04 toward albedo.</p>
+    <p>One implementation detail separates this shader from the canonical reference formula: Schlick Fresnel receives <code>NdotV</code>, whereas a conventional direct microfacet BRDF uses <code>VdotH</code>. The four position vectors also provide no light color, intensity, distance attenuation, range, or shadow. Each contribution has unit radiance after direction normalization.</p>
+
+    <h2 id="combine-split-sum-ibl" tabindex="-1">Combine diffuse and split-sum image-based lighting</h2>
+    <p>Environment lighting samples diffuse irradiance in the reconstructed normal direction and the reflection cube in the reflected view direction. Roughness chooses the reflection LOD. A two-channel lookup supplies the scale and bias used by the common split-sum specular approximation:</p>
+    <pre tabindex="0" aria-label="Combine diffuse and specular image-based lighting in WGSL"><code><span class="code-keyword">let</span> brdf = textureSample(
+    brdf_lut, brdf_sampler, vec2&lt;f32&gt;(dot_nv, roughness),
+).rg;
+<span class="code-keyword">let</span> irradiance = textureSample(
+    irradiance_map, environment_sampler, normal,
+).rgb;
+<span class="code-keyword">let</span> prefiltered = textureSampleLevel(
+    prefiltered_map, environment_sampler, reflection,
+    roughness * uniforms.params.z,
+).rgb;
+<span class="code-keyword">let</span> fresnel = f_schlick_roughness(
+    dot_nv, f0, roughness,
+);
+<span class="code-keyword">let</span> ambient = (kd * irradiance * albedo
+    + prefiltered * (fresnel * brdf.x + brdf.y)) * ao;</code></pre>
+    <p>AO multiplies both diffuse and specular environment lighting but not the four direct-light terms. There is no separate specular-occlusion approximation. The shader adds ambient and direct color, applies Uncharted 2 tone mapping with white point 11.2, multiplies by the selected exposure, and performs gamma output.</p>
+    <p>The default gamma control is 2.2. On an sRGB surface, Rust sends gamma divided by 2.2 so the shader and hardware encoding combine to approximate the chosen result; a linear surface receives the selected gamma directly.</p>
+
+    <h2 id="render-skybox-model-and-controls" tabindex="-1">Render the skybox, Cerberus, and live controls</h2>
+    <p>The camera remains at <code>(0.25, 0.08, 4.85)</code>, looks at the origin, and uses a 60&deg; right-handed perspective with near and far planes of 0.1 and 256. The skybox view removes translation. Neither the camera, model, nor lights animate.</p>
+    <p>The main pass clears surface color to <code>(0.02, 0.022, 0.028, 1)</code> and depth to 1. When enabled, the skybox pipeline draws a cube first with depth writes disabled and <code>LessEqual</code>. Its vertex shader emits <code>xyww</code>, placing the background at depth 1. The mesh pipeline then writes depth for the Cerberus. Both pipelines use one sample, triangle lists, no face culling, and no blending.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="pbrtexture-passes-caption" tabindex="0">
+      <table>
+        <caption id="pbrtexture-passes-caption">PBR Texture render passes and default submitted work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draws</th><th scope="col">Triangles</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">PBR scene</th><td>Surface color + surface-size depth</td><td>Skybox, then Cerberus</td><td>33,553</td><td>Textured pistol and bridge environment</td></tr>
+          <tr><th scope="row">egui</th><td>Load surface color; no depth</td><td>Dynamic UI draws</td><td>UI-managed</td><td>Settings and live statistics</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>With the skybox enabled, the scene submits two indexed draws: 12 skybox triangles and 33,541 Cerberus triangles. Turning it off removes only the 12-triangle cube draw. egui renders in a second color-load pass with dynamic draw work.</p>
+    <p>The top-left “PBR texture” window is interactive in both native and browser builds. Exposure defaults to 4.5 and accepts 0.1&ndash;12; gamma defaults to 2.2 and accepts 0.8&ndash;4; the Skybox checkbox starts enabled. The collapsible panel also reports CPU frame cadence, GPU adapter information, and the model's 32,814 vertices. Window events are forwarded to egui, and a changed setting becomes visible on the following continuously requested frame.</p>
+    <p>Resizing recreates the one-sample <code>Depth32Float</code> image and rewrites camera matrices for the new aspect. It does not rebuild the fixed material or environment textures.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native textured PBR example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU PBR Texture example"><code>cargo run --example pbrtexture</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU PBR Texture example"><code>scripts/build-wasm.sh --release pbrtexture
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/pbrtexture/</code> in a browser with WebGPU support. The example requests no optional WebGPU feature and uses downlevel default limits. Native and WebAssembly use the same geometry, generated IBL data, pipelines, controls, and WGSL with no rendering fallback.</p>
+    <p>The example is intentionally readable rather than production-complete. It retains large decoded material images, creates unused duplicate samplers, supplies no material mipmaps, uses eight-bit IBL resources, box-filters rather than GGX-prefilters reflection levels, approximates cubemap color transfer, ignores glTF material boundaries, and has no camera control, light attenuation, shadows, emissive map, or environment rotation.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Pack AO, roughness, and metallic into channels, generate a material mip chain, and release decoded CPU images after upload.</li>
+      <li>Replace the box-filtered reflection pyramid with HDR GGX importance sampling, store the BRDF LUT at higher precision, and make every environment sample linear.</li>
+      <li>Evaluate direct Fresnel with <code>VdotH</code>, add radiometric light colors and inverse-square attenuation, then compare direct and environment energy.</li>
+      <li>Add orbit-camera and environment-rotation controls before continuing to the dedicated image-based-lighting example.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbrtexture.rs">Read the PBR Texture source &nearr;</a>
+      <a href="../pbr/">&larr; Previous: WebGPU PBR Basic</a>
+      <a href="../pbribl/">Next: WebGPU PBR image-based lighting &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

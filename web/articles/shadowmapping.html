@@ -1,0 +1,205 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 21</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render a teapot from a moving light into a depth texture, project nine hardware depth comparisons onto a procedural floor, and shade the visible scene with ambient, diffuse, and specular light.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Shadow mapping demo at a glance">
+      <div><dt>Shadow map</dt><dd>1024&times;1024</dd></div>
+      <div><dt>Comparison taps</dt><dd>9</dd></div>
+      <div><dt>Render passes</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#project-depth-shadows">Project depth shadows</a></li>
+        <li><a href="#load-teapot-build-floor">Load the teapot and build the floor</a></li>
+        <li><a href="#build-shadow-map-resources">Build the shadow-map resources</a></li>
+        <li><a href="#render-light-depth-pass">Render from the light</a></li>
+        <li><a href="#project-shadow-coordinates">Project world positions into the map</a></li>
+        <li><a href="#filter-shadow-with-pcf">Filter nine depth comparisons</a></li>
+        <li><a href="#render-lit-scene">Render the lit scene</a></li>
+        <li><a href="#animate-light">Animate the light</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="project-depth-shadows" tabindex="-1">Project depth shadows in two stages</h2>
+    <p>The <a href="../bloom/#about">previous WebGPU bloom example</a> filters a color image before adding it over the scene. Shadow mapping uses a different offscreen signal: the closest depth seen by the light. A later scene pass projects each visible fragment into that light-space image and asks whether the fragment is nearer than the stored surface. A failed comparison means another surface blocks the light.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/4463644abffd90766934dba59daa1d71d379476a">original shadow-mapping commit</a> introduced the basic projected-shadow example, its WGSL, screenshots, and web registration while reusing the repository's teapot. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmapping.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmapping.wgsl">WGSL shader</a> preserve that design. Later changes removed an obsolete clip-space correction, <a href="https://github.com/PooyaEimandar/webgpu/commit/f3801edef8ed726a011d0aa352fbc2428fccfe94">corrected the comparison-bias direction</a>, and <a href="https://github.com/PooyaEimandar/webgpu/commit/5a44b27f48f8aaa78515e9c787afcec847668ff7">supplied the real camera position for specular lighting</a>. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/shadowmapping.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A perspective depth map follows the moving light. The white teapot casts onto the finite taupe floor, while the teapot itself deliberately remains outside the shadow-receiver path.</figcaption>
+    </figure>
+
+    <h2 id="load-teapot-build-floor" tabindex="-1">Load the teapot and build the floor</h2>
+    <p>The demo makes one runtime asset request: <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf"><code>teapot.gltf</code></a>. The 225,816-byte JSON file embeds its only 167,328-byte binary buffer as a Base64 data URI. It has no external <code>.bin</code>, image, texture, skin, or animation request. The WGSL shader and 122,752-byte Vazirmatn font are compiled into the program.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="shadow-assets-caption" tabindex="0">
+      <table>
+        <caption id="shadow-assets-caption">Shadow mapping geometry and GPU mesh storage</caption>
+        <thead>
+          <tr><th scope="col">Geometry</th><th scope="col">Source size</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Triangles</th><th scope="col">GPU buffers</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>teapot.gltf</code></th><td>225,816 bytes</td><td>4,690</td><td>27,384</td><td>9,128</td><td>297,136 bytes</td><td>Casts; does not receive</td></tr>
+          <tr><th scope="row">Procedural floor</th><td>No request</td><td>4</td><td>6</td><td>2</td><td>184 bytes</td><td>Receives; does not cast</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs">colored glTF loader</a> uses the repository's <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a>, traverses the scene, bakes node transforms, and flattens the teapot's single triangle primitive. The primitive supplies positions, normals, and 16-bit source indices but no material or vertex color, so the loader supplies white and converts indices to <code>u32</code>. Its baked bounds run from approximately <code>(-3.040, -1.722, -2)</code> to <code>(3.394, 1.428, 2)</code>.</p>
+    <p>Each <code>GltfColoredVertex</code> occupies 40 bytes: a position, a normal, and RGBA color. The teapot therefore uses 187,600 vertex bytes and 109,536 index bytes. Rust constructs the floor at Y&nbsp;=&nbsp;&minus;1.70 from four taupe vertices spanning X&nbsp;=&nbsp;&plusmn;7.5 and Z&nbsp;=&nbsp;&plusmn;5.5, plus six indices. The two meshes reserve 297,320 bytes in total.</p>
+    <p>Initialization repurposes vertex alpha as a receiver flag. It writes 0 into every teapot vertex and 1 into every floor vertex. That makes the teapot the only shadow-map caster and the floor the only object that applies the sampled visibility.</p>
+
+    <h2 id="build-shadow-map-resources" tabindex="-1">Build the shadow-map resources</h2>
+    <p>One 304-byte uniform block serves both example pipelines. It contains camera projection and view matrices, an identity model matrix, the light-space matrix, light and camera positions, and a final <code>clip</code> vector. The complete block is rewritten after every normal update and on resize. The shader never reads the 16-byte <code>clip</code> value.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="shadow-resources-caption" tabindex="0">
+      <table>
+        <caption id="shadow-resources-caption">Shadow mapping buffers and textures</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">How it changes</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Shared uniforms</th><td>304 bytes</td><td>Fully rewritten every update and resize</td><td>Camera, model, light-space, positions, and unused clip data</td></tr>
+          <tr><th scope="row">Shadow depth</th><td>1024&times;1024 <code>Depth32Float</code></td><td>Cleared and rendered every frame</td><td>Stores nearest light-space depth and supports comparison sampling</td></tr>
+          <tr><th scope="row">Offscreen color</th><td>1024&times;1024 <code>Rgba8Unorm</code></td><td>Cleared, rendered, then discarded every frame</td><td>Satisfies the current shadow pipeline's color attachment</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Recreated on resize</td><td>Depth-tests the visible floor and teapot</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed shadow depth texture has one mip and one sample with <code>RENDER_ATTACHMENT | TEXTURE_BINDING</code> usage. Its clamp-to-edge comparison sampler uses <code>LessEqual</code> with nearest minification, magnification, and mip filtering. At four bytes per texel it occupies 4,194,304 logical bytes.</p>
+    <p>The auxiliary color image has the same dimensions and byte count but only <code>RENDER_ATTACHMENT</code> usage. Nothing samples it, and its separately created default sampler is unused. Together these fixed offscreen images account for 8,388,608 logical bytes, or 8 MiB, before texture-object overhead. Neither changes size when the surface changes.</p>
+    <p>The offscreen bind group exposes only the uniform to the vertex stage. The scene bind group exposes the same uniform to both stages, plus the depth view and comparison sampler to the fragment stage.</p>
+
+    <h2 id="render-light-depth-pass" tabindex="-1">Render the teapot from the light</h2>
+    <p>The first render pass clears shadow depth to 1 and the auxiliary color target to black. It binds the offscreen pipeline and submits the teapot's 27,384 indices once. The vertex shader applies <code>light_space * model</code>, where <code>light_space</code> combines a 45&deg; right-handed perspective with the light's look-at matrix.</p>
+    <pre tabindex="0" aria-label="Transform a shadow caster into the light clip space"><code><span class="code-attribute">@vertex</span>
+<span class="code-keyword">fn</span> vs_offscreen(input: MeshVertexInput) -&gt; <span class="code-attribute">@builtin(position)</span> vec4&lt;f32&gt; {
+    <span class="code-keyword">return</span> uniforms.light_space
+        * uniforms.model
+        * vec4&lt;f32&gt;(input.position, 1.0);
+}</code></pre>
+    <p>The triangle-list pipeline draws 9,128 triangles with one sample, no face culling, writable <code>Depth32Float</code>, and <code>LessEqual</code>. Raster depth bias remains zero. The floor is absent because it receives the projected result instead of contributing to the map.</p>
+    <p>This is not a strictly depth-only pipeline. Its fragment shader writes solid red into the 1024&times;1024 <code>Rgba8Unorm</code> attachment, but the pass uses <code>StoreOp::Discard</code> and never reads that color. The depth image uses <code>StoreOp::Store</code> because the next pass samples it.</p>
+
+    <h2 id="project-shadow-coordinates" tabindex="-1">Project world positions into the shadow map</h2>
+    <p>The visible-scene vertex shader sends each world position through the same light-space matrix. The fragment function divides XYZ by W, remaps clip-space X and Y into texture coordinates, and flips Y for texture addressing:</p>
+    <pre tabindex="0" aria-label="Project a world position into WebGPU shadow texture coordinates"><code><span class="code-keyword">let</span> projected = shadow_position.xyz / safe_w;
+<span class="code-keyword">let</span> raw_shadow_uv = vec2&lt;f32&gt;(
+    projected.x * 0.5 + 0.5,
+    0.5 - projected.y * 0.5,
+);
+<span class="code-keyword">let</span> reference_depth = clamp(
+    projected.z - 0.00035,
+    0.0,
+    1.0,
+);</code></pre>
+    <p>A valid lookup needs an absolute W above 0.0001, positive W, UV inside 0 to 1, and projected Z inside 0 to 1. Fragments outside the light frustum return full visibility. The base UV is clamped to 0.001 through 0.999 before the filter offsets are added. An offset coordinate can cross those limits, in which case the sampler's clamp-to-edge mode handles it.</p>
+    <p>The constant 0.00035 bias moves the reference depth toward the light. That direction matters for a <code>LessEqual</code> comparison: a sample is lit when the biased reference is less than or equal to the stored caster depth. The example uses no slope-scaled, normal-based, or rasterizer bias, so the fixed value must balance acne against detached shadows across every surface angle.</p>
+
+    <h2 id="filter-shadow-with-pcf" tabindex="-1">Filter nine depth comparisons with a PCF-style footprint</h2>
+    <p>The fragment shader calls <code>textureSampleCompare</code> at the center, four cardinal neighbors, and four diagonal neighbors. Each nonzero axis component is 1.75 shadow texels, or 0.001708984375 in normalized coordinates for a 1024-wide map; diagonal taps move by that amount on both axes. The comparison sampler uses nearest filtering.</p>
+    <pre tabindex="0" aria-label="Combine nine WebGPU shadow comparison samples"><code><span class="code-keyword">let</span> texel = 1.75 / vec2&lt;f32&gt;(textureDimensions(shadow_map));
+<span class="code-keyword">let</span> c  = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv, reference_depth);
+<span class="code-keyword">let</span> n  = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv + vec2&lt;f32&gt;(0.0, texel.y), reference_depth);
+<span class="code-keyword">let</span> s  = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv - vec2&lt;f32&gt;(0.0, texel.y), reference_depth);
+<span class="code-keyword">let</span> e  = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv + vec2&lt;f32&gt;(texel.x, 0.0), reference_depth);
+<span class="code-keyword">let</span> w  = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv - vec2&lt;f32&gt;(texel.x, 0.0), reference_depth);
+<span class="code-comment">// ne, nw, se, and sw sample the four diagonals.</span>
+<span class="code-keyword">let</span> lit = min(min(min(min(c, n), min(s, e)),
+                  min(min(w, ne), min(nw, se))), sw);</code></pre>
+    <p>The footprint resembles 3&times;3 percentage-closer filtering, but the reduction is deliberately important: it takes the minimum instead of the average. With nearest comparison results, all nine samples must report lit for <code>lit</code> to become 1. One occluded tap makes it 0. In-bounds visibility is consequently either 0.16 or 1, creating a conservative, expanded hard shadow instead of the fractional transition produced by conventional averaged PCF.</p>
+    <p>The function accepts a normal and light direction but does not currently use them. That leaves both the 1.75-texel footprint and 0.00035 depth bias fixed regardless of slope or distance.</p>
+
+    <h2 id="render-lit-scene" tabindex="-1">Render the floor and teapot with projected visibility</h2>
+    <p>The second pass clears the surface to gray <code>(0.48, 0.52, 0.56, 1)</code> and surface depth to 1. It draws the two-triangle floor followed by the 9,128-triangle teapot. This pipeline enables back-face culling and uses writable <code>Depth32Float</code> with <code>LessEqual</code>, one sample, and no blending.</p>
+    <p>WGSL computes world-space ambient, Lambert diffuse, and Phong-style specular terms. Ambient remains visible in shadow. Diffuse and the white specular highlight are multiplied by projected visibility:</p>
+    <pre tabindex="0" aria-label="Apply projected shadow visibility to WebGPU scene lighting"><code><span class="code-keyword">let</span> ambient = input.color * 0.16;
+<span class="code-keyword">let</span> diffuse = max(dot(normal, light_direction), 0.0) * input.color;
+<span class="code-keyword">let</span> specular = pow(
+    max(dot(reflected, view_direction), 0.0),
+    16.0,
+) * vec3&lt;f32&gt;(0.25);
+<span class="code-keyword">let</span> visibility = select(
+    1.0,
+    shadow_visibility,
+    input.shadow_receiver &gt; 0.5,
+);
+
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(
+    ambient + (diffuse + specular) * visibility,
+    1.0,
+);</code></pre>
+    <p>The white teapot's receiver alpha is 0, so its final visibility is 1 and it never self-shadows. The taupe floor's alpha is 1, so it receives the map. The WGSL source calculates <code>shadow_factor</code> before selecting by receiver flag, meaning the teapot path is not guarded from those nine calls at shader-source level.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="shadow-passes-caption" tabindex="0">
+      <table>
+        <caption id="shadow-passes-caption">Shadow mapping render passes and explicit scene draws</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Draws</th><th scope="col">Triangles</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Light view</th><td>Fixed shadow depth + discarded color</td><td>Teapot</td><td>9,128</td><td>Nearest caster depth</td></tr>
+          <tr><th scope="row">Visible scene</th><td>Surface color + surface-size depth</td><td>Floor, then teapot</td><td>9,130</td><td>Lit color with projected floor shadow</td></tr>
+          <tr><th scope="row">Text overlay</th><td>Load surface color; no depth</td><td>Framework glyph draw</td><td>Framework-managed</td><td>Title, GPU information, and FPS</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Excluding overlay geometry, each frame records three render passes, three explicit scene draws, 18,258 submitted triangles, and 54,774 index invocations. The example owns two render pipelines; Glyphon adds its instanced text draw in the separate third pass when the overlay contains visible glyphs.</p>
+
+    <h2 id="animate-light" tabindex="-1">Animate the light around a fixed camera</h2>
+    <p>The camera does not move. It uses a 60&deg; right-handed perspective with the current surface aspect and near and far planes of 1 and 256. A 12.5-unit orbit at &minus;30&deg; yaw and 25&deg; pitch places the eye near <code>(5.6644, 5.2827, -9.8111)</code>, looking toward <code>(0, -0.35, 0)</code>.</p>
+    <p>Rust advances normalized animation time by <code>delta_seconds * 0.2</code> and keeps its fractional part, so one light cycle lasts five seconds. The phase drives this position:</p>
+    <pre tabindex="0" aria-label="Animate the shadow-casting light on a five-second ellipse"><code>vec3(
+    7.5 * cos(phase),
+    8.0 + 1.5 * sin(phase),
+    4.5 * sin(phase) - 4.0,
+)</code></pre>
+    <p>The light follows an ellipse centered at <code>(0, 8, -4)</code>, ranges from 6.5 to 9.5 on Y and &minus;8.5 to 0.5 on Z, and always looks toward <code>(0, -0.45, 0)</code>. Its square perspective frustum uses a 45&deg; field of view, aspect 1, near 1, and far 40. The model matrix stays identity.</p>
+    <p>Resizing recreates only the surface-size scene depth, rewrites the uniforms for the new camera aspect, and rebuilds overlay placement. The fixed shadow attachments remain 1024&times;1024. There are no keyboard, mouse, pointer, or touch controls.</p>
+    <p>The 22 px Vazirmatn overlay displays “Shadow mapping,” GPU device information, and FPS. That FPS is CPU frame cadence averaged over 500 ms, not GPU timing. Overlay preparation runs every frame; its text changes on the statistics cadence.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU shadow mapping example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU shadow mapping example"><code>cargo run --example shadowmapping</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU shadow mapping example"><code>scripts/build-wasm.sh --release shadowmapping
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/shadowmapping/</code> in a browser with WebGPU support. Native code loads the glTF synchronously. The WebAssembly entry point starts an asynchronous task, awaits the same model, and then runs the example. Both targets use the same three passes and WGSL with no rendering fallback.</p>
+    <p>This compact implementation keeps the full projected-shadow path visible, but it has one fixed-resolution perspective map, one caster, one receiver, and one moving light. It has no cascades, cube-map coverage, texel snapping, dynamic resolution, multiple lights, MSAA, alpha-tested casters, transparency, normal mapping, PBR materials, or controls. The finite light frustum can clip geometry, and the fixed bias trades shadow acne against separation as angles and distances change.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Average or weight the nine comparison results to produce fractional PCF visibility, then compare edge quality with the current minimum reduction.</li>
+      <li>Remove the discarded 4 MiB color target and red fragment work by creating a truly depth-only shadow pipeline.</li>
+      <li>Add slope-scaled or normal bias, front-face culling for the caster pass, and controls for bias and filter radius.</li>
+      <li>Enable teapot self-shadowing, add more casters and receivers, then extend the technique with cascades for directional lights or a cube depth map for point lights.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmapping.rs">Read the shadow mapping source &nearr;</a>
+      <a href="../bloom/">&larr; Previous: WebGPU bloom</a>
+      <a href="../shadowmappingcascade/">Next: WebGPU cascaded shadow mapping &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

@@ -1,0 +1,9 @@
+{
+  "title": "Compute Shader Ray Tracing in WebGPU with Rust and WGSL",
+  "description": "Build a WebGPU compute shader ray tracer in Rust and WGSL. Trace spheres and planes, cast hard shadows, add two reflection steps, and present a storage texture.",
+  "breadcrumbName": "Compute shader ray tracing",
+  "image": "computeraytracing.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Three glossy spheres reflected across red, green, white, and black walls in a WebGPU compute ray traced room."
+}

@@ -1,0 +1,121 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 07</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render an FPS counter and Persian text over a rotating cube with Rust and wgpu. This example uses a bundled font, Unicode shaping, and a glyph atlas, then composites the text in a separate WebGPU render pass.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Text overlay demo at a glance">
+      <div><dt>Text items</dt><dd>2</dd></div>
+      <div><dt>Render passes</dt><dd>2</dd></div>
+      <div><dt>Font</dt><dd>Vazirmatn</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#scene-and-overlay">A 3D scene with a 2D text overlay</a></li>
+        <li><a href="#fonts-and-glyph-atlas">Load the font and build a glyph atlas</a></li>
+        <li><a href="#text-style-and-placement">Style and position the text</a></li>
+        <li><a href="#unicode-and-rtl">Shape Unicode and Persian RTL text</a></li>
+        <li><a href="#prepare-and-render">Prepare, render, and update the overlay</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="scene-and-overlay" tabindex="-1">A 3D scene with a 2D text overlay</h2>
+    <p>The <a href="../texturemipmapgen/#about">mipmap generation example</a> used an overlay to report its GPU and frame rate. Here I focus on how that text is created and drawn, with two text items over a simple animated scene.</p>
+    <p>The cube uses eight vertices and thirty-six indices, forming twelve triangles. Its <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textoverlay.wgsl">WGSL shader</a> transforms positions with a model-view-projection matrix, interpolates vertex colors, and applies a small RGB tint. The cube rotates around Y with a fixed 28&deg; tilt around X; the camera stays in place.</p>
+    <p>The text remains in screen coordinates while the cube moves behind it. GPU information and FPS appear at the upper left, and a Persian sample appears near the lower right. These labels are rendered into the canvas through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>. The demo has no mouse or keyboard controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/textoverlay.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Two text items share one overlay renderer. Their positions are independent of the cube&rsquo;s model and camera matrices, so the labels stay fixed as the scene rotates.</figcaption>
+    </figure>
+
+    <h2 id="fonts-and-glyph-atlas" tabindex="-1">Load the font and build a glyph atlas</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/textoverlay.rs">Rust example</a> embeds <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn-Regular.ttf</a> with <code>include_bytes!</code>. During initialization, it passes those bytes to the text helper:</p>
+    <pre tabindex="0" aria-label="Initialize the text overlay with a bundled font in Rust"><code>self.overlay = Some(text::TextOverlay::with_font_data(
+    context,
+    [FONT_BYTES.to_vec()],
+)?);</code></pre>
+    <p>The font travels with the native executable or WebAssembly module, so the demo does not require a separate font download or an installed copy of Vazirmatn. Both labels select it with <code>TextFamily::Name("Vazirmatn")</code>. The repository includes the font&rsquo;s <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">license file</a>.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text.rs">text helper used by this checkout</a> wraps <a href="https://github.com/grovesNL/glyphon">glyphon</a>. Text shaping and layout determine which glyphs to draw and where to place them. Glyph images are rasterized on the CPU and cached in GPU atlas textures; the renderer then draws textured glyph quads.</p>
+    <p>An atlas packs many glyph images into shared texture storage. Repeated letters and digits can reuse cached images instead of uploading a new texture for each character. This example uses glyphon&rsquo;s atlas and rendering pipeline rather than implementing a font rasterizer in its scene shader.</p>
+
+    <h2 id="text-style-and-placement" tabindex="-1">Style and position the text</h2>
+    <p>Each call to <code>overlay.add_text</code> supplies a string, a <code>TextStyle</code>, and a <code>TextPlacement</code>. Style controls typography and color; placement controls the rectangle in which the text is laid out and clipped.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="text-overlay-styles-caption" tabindex="0">
+      <table>
+        <caption id="text-overlay-styles-caption">Styles used by the two text items</caption>
+        <thead>
+          <tr><th scope="col">Text item</th><th scope="col">Font size</th><th scope="col">Line height</th><th scope="col">Alignment</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">GPU information and FPS</th><td>22 px</td><td>30 px</td><td>Left</td></tr>
+          <tr><th scope="row">Persian sample</th><td>28 px</td><td>38 px</td><td>Right</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The stats item begins 26 pixels from the left and 24 pixels from the top. Its color is <code>[246, 249, 255, 255]</code>. The Persian item uses <code>[148, 213, 255, 255]</code>, giving it a light blue color, with its position recalculated from the surface width and height.</p>
+    <p>These measurements use render target pixels at the default placement scale of 1. The helper applies word wrapping and clips text to its placement bounds. The stats rectangle has a fixed height of 72 pixels, so a long GPU name can wrap and clip the FPS line on a narrow surface. When adapting the demo, budget space for the text after wrapping, not just its explicit newline count.</p>
+
+    <h2 id="unicode-and-rtl" tabindex="-1">Shape Unicode and Persian RTL text</h2>
+    <p>The lower label includes the Latin prefix <code>RTL:</code> and these two Persian phrases:</p>
+    <p id="persian-text-sample" lang="fa" dir="rtl">سلام ایران<br />متن راست به چپ</p>
+    <p>They mean &ldquo;Hello Iran&rdquo; and &ldquo;right to left text.&rdquo; They are kept in their normal Unicode order in the Rust string; the application does not reverse the characters manually.</p>
+    <p>The default <code>TextStyle</code> uses <code>Shaping::Advanced</code>. Through glyphon, <a href="https://github.com/pop-os/cosmic-text">cosmic-text</a> handles shaping and bidirectional layout, including contextual glyph forms and mixed text directions. The helper creates a text buffer with the requested font and metrics, sets its text, and calls <code>shape_until_scroll</code> before preparing it for rendering.</p>
+    <p><code>Align::Right</code> places each line against the right edge of its box after layout. Alignment alone cannot join Persian letters or resolve the order of mixed Latin and Persian text. Those are separate responsibilities of shaping and bidirectional layout.</p>
+    <p><a href="https://github.com/rastikerdar/vazirmatn">Vazirmatn</a> supplies the glyphs needed for this sample. If you replace the text with another script, load a font that covers it; one bundled font is not a guarantee of support for every language or emoji.</p>
+
+    <h2 id="prepare-and-render" tabindex="-1">Prepare, render, and update the overlay</h2>
+    <p>Each frame begins with <code>overlay.prepare(context)</code>. The helper updates its viewport resolution, prepares the text areas, and makes the glyph and instance data ready for the GPU.</p>
+    <p>The first render pass clears the color and depth buffers, then draws the cube with depth testing. The second pass <strong>loads the existing color</strong> and renders the text without a depth attachment. With initialization checks omitted, that final pass looks like this:</p>
+    <pre tabindex="0" aria-label="Render text over the existing scene color in Rust"><code>{
+    <span class="code-keyword">let mut</span> pass = render_pass::begin_color_load(
+        encoder, Some("text overlay render pass"), view,
+    );
+    overlay.render(&amp;mut pass)?;
+}</code></pre>
+    <p>Loading preserves the cube&rsquo;s pixels; clearing this pass would erase them. The text pipeline uses alpha blending to composite the glyphs, and the lack of depth testing lets the labels appear above scene geometry.</p>
+    <p>After recording the text draw, <code>overlay.trim()</code> resets atlas usage tracking so unused glyphs can be evicted later. It does not clear the text items or erase every cached glyph image each frame.</p>
+    <p>The rotation and matrix uniform update every frame, but the FPS label updates only when <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/stats.rs"><code>FrameStats</code></a> finishes its default 500 ms sample window. <code>add_text</code> returns a <code>TextItemId</code>, which is saved for that update:</p>
+    <pre tabindex="0" aria-label="Update the existing stats item in the text overlay"><code>overlay.update_text(id, &amp;value, style, placement)</code></pre>
+    <p>This replaces and reshapes that item&rsquo;s text buffer while keeping the overlay&rsquo;s font system, atlas, and renderer. On resize, the example recreates the depth texture and rebuilds both text items with new placements. The displayed FPS is an application frame-rate sample, not an isolated measurement of text rendering cost.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native text overlay example"><code>cargo run --example textoverlay</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU text overlay example"><code>scripts/build-wasm.sh --release textoverlay
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/textoverlay/</code>. Live rendering needs WebGPU support in the browser; this article, the Persian sample, and the screenshot remain readable without it.</p>
+    <p>Try these changes in the source:</p>
+    <ul>
+      <li>Edit the string in <code>rebuild_overlay</code> to test another mixture of Latin and Persian text.</li>
+      <li>Change font size, line height, color, and alignment, then adjust the placement bounds to fit the result.</li>
+      <li>Add another item with <code>add_text</code>, save its returned ID, and use <code>update_text</code> when its value changes.</li>
+    </ul>
+    <p>Canvas labels are not selectable HTML text. If an application relies on them for essential status information, expose an accessible text equivalent outside the canvas as well.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/textoverlay.rs">Read the text overlay source &nearr;</a>
+      <a href="../texturemipmapgen/">&larr; Previous: WebGPU mipmap generation</a>
+      <a href="../textmesh/">Next: WebGPU 3D text mesh &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

@@ -9,6 +9,18 @@ license = "MIT"
 name = "serve"
 path = "src/main.rs"
 
+# Examples default to `test = false`, which meant the tests living in these
+# two were compiled but never run by `cargo test`. Opt them in explicitly.
+[[example]]
+name = "residentevil2"
+path = "examples/residentevil2.rs"
+test = true
+
+[[example]]
+name = "nanite"
+path = "examples/nanite.rs"
+test = true
+
 [dependencies]
 base64 = { version = "0.22.1" }
 bvh = { version = "0.12.0", default-features = false, features = ["std"] }
@@ -24,8 +36,9 @@ gltf = { version = "1.4.1", default-features = false, features = [
 ] }
 http = { version = "1.4.2" }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
-nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
-# bvh 0.12 links nalgebra 0.34; accel.rs needs that exact version for
+# bvh 0.12 links nalgebra 0.34, and accel.rs hands Point3 values straight to
+# the bvh builder, so it must use that exact version — a newer nalgebra's
+# Point3 is a distinct type and will not coerce.
 nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = false, features = [
     "std",
 ] }

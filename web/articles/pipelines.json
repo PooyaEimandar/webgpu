@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Render Pipelines in Rust: Phong, Toon, and Wireframe",
+  "description": "Compare Phong, toon, and wireframe WebGPU render pipelines in Rust and WGSL while drawing one glTF scene through three viewports with wgpu.",
+  "breadcrumbName": "WebGPU multiple render pipelines",
+  "image": "pipelines.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "One WebGPU treasure scene shown side by side with glossy Phong shading, banded toon shading, and colored wireframe lines."
+}

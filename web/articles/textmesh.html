@@ -1,0 +1,126 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 08</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Turn font outlines into 3D geometry with Rust and wgpu. This WebGPU example shapes Latin and Persian text, builds extruded strokes along the glyph contours, and draws both lines as one indexed mesh with lighting in WGSL.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Text mesh demo at a glance">
+      <div><dt>Text lines</dt><dd>2</dd></div>
+      <div><dt>Draw calls</dt><dd>1</dd></div>
+      <div><dt>Curve steps</dt><dd>10</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#text-as-geometry">Text as geometry in a 3D scene</a></li>
+        <li><a href="#shape-the-text">Shape the text before building the mesh</a></li>
+        <li><a href="#extrude-font-outlines">Extrude the font outlines</a></li>
+        <li><a href="#combine-text-meshes">Combine and position the two lines</a></li>
+        <li><a href="#render-and-light">Render and light the mesh in WGSL</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="text-as-geometry" tabindex="-1">Text as geometry in a 3D scene</h2>
+    <p>The <a href="../textoverlay/#about">text overlay example</a> drew glyph images from a texture atlas in screen coordinates. Here the letters have positions, normals, and vertex colors in a 3D scene. Their side faces become visible as the mesh tilts, and lighting makes the extrusion easier to read.</p>
+    <p>The upper line says <q>Hey WGPU!</q> in gold. The blue line beneath it contains this Persian text:</p>
+    <p id="persian-mesh-sample" lang="fa" dir="rtl">هی وب جی پی یو!</p>
+    <p>The visible letters are <strong>extruded contour strokes</strong>. The helper builds narrow prisms along the font outlines, leaving the glyph interiors open. Both lines gently rock around Y with a fixed 8&deg; tilt around X. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> and has no mouse, keyboard, or text editing controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/textmesh.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Latin and Persian glyph contours become narrow 3D strokes. The front and side faces have separate normals, producing the visible changes in brightness.</figcaption>
+    </figure>
+
+    <h2 id="shape-the-text" tabindex="-1">Shape the text before building the mesh</h2>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/textmesh.rs">Rust example</a> embeds <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn-Regular.ttf</a> with <code>include_bytes!</code>. It calls <code>TextMesh::from_font_bytes</code> once for each line, supplying the font, string, color, and mesh options:</p>
+    <pre tabindex="0" aria-label="Build the Latin text mesh from a bundled font in Rust"><code><span class="code-keyword">let</span> ltr = text_mesh::TextMesh::from_font_bytes(
+    FONT_BYTES,
+    "Hey WGPU!",
+    [1.0, 0.72, 0.28, 1.0],
+    options,
+)?;</code></pre>
+    <p>The <a href="https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text_mesh.rs">text mesh helper used by this checkout</a> creates a glyphon text buffer backed by <a href="https://github.com/pop-os/cosmic-text">cosmic-text</a>. Its default <code>Shaping::Advanced</code> selects and positions glyphs before any triangles are generated. The Persian string stays in normal Unicode order; shaping and bidirectional layout determine its visual arrangement.</p>
+    <p>For each shaped glyph, <code>ttf_parser::Face::outline_glyph</code> supplies its outline. The helper scales the font coordinates by <code>glyph.font_size / units_per_em</code> and applies the glyph&rsquo;s layout position and offsets. It also flips the layout&rsquo;s vertical origin into the mesh coordinate system.</p>
+    <p>Outline extraction uses the supplied font face. Choose a font that contains the characters you need; this helper does not resolve outlines from arbitrary fallback fonts. Glyphs without outlines are skipped, and a string that produces no vertices returns an error.</p>
+
+    <h2 id="extrude-font-outlines" tabindex="-1">Extrude the font outlines</h2>
+    <p>The example requests the <code>Vazirmatn</code> family and uses these options. Distances are mesh and layout units before the model scale is applied:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="text-mesh-options-caption" tabindex="0">
+      <table>
+        <caption id="text-mesh-options-caption">Text mesh construction options</caption>
+        <thead>
+          <tr><th scope="col">Option</th><th scope="col">Value</th><th scope="col">Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>font_size</code></th><td>1.0</td><td>Scale used for text layout and glyph outlines</td></tr>
+          <tr><th scope="row"><code>line_height</code></th><td>1.35</td><td>Line metric within each shaping buffer</td></tr>
+          <tr><th scope="row"><code>depth</code></th><td>0.18</td><td>Extrusion from Z = &minus;0.09 to +0.09</td></tr>
+          <tr><th scope="row"><code>stroke_width</code></th><td>0.032</td><td>Full width of each contour stroke</td></tr>
+          <tr><th scope="row"><code>curve_steps</code></th><td>10</td><td>Fixed subdivisions per B&eacute;zier curve</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><code>OutlineCollector</code> implements <a href="https://docs.rs/ttf-parser/latest/ttf_parser/trait.OutlineBuilder.html"><code>ttf_parser::OutlineBuilder</code></a>. Straight lines contribute their endpoints. Quadratic and cubic B&eacute;zier curves are sampled at evenly spaced parameter values, producing a sequence of straight segments. Closing a contour connects its final point back to its first.</p>
+    <p>Each segment becomes a separate rectangular prism. A perpendicular offset of half the stroke width establishes its sides, and half the depth places its front and back faces. Two end caps complete the prism.</p>
+    <p>That is six quads, or <strong>24 vertices and 36 indices per nondegenerate segment</strong>. Each face has its own vertices and flat normal. Inner contours receive the same treatment as outer contours.</p>
+    <p>This simple construction does not triangulate filled glyph interiors or weld neighboring prisms into one solid. Prisms can overlap at joins, and there are no bevels. Increasing <code>curve_steps</code> makes curved outlines more detailed while increasing geometry and CPU construction work; it does not change how those joins are built.</p>
+
+    <h2 id="combine-text-meshes" tabindex="-1">Combine and position the two lines</h2>
+    <p>With the default <code>center: true</code>, each line is centered in X and Y after construction. The example appends them to a combined mesh with separate vertical offsets, then centers the result:</p>
+    <pre tabindex="0" aria-label="Combine and center the Latin and Persian text meshes"><code><span class="code-keyword">let mut</span> mesh = text_mesh::TextMesh::default();
+mesh.append(&amp;ltr, [0.0, 0.58, 0.0])?;
+mesh.append(&amp;rtl, [0.0, -0.58, 0.0])?;
+<span class="code-keyword">let</span> center = mesh.bounds.center();
+mesh.translate([-center[0], -center[1], 0.0]);</code></pre>
+    <p><code>append</code> copies the vertices and offsets the incoming indices to refer to their new positions in the combined vertex array. The two offsets differ by 1.16 units. This separation comes from the append operations, not the <code>line_height</code> option, because the lines were shaped in separate buffers.</p>
+    <p>The initial model scale is <code>(4.7 / mesh.bounds.width().max(1.0)).min(1.25)</code>. The camera uses a distance of 5.5 for wide viewports and 7.1 for portrait viewports. Very narrow views or longer replacement strings may still need a smaller model scale or a different camera distance to keep the full text visible.</p>
+    <p>The gentle yaw animation advances with a frame counter. Its speed therefore depends on frame rate. Animation updates the uniform buffer; it does not rebuild the text geometry. Resizing recreates the depth texture and updates the camera and projection uniforms.</p>
+
+    <h2 id="render-and-light" tabindex="-1">Render and light the mesh in WGSL</h2>
+    <p><code>TextMeshVertex</code> has a 40-byte stride: position occupies 12 bytes at shader location 0, normal occupies 12 bytes at location 1, and RGBA color occupies 16 bytes at location 2. Both lines are uploaded into one vertex buffer and one <code>u32</code> index buffer during initialization.</p>
+    <p>The only bind group entry is a uniform buffer at <code>@group(0) @binding(0)</code>, containing the model-view-projection matrix, model matrix, and light direction. There are no sampled textures in this render pipeline. One pass clears color and depth, then draws both lines:</p>
+    <pre tabindex="0" aria-label="Draw both lines as one indexed text mesh"><code>render_pass.draw_indexed(0..self.index_count, 0, 0..1);</code></pre>
+    <p>The pipeline writes depth and uses <code>LessEqual</code> testing, with face culling disabled. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textmesh.wgsl">WGSL shader</a> transforms and normalizes the vertex normals. In the fragment stage, a directional diffuse term and a cool rim accent shade the vertex color:</p>
+    <pre tabindex="0" aria-label="Shade the text mesh with diffuse lighting and a rim accent"><code><span class="code-keyword">let</span> shaded = input.color.rgb * (0.34 + diffuse * 0.74)
+    + vec3&lt;f32&gt;(0.18, 0.24, 0.32) * rim;</code></pre>
+    <p>The rim term compares the surface normal with the fixed +Z direction, rather than a calculated camera vector. Both text colors have alpha 1, and this pipeline does not enable alpha blending.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native version:</p>
+    <pre tabindex="0" aria-label="Run the native text mesh example"><code>cargo run --example textmesh</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU text mesh example"><code>scripts/build-wasm.sh --release textmesh
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/textmesh/</code>. The font is bundled, so no separate font download is needed. Live rendering requires WebGPU support in the browser; the article, text sample, and screenshot remain readable without it.</p>
+    <p>Try these source changes and rebuild:</p>
+    <ul>
+      <li>Adjust <code>depth</code> and <code>stroke_width</code> independently to compare extrusion depth with outline thickness.</li>
+      <li>Change <code>curve_steps</code> from 10 to 20 and compare the curves and generated vertex count.</li>
+      <li>Replace either string with text covered by the bundled font, then adjust the mesh offsets and camera framing.</li>
+    </ul>
+    <p>The buffers are built at startup. Adding live text editing would require regenerating the mesh and updating its GPU buffers; changing the string alone would not update an already uploaded mesh.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/textmesh.rs">Read the text mesh source &nearr;</a>
+      <a href="../textoverlay/">&larr; Previous: WebGPU text overlay</a>
+      <a href="../htmlmesh/">Next: WebGPU HTML mesh &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU 3D Text Mesh in Rust and wgpu",
+  "description": "Build 3D text from font outlines in Rust and wgpu. Learn RTL shaping, Bézier curve sampling, extrusion, indexed meshes, and WGSL lighting with WebGPU.",
+  "breadcrumbName": "Text mesh",
+  "image": "textmesh.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Gold Hey WGPU! lettering above blue Persian text, with extruded contour strokes and visible side faces on a dark background."
+}

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Shadow Mapping in Rust with wgpu",
+  "description": "Build WebGPU shadow mapping in Rust with a 1024×1024 depth pass, comparison sampling, a nine-tap PCF-style filter, and an animated light.",
+  "breadcrumbName": "WebGPU shadow mapping",
+  "image": "shadowmapping.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A white teapot casting a long dark shadow across a beige floor against a gray background."
+}

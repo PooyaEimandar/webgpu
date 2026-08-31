@@ -1,0 +1,213 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 34</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Seed 262,144 particles once, update every record in a compute pass, alternate two 8 MiB storage buffers, and expand the GPU-written state into procedural textured quads with additive color.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU compute particles demo at a glance">
+      <div><dt>Particles</dt><dd>262,144</dd></div>
+      <div><dt>Compute workgroups</dt><dd>1,024</dd></div>
+      <div><dt>Ping-pong storage</dt><dd>16 MiB</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#move-state-to-compute">Move persistent state to compute</a></li>
+        <li><a href="#load-two-ktx-textures">Load two KTX textures</a></li>
+        <li><a href="#seed-particles">Seed two storage buffers</a></li>
+        <li><a href="#dispatch-simulation">Dispatch the simulation</a></li>
+        <li><a href="#render-billboards">Render procedural billboards</a></li>
+        <li><a href="#steer-repulsor">Steer the repulsor</a></li>
+        <li><a href="#record-three-passes">Record three passes</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="move-state-to-compute" tabindex="-1">Move persistent particle state from CPU loops to a compute shader</h2>
+    <p>The <a href="../ssao/#about">previous SSAO example</a> uses fullscreen fragment work to derive a temporary visibility texture from a deferred G-buffer. Compute Particles demonstrates a different GPU pattern: dynamic state persists across frames in storage buffers. One compute dispatch reads the current particle array and writes the next array. The following graphics pass consumes that output directly, and the two arrays swap roles for the next frame.</p>
+    <p>There is no per-frame particle upload or readback. Rust writes only a 32-byte uniform block containing time step, target, particle count, billboard size, and viewport dimensions. WebGPU orders the compute and render passes in the same command stream, so the vertex shader sees the storage writes before it builds the billboards.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/c5a40b3e41a72f0d2b29e8899777fcd47781a511">introducing Compute Particles commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computeparticles.rs">Rust example</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computeparticles.wgsl">WGSL shader</a>, particle sprite, screenshots, build registration, README entry, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">gallery registration</a>. The shader, both textures, and screenshots remain unchanged from that revision. Current Rust differs only through the later <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a>. The example uses the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a>, whose <a href="https://github.com/PooyaEimandar/webgpu/commit/7bb1e1b93fad1cf7683913cfa79394e50b137f98">later batch-loading update</a> supplies the current concurrent browser fetch, and runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/computeparticles.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Dense additive sprites trace cyan, magenta, yellow, and green streams around the repelling target. The unchanged 1280&times;720 capture is available as a 545,263-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computeparticles.jpg">JPEG</a> and 442,242-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computeparticles.webp">WebP</a>. Its displayed frame rate is capture text, not a benchmark.</figcaption>
+    </figure>
+
+    <h2 id="load-two-ktx-textures" tabindex="-1">Load two uncompressed KTX 1 textures in one batch</h2>
+    <p>Startup requests <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle01_rgba.ktx"><code>particle01_rgba.ktx</code></a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_gradient_rgba.ktx"><code>particle_gradient_rgba.ktx</code></a> together. Native loading gives each request a worker thread. WebAssembly sends both URLs to one temporary Worker, whose <code>Promise.all</code> fetches them concurrently. Rendering starts after both byte arrays arrive and pass the example's KTX decoder.</p>
+    <p>The decoder accepts little-endian KTX 1 files containing uncompressed unsigned-byte RGBA8, one face, no array layers, and no volume depth. It reads each mip payload into tightly packed RGBA bytes and uploads a <code>Rgba8Unorm</code> texture. These two files each contain only mip zero. Linear minification and magnification soften the 64&times;64 sprite and sample the 256-entry color ramp.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-particles-assets-caption" tabindex="0">
+      <table>
+        <caption id="compute-particles-assets-caption">Compute Particles runtime assets and embedded inputs</caption>
+        <thead>
+          <tr><th scope="col">Input</th><th scope="col">Delivery</th><th scope="col">Stored bytes</th><th scope="col">Encoded layout</th><th scope="col">Uploaded payload</th><th scope="col">Shader use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>particle01_rgba.ktx</code></th><td>Runtime request</td><td>16,484</td><td>64&times;64 RGBA8; 1 mip</td><td>16,384 bytes</td><td>Billboard shape and coverage</td></tr>
+          <tr><th scope="row"><code>particle_gradient_rgba.ktx</code></th><td>Runtime request</td><td>1,124</td><td>256&times;0 header; RGBA8; 1 mip</td><td>1,024 bytes at 256&times;1</td><td>Animated particle color</td></tr>
+          <tr><th scope="row"><code>computeparticles.wgsl</code></th><td>Embedded with <code>include_str!</code></td><td>4,258</td><td>145 lines of WGSL</td><td>Compute + graphics pipelines</td><td>Simulation, expansion, shading</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn font</a></th><td>Embedded with <code>include_bytes!</code></td><td>122,752</td><td>TrueType; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td><td>Framework-managed glyph atlas</td><td>Title, GPU, FPS, particle count</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two URL-fetched files total 17,608 stored bytes and upload 17,408 texel bytes before alignment or driver overhead. The 64&times;64 sprite's alpha channel is fully opaque; its RGB intensity creates coverage in the fragment shader. The gradient's alpha is also unused. Both textures are linear <code>Rgba8Unorm</code>, not sRGB.</p>
+    <p>The sprite arrived with the introducing commit. The gradient had already arrived with the <a href="https://github.com/PooyaEimandar/webgpu/commit/7f54cadf3f26d9e07c19d16d9251c7832b91a44e">Radial Blur example</a>. They are exact byte matches for the same <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/textures/particle01_rgba.ktx">particle sprite</a> and <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/textures/particle_gradient_rgba.ktx">color gradient</a> in Sascha Willems' Vulkan-Assets repository. Its <a href="https://github.com/SaschaWillems/Vulkan-Assets/blob/main/README.md">README</a> does not provide a general asset license or per-file license, so the article does not assign definitive authorship or licensing to these textures.</p>
+
+    <h2 id="seed-particles" tabindex="-1">Seed 262,144 deterministic particle records twice</h2>
+    <p>Rust uses a linear congruential generator seeded with <code>0x5eed_cafe</code>. Every initial position is distributed across normalized device coordinates from &minus;1 to 1, velocity starts at zero, and the first gradient coordinate starts at half the X position. The same CPU vector initializes both storage buffers, then the temporary vector can be dropped.</p>
+    <p>Each <code>Particle</code> stores two floats for position, two for velocity, and four for gradient state. That is 32 bytes per record and exactly 8,388,608 bytes per 262,144-particle array. The duplicate arrays consume 16 MiB and let every compute invocation read one immutable input record while writing the matching output record.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-particles-resources-caption" tabindex="0">
+      <table>
+        <caption id="compute-particles-resources-caption">Fixed logical GPU resources owned by Compute Particles</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Elements</th><th scope="col">Element or block size</th><th scope="col">Logical bytes</th><th scope="col">Update cadence</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Particle buffer A</th><td>262,144 records</td><td>32 bytes</td><td>8,388,608</td><td>Written every other compute pass</td><td>Current or next simulation state</td></tr>
+          <tr><th scope="row">Particle buffer B</th><td>262,144 records</td><td>32 bytes</td><td>8,388,608</td><td>Written every other compute pass</td><td>Next or current simulation state</td></tr>
+          <tr><th scope="row">Simulation uniform</th><td>2 <code>vec4</code> values</td><td>32 bytes</td><td>32</td><td>One queue write per frame</td><td>Time, target, count, size, viewport</td></tr>
+          <tr><th scope="row">Particle sprite</th><td>64&times;64 texels</td><td>4 bytes</td><td>16,384</td><td>Uploaded once</td><td>Billboard intensity mask</td></tr>
+          <tr><th scope="row">Color gradient</th><td>256&times;1 texels</td><td>4 bytes</td><td>1,024</td><td>Uploaded once</td><td>Animated RGB lookup</td></tr>
+          <tr><th scope="row">Total</th><td>Buffers + texels</td><td>&mdash;</td><td><strong>16,794,656</strong></td><td>&mdash;</td><td>16.0166 MiB before allocation overhead</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The total excludes bind-group and sampler descriptors, the presentation surface, the embedded font and generated glyph resources, staging behavior, and implementation-specific alignment. Only <code>gradient_pos.x</code> affects rendering; its other three floats occupy 3 MiB per particle buffer, or 6 MiB across the pair, without being read. Two compute bind groups encode A-to-B and B-to-A bindings. Two render bind groups point at A or B. Selecting prebuilt groups each frame avoids rewriting descriptors.</p>
+
+    <h2 id="dispatch-simulation" tabindex="-1">Dispatch 1,024 independent compute workgroups</h2>
+    <p>Rust dispatches <code>ceil(262144 / 256)</code>, which is exactly 1,024 workgroups. WGSL fixes its X workgroup size at 256, producing 262,144 invocations without a partial final group. The bounds check remains in the shader, but no invocation is out of range at the current constants. There are no atomics, shared-memory tiles, neighbor searches, or particle-to-particle collisions: invocation <em>i</em> reads record <em>i</em> and writes record <em>i</em>.</p>
+    <p>The target is a repulsor. The shader adds a small inverse-distance-cubed force directed away from it, advances position with the scaled time step, and increments the gradient coordinate. When either coordinate leaves the clip-space square, the particle is clamped to &plusmn;0.998 and its velocity is reflected at one tenth of its previous magnitude plus an attraction back toward the target.</p>
+    <pre tabindex="0" aria-label="Update one ping-ponged particle in WGSL"><code><span class="code-keyword">var</span> velocity = particle.vel;
+<span class="code-keyword">var</span> position = particle.pos;
+<span class="code-keyword">var</span> gradient = particle.gradient_pos;
+
+velocity = velocity + repulsion(position, dest_pos) * 0.05;
+position = position + velocity * delta_t;
+
+<span class="code-keyword">if</span> (position.x &lt; -1.0 || position.x &gt; 1.0
+    || position.y &lt; -1.0 || position.y &gt; 1.0) {
+    velocity = (-velocity * 0.1) + attraction(position, dest_pos) * 12.0;
+    position = clamp(position, vec2&lt;f32&gt;(-0.998), vec2&lt;f32&gt;(0.998));
+}
+
+gradient.x = gradient.x + 0.02 * delta_t;
+<span class="code-keyword">if</span> (gradient.x &gt; 1.0) {
+    gradient.x = gradient.x - 1.0;
+}
+
+particles_out[index].pos = position;
+particles_out[index].vel = velocity;
+particles_out[index].gradient_pos = gradient;</code></pre>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-particles-simulation-caption" tabindex="0">
+      <table>
+        <caption id="compute-particles-simulation-caption">Compute simulation constants and state transitions</caption>
+        <thead>
+          <tr><th scope="col">Quantity</th><th scope="col">Current value</th><th scope="col">Applied in</th><th scope="col">Effect</th><th scope="col">Constraint</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Particle count</th><td>262,144; exactly representable as <code>f32</code></td><td>Rust + uniform</td><td>One invocation and one billboard per record</td><td>Fixed at compile time</td></tr>
+          <tr><th scope="row">Workgroup size</th><td>256</td><td>Rust dispatch + WGSL attribute</td><td>1,024 X workgroups</td><td>Constants must stay synchronized</td></tr>
+          <tr><th scope="row">Simulation step</th><td><code>clamp(frame_dt &times; 2.5, 0, 0.25)</code></td><td>Uniform</td><td>Scales movement and gradient drift</td><td>Large frame gaps cap after 0.1 seconds</td></tr>
+          <tr><th scope="row">Repulsion soft floor</th><td>Distance squared &ge; 0.0004</td><td>WGSL</td><td>Limits the inverse-distance singularity</td><td>Still strongest near the target</td></tr>
+          <tr><th scope="row">Boundary</th><td>&minus;1 to 1; clamp to &plusmn;0.998</td><td>WGSL</td><td>Keeps centers inside clip space</td><td>Billboard edges can still clip</td></tr>
+          <tr><th scope="row">Gradient drift</th><td><code>0.02 &times; delta_t</code></td><td>WGSL</td><td>Moves through the 256-color ramp</td><td>Wraps above 1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The first frame reads A, writes B, renders B, and marks B active. The next reads B, writes A, renders A, and repeats. A normal dispatch logically reads and writes 16 MiB of particle payload in total before cache and implementation effects. No command copies that payload between buffers or returns it to the CPU. At ordinary frame timing, the scaled delta advances the gradient by about 0.05 phase per real second, giving a 20-second color cycle. Repulsive acceleration itself is added once per frame without delta scaling.</p>
+
+    <h2 id="render-billboards" tabindex="-1">Expand the output buffer into 524,288 additive triangles</h2>
+    <p>The render pipeline has no vertex or index buffer. A single non-indexed instanced draw requests six vertices for every particle. <code>instance_index</code> selects the particle record from the just-written storage buffer, while <code>vertex_index</code> selects one of six hard-coded quad corners and UVs. At 262,144 instances, that means 1,572,864 vertex invocations and 524,288 triangles.</p>
+    <p>Viewport dimensions convert an eight-surface-pixel square into clip-space offsets, so billboards retain their size in physical device pixels when the surface changes; that is not necessarily eight CSS pixels on a high-density display. Particle positions themselves remain raw normalized device coordinates, so their motion and distribution stretch with viewport aspect ratio. The example has no camera, depth attachment, depth test, culling, or multisampling. All quads lie at clip-space Z zero and overlap according to their additive blend rather than geometric visibility.</p>
+    <p>The fragment shader samples the grayscale sprite and the animated color ramp. Sprite alpha is one throughout, so coverage comes from a smoothstep over the maximum RGB component. RGB is multiplied by the gradient, brightened by 1.75, premultiplied by coverage, and added to the destination. Alpha uses source-one and destination-one-minus-source-alpha blending. There is no fragment discard: dark sprite corners still shade and blend a near-zero contribution. Because the surface clears with alpha one, that alpha blend keeps final surface alpha at one.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-particles-render-caption" tabindex="0">
+      <table>
+        <caption id="compute-particles-render-caption">Billboard expansion and fragment composition</caption>
+        <thead>
+          <tr><th scope="col">Stage</th><th scope="col">Input</th><th scope="col">Work per particle</th><th scope="col">Frame total</th><th scope="col">Output behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Vertex</th><td>One storage record + procedural corner</td><td>6 invocations</td><td>1,572,864 vertices</td><td>One 8-device-pixel screen-aligned quad</td></tr>
+          <tr><th scope="row">Primitive assembly</th><td>Six vertices</td><td>2 triangles</td><td>524,288 triangles</td><td>No vertex/index buffers or culling</td></tr>
+          <tr><th scope="row">Fragment sampling</th><td>Sprite + gradient</td><td>2 filtered samples per covered fragment</td><td>Depends on clipping and overdraw</td><td>Premultiplied colored coverage</td></tr>
+          <tr><th scope="row">RGB blend</th><td>Source + destination</td><td>Add</td><td>All covered fragments</td><td>Dense trails grow brighter</td></tr>
+          <tr><th scope="row">Alpha blend</th><td>Source + destination</td><td><code>src + dst(1-src_alpha)</code></td><td>All covered fragments</td><td>Separate from additive RGB</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="steer-repulsor" tabindex="-1">Steer the repulsor with pointer or touch input</h2>
+    <p>Before interaction, the target moves horizontally between &minus;0.75 and 0.75. Its phase advances at 0.08 cycles per second, giving a 12.5-second loop. Hold the left mouse button and drag, or start and move a touch, to convert the physical pointer position into normalized device coordinates and replace that automatic target.</p>
+    <p>After the first valid pointer update, <code>pointer_active</code> remains true. Releasing the mouse, ending a touch, or leaving the canvas stops further updates but does not return to automatic movement; the last normalized position remains the repulsor until another interaction or page restart. There is no keyboard control, reset button, particle-count control, pause, or visible marker for the target.</p>
+    <p>On resize, Rust rewrites the uniform with the new physical surface dimensions and rebuilds the text overlay. The particle state remains intact. The overlay uses the embedded Vazirmatn font at 18 px with a 22 px line height and reports the title, rolling frame time and FPS, GPU description, and particle count. That FPS value averages CPU or event-loop frame delivery over 500 ms; it is not a GPU timestamp measurement. The overlay's changing buffers and glyph resources are managed by the framework rather than counted in the fixed resource table.</p>
+
+    <h2 id="record-three-passes" tabindex="-1">Record one compute pass and two render passes</h2>
+    <p>Every frame prepares the text overlay, records the simulation dispatch, clears and fills the presentation surface with particles, then opens a second color pass that loads the surface and draws text. The active ping-pong index changes only after those passes have been recorded.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-particles-passes-caption" tabindex="0">
+      <table>
+        <caption id="compute-particles-passes-caption">Compute Particles frame graph and submitted work</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Pass</th><th scope="col">Submission</th><th scope="col">Reads</th><th scope="col">Writes</th><th scope="col">Synchronization result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td>Compute simulation</td><td>1,024 workgroups &times; 256</td><td>Active particle buffer + uniform</td><td>Inactive particle buffer</td><td>Next state available to graphics</td></tr>
+          <tr><th scope="row">2</th><td>Particle render</td><td>6 vertices &times; 262,144 instances</td><td>New state + uniform + 2 textures</td><td>Cleared presentation surface</td><td>524,288 blended triangles; no depth attachment</td></tr>
+          <tr><th scope="row">3</th><td>Text overlay</td><td>Framework-managed glyph draws</td><td>Glyph atlas and overlay buffers</td><td>Loaded presentation surface</td><td>Diagnostics appear over particles</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed simulation performs one 32-byte uniform queue write per frame; <code>params1.w</code> is currently unused. Texture sampling and additive blending can dominate as particles overlap: 262,144 nominal 8&times;8 quads describe up to 16,777,216 fragment candidates before edge clipping, although the actual fragment count depends on rasterization and the surface. The color-depth helper receives no depth texture, so its depth-clear argument has no effect. The demo exposes no timestamp query, pipeline statistics, or overdraw visualization.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU Compute Particles example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU Compute Particles example"><code>cargo run --example computeparticles</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU Compute Particles example"><code>scripts/build-wasm.sh --release computeparticles
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/computeparticles/</code> in a browser with WebGPU support. Native and WebAssembly load the same two KTX files before calling <code>sib::render</code>, then run the same ping-ponged compute and draw sequence.</p>
+    <p>This is not an N-body simulation. Particles do not observe one another, exchange momentum, collide, spawn, die, compact, or sort. All 262,144 records are updated and all 262,144 billboards are submitted every frame, including particles whose contribution may be dim or clipped. The fixed count, duplicated 256 workgroup constant, and two permanently allocated 8 MiB buffers are not runtime quality settings.</p>
+    <p>The integration is frame-rate dependent because repulsive acceleration is added to velocity once per frame without multiplying by the time step. Only position and gradient movement use the scaled, clamped delta. A fixed-step integrator, acceleration scaled by seconds, damping, and deterministic substeps would make behavior more comparable across refresh rates and stalls.</p>
+    <p>Billboards use normalized device positions rather than a world-space camera. They have no depth ordering, soft-particle intersection, culling, LOD, indirect draw, or MSAA. Additive blending creates the luminous ribbons but also produces heavy overdraw and can saturate presentation colors. Both textures have one mip and use linear <code>Rgba8Unorm</code>, so the gradient is not decoded as sRGB and mip filtering has no lower level to select.</p>
+    <p>The automatic target has no visual marker, and pointer mode has no way back to automatic motion without restarting. Boundary response is a visual rule rather than a physically derived collision. The inverse-distance force is softened, but the simulation still has no spatial structure, obstacles, lifetime distribution, or trail history; the apparent trails come from dense instantaneous overlap, not accumulated frames.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Add fixed-step integration and scale acceleration by delta time, then compare 60 Hz and 144 Hz trajectories.</li>
+      <li>Expose particle count, sprite size, force, damping, and automatic or pointer target modes with egui.</li>
+      <li>Compact visible particles into an indirect draw buffer and measure storage traffic and overdraw separately.</li>
+      <li>Add particle lifetime, emitters, obstacle fields, depth-aware soft particles, and an HDR target with tone mapping.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computeparticles.rs">Read the Compute Particles source &nearr;</a>
+      <a href="../ssao/">&larr; Previous: WebGPU screen-space ambient occlusion</a>
+      <a href="../computecloth/">Next: WebGPU compute cloth simulation &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

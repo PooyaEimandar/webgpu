@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Text Overlay in Rust and wgpu",
+  "description": "Render text over a 3D scene with Rust and wgpu. Learn glyph atlases, bundled fonts, Unicode and RTL shaping, dynamic FPS labels, and WebGPU overlay passes.",
+  "breadcrumbName": "Text overlay",
+  "image": "textoverlay.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A cube with smoothly blended vertex colors on a dark background, with white GPU and FPS text at the upper left and blue Persian text at the lower right."
+}

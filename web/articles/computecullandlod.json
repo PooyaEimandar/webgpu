@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Compute Culling and LOD in Rust: GPU-Driven Draws",
+  "description": "Build GPU-driven WebGPU rendering in Rust with compute frustum culling, six distance LOD buckets, compacted instances, and indexed indirect draws.",
+  "breadcrumbName": "WebGPU compute culling and LOD",
+  "image": "computecullandlod.jpg",
+  "imageWidth": 1600,
+  "imageHeight": 1000,
+  "imageAlt": "A three-dimensional grid of colored sphere LODs rendered after WebGPU compute frustum culling, beside live culling statistics."
+}

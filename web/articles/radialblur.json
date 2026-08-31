@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Radial Blur in Rust: 32-Sample Glow with wgpu",
+  "description": "Build a WebGPU radial blur in Rust with a 512x512 glow pass, 32 inward texture samples, additive compositing, and animated wgpu and WGSL rendering.",
+  "breadcrumbName": "WebGPU radial blur",
+  "image": "radialblur.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A rotating black geodesic WebGPU sphere with vivid magenta triangular openings and radial glow streaks on a dark background."
+}

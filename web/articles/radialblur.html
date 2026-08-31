@@ -1,0 +1,176 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 19</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render an animated glow mask into a fixed offscreen texture, sample it 32 times toward the image center, and add the resulting WebGPU radial blur over a separately shaded scene.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Radial blur demo at a glance">
+      <div><dt>Glow target</dt><dd>512&times;512</dd></div>
+      <div><dt>Samples per pixel</dt><dd>32</dd></div>
+      <div><dt>Effect draws</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#multipass-radial-glow">Separate the glow from the shaded scene</a></li>
+        <li><a href="#load-glow-sphere-assets">Load and flatten the glow-sphere assets</a></li>
+        <li><a href="#build-offscreen-target">Create fixed offscreen resources</a></li>
+        <li><a href="#render-glow-mask">Render an explicit glow mask</a></li>
+        <li><a href="#render-phong-scene">Shade the main scene separately</a></li>
+        <li><a href="#sample-radial-blur">Take 32 samples toward the center</a></li>
+        <li><a href="#additive-composite">Composite the additive glow</a></li>
+        <li><a href="#animate-orbit-gradient">Animate the camera and gradient</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="multipass-radial-glow" tabindex="-1">Separate the glow from the shaded scene</h2>
+    <p>The <a href="../occlusionquery/#about">previous WebGPU occlusion query example</a> renders geometry to answer a visibility question. Radial blur uses another multi-pass pattern: render only the pixels that should glow, filter that image in screen space, and composite it over the normal scene. Keeping the source mask separate prevents the dark frame and background from producing unwanted streaks.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/7f54cadf3f26d9e07c19d16d9251c7832b91a44e">original radial blur commit</a> introduced the sphere, color ramp, three pipelines, and 32-sample post-process. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/radialblur.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/radialblur.wgsl">WGSL shader</a> preserve that design. Later changes aligned projection with current wgpu conventions, corrected the fullscreen triangle's Y orientation, and modernized the WebAssembly entry point. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> with a fixed animation and no keyboard, pointer, touch, or scene controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/radialblur.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The dark geodesic frame is shaded in the main pass. Its animated magenta interior is isolated offscreen, stretched toward the center, and added back as a soft radial glow.</figcaption>
+    </figure>
+
+    <h2 id="load-glow-sphere-assets" tabindex="-1">Load and flatten the glow-sphere assets</h2>
+    <p>The example loads two files before renderer initialization. Native code reads the KTX file and then the glTF synchronously. WebAssembly awaits the same two requests in sequence. The model's binary payload is embedded inside the glTF as a Base64 data URI, so loading it does not create a separate <code>.bin</code> request.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="radial-assets-caption" tabindex="0">
+      <table>
+        <caption id="radial-assets-caption">Radial blur runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">File size</th><th scope="col">Decoded content</th><th scope="col">Runtime role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/glowsphere.gltf"><code>glowsphere.gltf</code></a></th><td>146,434 bytes</td><td>3,104 vertices, 3,120 indices</td><td>Orange glow shell and black geodesic frame</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_gradient_rgba.ktx"><code>particle_gradient_rgba.ktx</code></a></th><td>1,124 bytes</td><td>256&times;1 RGBA color ramp</td><td>Animated glow color</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two asset files total 147,558 bytes. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs">colored glTF loader</a> applies both node transforms and flattens two primitives into one vertex and index buffer. The orange primitive contributes 240 vertices and 80 triangles. The black primitive contributes 2,864 vertices and 960 triangles. Together they produce one 1,040-triangle mesh and one indexed draw.</p>
+    <p>No vertex-color attribute exists in this model, so the loader starts with white and multiplies it by each material's base-color factor. A 40-byte GPU vertex stores a position, normal, and RGBA color. The 124,160-byte vertex buffer and 12,480-byte <code>u32</code> index buffer occupy 136,640 bytes.</p>
+    <p>The custom KTX1 decoder accepts little-endian, uncompressed RGBA8, single-face 1D or 2D images. This file reports zero height, which the decoder promotes to one texel, and contains one 1,024-byte image level. The GPU texture is <code>Rgba8UnormSrgb</code>; its U coordinate repeats so the animation can wrap around the ramp, while linear minification and magnification interpolate between colors.</p>
+
+    <h2 id="build-offscreen-target" tabindex="-1">Create fixed offscreen resources</h2>
+    <p>Initialization creates one scene bind group used by the mesh pipelines and one blur bind group used by the fullscreen fragment shader. The first supplies matrices, lighting, animation state, the gradient texture, and its sampler. The second supplies static blur parameters, the offscreen color texture, and a clamp-to-edge linear sampler.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="radial-resources-caption" tabindex="0">
+      <table>
+        <caption id="radial-resources-caption">Radial blur GPU resources</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">How it changes</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene uniforms</th><td>224 bytes</td><td>Rewritten every update and resize</td><td>Projection, view, normal matrix, light, and ramp position</td></tr>
+          <tr><th scope="row">Blur uniforms</th><td>16 bytes</td><td>Initialized once</td><td>Scale 0.35, strength 0.75, origin (0.5, 0.5)</td></tr>
+          <tr><th scope="row">Gradient ramp</th><td>256&times;1 <code>Rgba8UnormSrgb</code></td><td>Static after one 1,024-byte upload</td><td>Repeating animated glow color</td></tr>
+          <tr><th scope="row">Offscreen color</th><td>512&times;512 <code>Rgba8Unorm</code></td><td>Cleared and rendered every frame</td><td>Stores the isolated glow mask</td></tr>
+          <tr><th scope="row">Offscreen depth</th><td>512&times;512 <code>Depth32Float</code></td><td>Cleared every glow pass</td><td>Depth-tests the mask geometry</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Recreated on resize</td><td>Depth-tests the visible scene</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Each fixed 512&times;512 attachment occupies 1,048,576 bytes, so the offscreen color and depth images reserve 2 MiB before views and driver overhead. They remain 512&times;512 when the window changes size. Only the surface-sized depth image is recreated on resize.</p>
+    <p>The 224-byte <code>SceneUniforms</code> block contains three 4&times;4 matrices and two four-component vectors. Rust rewrites the complete block once per normal update as the camera and gradient advance. The 16-byte <code>BlurUniforms</code> block contains two scalars and a two-component origin; it never changes after initialization. Overlay glyph uploads are separate from these example-owned buffer writes.</p>
+
+    <h2 id="render-glow-mask" tabindex="-1">Render an explicit glow mask</h2>
+    <p>The first render pass clears the fixed color target to black and its depth target to 1. It then submits the complete 3,120-index mesh once. The color pipeline uses triangle lists, one sample, no face culling or blending, and <code>Depth32Float</code> writes with <code>LessEqual</code>. The pass stores the color result for sampling and discards the depth contents.</p>
+    <p>Every vertex receives the same gradient coordinate: the current ramp position on U and zero on V. The fragment shader tests the material-derived vertex color. If any RGB channel is at least 0.9, it writes the sampled gradient; otherwise it writes the original color:</p>
+    <pre tabindex="0" aria-label="Build the radial blur glow mask in WGSL"><code><span class="code-keyword">let</span> gradient = textureSample(gradient_ramp, gradient_sampler, input.uv).rgb;
+
+<span class="code-keyword">if</span> input.color.r &gt;= 0.9 || input.color.g &gt;= 0.9 || input.color.b &gt;= 0.9 {
+    <span class="code-keyword">return</span> vec4&lt;f32&gt;(gradient, 1.0);
+}
+
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(input.color, 1.0);</code></pre>
+    <p>The orange primitive has a red channel of 1, so it becomes the animated glow source. The black frame stays black. This is an explicit mask based on baked vertex color, not a brightness threshold applied after scene lighting.</p>
+
+    <h2 id="render-phong-scene" tabindex="-1">Shade the main scene separately</h2>
+    <p>The second pass clears the surface to <code>(0.018, 0.021, 0.03, 1)</code>, clears the surface-sized depth image, and draws the same 1,040 triangles again. Bright vertices still return the animated ramp color without lighting. The remaining geometry receives a compact Phong calculation with 0.2 ambient light, a 0.5 diffuse term, and a low-power specular highlight raised to the fourth power.</p>
+    <p>Because the frame's base color is black, its ambient and diffuse contributions remain black; the specular term provides most of its visible definition. The fixed light position is <code>(0, 0, -5)</code>. The shader transforms normals and eye positions into view space but derives its light vector from the original input position, so its simple lighting mixes coordinate spaces. Keeping all quantities in one space is a useful correctness improvement to try.</p>
+
+    <h2 id="sample-radial-blur" tabindex="-1">Take 32 samples toward the center</h2>
+    <p>A procedural fullscreen vertex shader generates one oversized triangle from <code>vertex_index</code>, so the composite needs no vertex buffer. For each covered surface pixel, the fragment shader derives a half-texel offset from the 512&times;512 source, subtracts the origin at <code>(0.5, 0.5)</code>, and gathers exactly 32 samples:</p>
+    <pre tabindex="0" aria-label="Sample a 32-tap WebGPU radial blur"><code><span class="code-keyword">let</span> sample_count = 32u;
+
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; sample_count; i = i + 1u) {
+    <span class="code-keyword">let</span> scale = 1.0 - blur.radial_blur_scale
+        * (f32(i) / f32(sample_count - 1u));
+    color += textureSample(
+        offscreen_color,
+        offscreen_sampler,
+        uv * scale + blur.radial_origin,
+    );
+}
+
+<span class="code-keyword">let</span> blurred = (color / f32(sample_count))
+    * blur.radial_blur_strength;</code></pre>
+    <p>With a scale parameter of 0.35, the first sample uses scale 1 and the last uses 0.65. The positions therefore move along one line from the current UV toward the center, ending 35% closer to the origin. All samples have equal weight. Their average is multiplied by the fixed strength of 0.75.</p>
+    <p>The source mask stays at 512&times;512, but this shader runs at the final surface resolution and performs 32 linear-filtered texture samples for every covered output pixel. A larger display therefore increases composite cost even though the offscreen geometry pass keeps a fixed resolution.</p>
+
+    <h2 id="additive-composite" tabindex="-1">Composite the additive glow</h2>
+    <p>The third render pass loads the already shaded surface, binds the offscreen mask, and draws the fullscreen triangle. RGB blending uses source <code>One</code>, destination <code>One</code>, and addition, so the filtered glow is added directly over the main scene. Alpha uses source <code>One</code> and destination <code>Zero</code>, replacing the previous alpha with the shader's value of 1. No depth attachment is bound.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="radial-passes-caption" tabindex="0">
+      <table>
+        <caption id="radial-passes-caption">Radial blur render passes</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Target</th><th scope="col">Effect draw</th><th scope="col">Triangles</th><th scope="col">Color behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Glow mask</th><td>512&times;512 <code>Rgba8Unorm</code></td><td>1 indexed mesh draw</td><td>1,040</td><td>Clear black, isolate bright-color geometry</td></tr>
+          <tr><th scope="row">Main scene</th><td>Surface format</td><td>1 indexed mesh draw</td><td>1,040</td><td>Clear dark background, shade the mesh</td></tr>
+          <tr><th scope="row">Composite</th><td>Surface format</td><td>1 fullscreen draw</td><td>1</td><td>Load scene and add filtered RGB</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Excluding the variable text-overlay geometry, each frame records three render passes, three draws, and 2,081 submitted triangles. The overlay is rendered after the fullscreen triangle inside the same composite pass, so it does not add a fourth pass.</p>
+
+    <h2 id="animate-orbit-gradient" tabindex="-1">Animate the camera and gradient</h2>
+    <p>The right-handed perspective uses a 45&deg; vertical field of view, the current surface aspect ratio, and near and far planes of 1 and 256. A camera 17.5 units from the origin starts at a yaw of &minus;28.75&deg; and pitch of &minus;16.25&deg;. Rust adds 10&deg; of yaw per second, completing an orbit every 36 seconds.</p>
+    <p>The ramp coordinate advances by 0.1 per second and wraps with <code>fract</code>, so it cycles through the 256 colors every 10 seconds. Elapsed time is not clamped. Resizing rewrites the projection and view data, recreates scene depth, and rebuilds the overlay placement while leaving the offscreen resources and blur bind group intact.</p>
+    <p>The text overlay displays “Radial blur,” the GPU device description, and estimated FPS in 22 px Vazirmatn. FPS measures CPU frame cadence over a 500 ms window rather than GPU execution time. The text content updates when that statistics interval completes, while the overlay renderer prepares its glyph data every frame.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the same three-pass effect natively:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU radial blur example"><code>cargo run --example radialblur</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU radial blur example"><code>scripts/build-wasm.sh --release radialblur
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/radialblur/</code> in a browser with WebGPU support. Native initialization loads the two files synchronously. The WebAssembly entry point uses an asynchronous task, awaits the KTX and glTF in sequence, and logs loading or rendering failures. Both targets use the same render passes and blur math. WGSL and the Vazirmatn font are compiled into the binary, while this article and screenshot remain readable without WebGPU.</p>
+    <p>The current implementation favors a small, readable post-process over a production bloom stack. It uses a fixed center, scale, and strength; one 8-bit low-dynamic-range source; equal weights; and a one-sided inward sampling path. There is no downsample pyramid, HDR exposure, depth-aware rejection, temporal filtering, MSAA, or user control. It also renders the complete mesh twice.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Move the blur origin to a projected world-space light and expose scale and strength as live controls.</li>
+      <li>Render an HDR emissive attachment with the main scene, then build a downsampled glow pyramid instead of drawing the mesh twice.</li>
+      <li>Compare equal taps with distance-weighted, symmetric, or jittered sampling while measuring full-resolution fragment cost.</li>
+      <li>Replace the vertex-color threshold with explicit emissive material data and keep the Phong light, normal, and eye vectors in one coordinate space.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/radialblur.rs">Read the radial blur source &nearr;</a>
+      <a href="../occlusionquery/">&larr; Previous: WebGPU occlusion queries</a>
+      <a href="../bloom/">Next: WebGPU bloom &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

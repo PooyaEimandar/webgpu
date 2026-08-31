@@ -1,0 +1,123 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 38</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Launch one WGSL compute invocation per output texel, intersect nine analytic objects, cast hard-shadow rays, follow two additional reflection steps, and present the result through a procedural full-screen triangle.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Compute ray tracing demo at a glance">
+      <div><dt>Scene objects</dt><dd>9</dd></div>
+      <div><dt>Compute tile</dt><dd>16&times;16</dd></div>
+      <div><dt>Reflection loop</dt><dd>2 steps</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#raster-to-rays">Move image generation into compute</a></li>
+        <li><a href="#pack-scene">Pack spheres and planes</a></li>
+        <li><a href="#intersect-scene">Find the nearest analytic hit</a></li>
+        <li><a href="#shade-and-reflect">Shade, shadow, fog, and reflect</a></li>
+        <li><a href="#dispatch-present">Dispatch and present the storage texture</a></li>
+        <li><a href="#controls-limitations">Controls and honest limitations</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="raster-to-rays" tabindex="-1">Move image generation from rasterization into a compute shader</h2>
+    <p>The <a href="../computenbody/#about">previous Compute N-body example</a> used compute to update a particle buffer before a graphics draw. This example uses compute to produce the image itself. Each invocation constructs a camera ray, searches a compact analytic scene, shades the closest hit, and stores one <code>rgba8unorm</code> texel. A separate render pipeline only samples that result onto the surface.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/2824374051ea27de5570ee2e24524479850274e3">introducing ray tracing commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computeraytracing.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computeraytracing_compute.wgsl">compute WGSL</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/computeraytracing_present.wgsl">present WGSL</a>, screenshots, build entry, README row, and gallery card. The current shader later changed fog to use camera-ray hit distance in <a href="https://github.com/PooyaEimandar/webgpu/commit/0aa53195efcf6fc9a9f19e3b567b284367e3a59f">the hit-distance fog fix</a>; the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry update</a> supplies the current start function. The application runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/computeraytracing.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Three spheres reflect a six-plane red, green, white, and black room while the animated point light creates hard shadows. The unchanged 1280&times;720 capture is stored as a 62,771-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computeraytracing.jpg">JPEG</a> and a 23,938-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/computeraytracing.webp">WebP</a>. It came with the introducing commit, predates the fog correction, and its displayed 6&nbsp;fps is one browser capture rather than a benchmark.</figcaption>
+    </figure>
+
+    <h2 id="pack-scene" tabindex="-1">Pack three spheres and six planes into one storage buffer</h2>
+    <p>Rust creates three colored spheres and six infinite planes. Each 48-byte <code>SceneObject</code> contains geometry in one <code>vec4</code>, RGB plus a specular exponent in a second, and an ID plus type tag in a third. Sphere XYZ and radius occupy the geometry vector. A plane stores its normal and signed distance for the equation <code>dot(normal, position) + distance = 0</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-ray-scene-caption" tabindex="0">
+      <table>
+        <caption id="compute-ray-scene-caption">Analytic scene assembled by <code>scene_objects()</code></caption>
+        <thead><tr><th scope="col">Group</th><th scope="col">Count</th><th scope="col">Geometry</th><th scope="col">Material</th><th scope="col">Intersection</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Spheres</th><td>3</td><td>Centers near X&nbsp;=&nbsp;&minus;1.75, 0, and 1.75; radii 1&ndash;1.25</td><td>Green, pale blue, and gold; exponent 32</td><td>Quadratic ray/sphere test</td></tr>
+          <tr><th scope="row">Room planes</th><td>6</td><td>Axis-aligned at signed distance 4</td><td>White ceiling/floor/back, black front, red and green sides</td><td>Ray/plane equation</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The scene buffer is 432 bytes. A 64-byte uniform buffer carries the moving light, black fog color, camera position, object count, target dimensions, aspect ratio, and animation time. The camera remains at <code>(0, 0, 4)</code>. The light follows a compact three-dimensional loop as normalized animation time advances at one quarter of wall-clock speed.</p>
+
+    <h2 id="intersect-scene" tabindex="-1">Find the nearest analytic hit with a linear search</h2>
+    <p>The compute shader tests all nine records for every ray. Sphere intersection solves the quadratic and returns the nearer root. Plane intersection divides the signed distance by the ray/normal dot product. The closest positive value above <code>0.0001</code> wins.</p>
+    <pre tabindex="0" aria-label="Find the nearest analytic ray hit in WGSL"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; object_count(); i = i + 1u) {
+  <span class="code-keyword">let</span> t = object_intersect(ray_o, ray_d, scene_objects[i]);
+  <span class="code-keyword">if</span> ((t &gt; EPSILON) &amp;&amp; (t &lt; hit.t)) {
+    hit.object_id = i32(scene_objects[i].ids.x);
+    hit.t = t;
+  }
+}</code></pre>
+    <p>There is no acceleration structure because nine records are cheap enough to scan. The tradeoff is direct: adding objects increases the intersection work for every primary, shadow, and reflection ray. This representation also supports only spheres and planes; it has no triangles, transforms, meshes, or material indirection.</p>
+
+    <h2 id="shade-and-reflect" tabindex="-1">Shade each hit, cast a hard shadow, apply fog, and reflect</h2>
+    <p>Local shading combines diffuse color with a Blinn-style highlight. Diffuse never falls below 0.1. A secondary ray toward the moving light searches the other eight objects and multiplies the result by 0.5 when blocked. Fog then blends the hit toward black according to <code>abs(hit.t) / 20</code>. The current code correctly uses distance along the ray; the original version used distance to the moving light and made fog change as the light passed a surface.</p>
+    <p>After the first surface result, a fixed loop calls the same routine twice more. Reflection starts at 0.4 and halves after each step. The blend is a stylized recurrence rather than an energy-conserving path tracer:</p>
+    <pre tabindex="0" aria-label="Blend two additional reflection steps in WGSL"><code><span class="code-keyword">var</span> reflection_strength = 0.4;
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; 2u; i = i + 1u) {
+  <span class="code-keyword">let</span> reflected = render_scene(ray_o, ray_d, object_id);
+  final_color.color = (1.0 - reflection_strength) * final_color.color
+    + reflection_strength * mix(reflected.color, final_color.color,
+                                1.0 - reflection_strength);
+  reflection_strength = reflection_strength * 0.5;
+}</code></pre>
+    <p>A reflected origin moves only one <code>EPSILON</code> along the normal. The shader has no stochastic sampling, soft shadows, anti-aliasing, refraction, physically based BRDF, gamma conversion, or denoiser.</p>
+
+    <h2 id="dispatch-present" tabindex="-1">Dispatch at a capped resolution and present a full-screen triangle</h2>
+    <p>The storage texture preserves surface aspect ratio but caps its largest dimension at 1,024. A 1280&times;720 surface therefore traces 1024&times;576 pixels: 589,824 active invocations in 64&times;36 workgroups. Because both dimensions divide by 16, that capture has no surplus lanes. At other sizes, out-of-range invocations return before writing.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="compute-ray-resources-caption" tabindex="0">
+      <table>
+        <caption id="compute-ray-resources-caption">Core resources at the screenshot's 1024&times;576 trace resolution</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Layout</th><th scope="col">Logical bytes</th><th scope="col">Update</th><th scope="col">Purpose</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Ray target</th><td>1024&times;576 <code>Rgba8Unorm</code>; 1 mip; 1 sample</td><td>2,359,296</td><td>Compute writes every frame</td><td>Storage output and sampled presentation input</td></tr>
+          <tr><th scope="row">Scene storage</th><td>9 &times; 48-byte records</td><td>432</td><td>Uploaded once</td><td>Spheres and room planes</td></tr>
+          <tr><th scope="row">Uniform buffer</th><td>4 &times; <code>vec4</code></td><td>64</td><td>One queue write per frame</td><td>Camera, light, dimensions, time</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>Embedded TrueType; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td><td>122,752 stored</td><td>Atlas managed by overlay</td><td>FPS, device, object, and target text</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The frame records three passes: one compute pass, one graphics pass that draws three procedural vertices, and one color-load pass for diagnostics. The presentation sampler is linear and clamp-to-edge, so a capped ray image scales to the surface. There is no depth attachment, blending, or multisampling in the present pipeline.</p>
+
+    <h2 id="controls-limitations" tabindex="-1">Controls, diagnostics, and important simplifications</h2>
+    <p>This demo has no keyboard, pointer, camera, or material controls. It animates the light automatically and reports sampled frame time, FPS, GPU description, nine objects, and storage-texture dimensions. Resizing recreates the target and both bind groups only when the capped dimensions change.</p>
+    <p>The <code>camera_pos_fov.w</code> field contains 60 degrees, but this first shader does not read it: <code>normalize(vec3(screen, -1))</code> produces an effective 90-degree vertical field of view. Its specular view vector is also the normalized camera position rather than the direction from each hit to the camera. Sphere intersection accepts only the near quadratic root, so a ray starting inside a sphere can miss its exit. These choices are useful discussion points when extending the example, not features hidden by the article.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native compute shader ray tracing example"><code>cargo run --example computeraytracing</code></pre>
+    <p>Build and serve its WebAssembly page:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU compute ray tracing example"><code>scripts/build-wasm.sh --release computeraytracing
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/computeraytracing/</code> in a browser with WebGPU support. The shaders and font are embedded, so the example has no runtime image or model request. Good next experiments are to use the stored FOV, fix the view vector, return the far sphere root, or compare the linear object scan with a small bounding-volume hierarchy.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computeraytracing.rs">Read the compute ray tracing source &nearr;</a>
+      <a href="../computenbody/">&larr; Previous: WebGPU N-body simulation</a>
+      <a href="../raytracingshadows/">Next: WebGPU ray-traced shadows &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

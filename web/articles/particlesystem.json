@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Particle System in Rust: CPU Fire and Smoke with wgpu",
+  "description": "Simulate 512 fire and smoke particles on the CPU, stream their instance data each frame, and render WebGPU billboards with Rust, wgpu, and WGSL.",
+  "breadcrumbName": "WebGPU CPU particle system",
+  "image": "particlesystem.jpg",
+  "imageWidth": 1272,
+  "imageHeight": 690,
+  "imageAlt": "A bright WebGPU campfire with layered flame and smoke billboards illuminating logs and textured ground."
+}

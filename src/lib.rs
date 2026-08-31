@@ -6,6 +6,7 @@ pub mod ktx;
 pub mod light_gizmo;
 pub mod metropolis;
 pub mod restir;
+pub mod shader_include;
 pub mod skybox;
 
 pub fn log_error(error: impl std::fmt::Display) {

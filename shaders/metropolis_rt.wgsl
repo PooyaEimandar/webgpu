@@ -23,18 +23,9 @@ struct Material {
     texture_settings: vec4<f32>,
 }
 
-struct GpuLight {
-    position_range: vec4<f32>, // xyz world position, w range
-    color_type: vec4<f32>,     // rgb colour×intensity, w type (0 point, 1 spot)
-    direction: vec4<f32>,      // xyz spot direction, w cos(outer)
-    cone: vec4<f32>,           // x cos(inner), y atlas slot (-1 = none)
-}
+//!include light
 
-// Per-spot shadow matrices and their atlas tiles (xy = offset, zw = scale).
-struct SpotShadows {
-    matrices: array<mat4x4<f32>, 4>,
-    tiles: array<vec4<f32>, 4>,
-}
+//!include spot_shadow
 
 struct RtParams {
     inv_projection: mat4x4<f32>,
@@ -67,10 +58,7 @@ struct RtParams {
 @group(0) @binding(10) var spot_atlas: texture_depth_2d;
 @group(0) @binding(11) var<uniform> spot_shadows: SpotShadows;
 
-fn range_attenuation(dist: f32, range: f32) -> f32 {
-    let window = clamp(1.0 - pow(dist / max(range, 1e-3), 4.0), 0.0, 1.0);
-    return window * window / (dist * dist + 0.01);
-}
+//!include attenuation
 
 fn sun_visibility(world_position: vec3<f32>) -> f32 {
     let clip = rt.sun_view_projection * vec4<f32>(world_position, 1.0);

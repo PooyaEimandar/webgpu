@@ -1,0 +1,135 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 10</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load a glTF 2.0 scene at runtime, turn its nodes and mesh attributes into GPU buffers, upload its base-color texture, and render the result with Rust, wgpu, and WGSL.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL / glTF</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="glTF demo at a glance">
+      <div><dt>Vertices</dt><dd>24</dd></div>
+      <div><dt>Indices</dt><dd>36</dd></div>
+      <div><dt>Model draws</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#gltf-to-webgpu">From a glTF file to a WebGPU frame</a></li>
+        <li><a href="#fetch-gltf-resources">Fetch the JSON, buffer, and image</a></li>
+        <li><a href="#traverse-and-merge">Traverse the scene and merge its primitives</a></li>
+        <li><a href="#material-and-texture">Map the material, texture, and sampler</a></li>
+        <li><a href="#render-with-wgsl">Upload and render the model with WGSL</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="gltf-to-webgpu" tabindex="-1">From a glTF file to a WebGPU frame</h2>
+    <p>The <a href="../htmlmesh/#about">previous HTML mesh example</a> assembles browser-like content from generated geometry. This example starts with an existing glTF 2.0 asset: the <a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured/glTF">BoxTextured sample from Khronos</a>. Its scene contains one textured cube, one triangle primitive, and one material.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltf.rs">Rust example</a> passes a raw GitHub URL to <code>load_gltf_scene</code> before initializing the renderer. Native builds load synchronously. The WebAssembly entry point starts the same work asynchronously and only calls <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> after the scene is ready.</p>
+    <p>The live demo rotates the cube at 0.72 radians per second, with a fixed 12&deg; tilt around X. A separate text overlay shows the selected GPU and a frame-rate sample. There are no camera, mouse, keyboard, or file-picker controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/gltf.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The Khronos BoxTextured sample after its node transform, vertex data, material, sampler, and base-color image have been converted into wgpu resources.</figcaption>
+    </figure>
+
+    <h2 id="fetch-gltf-resources" tabindex="-1">Fetch the JSON, buffer, and image</h2>
+    <p>The glTF file is a JSON document that points to two neighboring resources. <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs"><code>load_gltf_scene</code></a> first downloads and parses that JSON with the Rust <a href="https://docs.rs/gltf/1.4.1/gltf/"><code>gltf</code> crate</a>. It resolves each relative URI against the document URL, loads the buffer and image, and decodes the PNG into RGBA8 pixels.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="gltf-asset-caption" tabindex="0">
+      <table>
+        <caption id="gltf-asset-caption">BoxTextured data used by the demo</caption>
+        <thead>
+          <tr><th scope="col">Resource or value</th><th scope="col">Source data</th><th scope="col">Loader result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>BoxTextured.gltf</code></th><td>glTF 2.0 JSON</td><td>Scene, nodes, accessors, material, and URIs</td></tr>
+          <tr><th scope="row"><code>BoxTextured0.bin</code></th><td>840 bytes</td><td>24 positions, normals, UVs, and 36 indices</td></tr>
+          <tr><th scope="row"><code>CesiumLogoFlat.png</code></th><td>256 &times; 256 pixels</td><td>RGBA8 sRGB base-color texture</td></tr>
+          <tr><th scope="row">Primitive mode</th><td>Triangles</td><td>12 indexed triangles</td></tr>
+          <tr><th scope="row">Sampler</th><td>Repeat; linear magnification; nearest minification with linear mip filtering</td><td>wgpu sampler options</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a> reads local paths or HTTP URLs on native targets. In a browser it uses Fetch, while URI resource batches run through a Web Worker. Base64-encoded data URIs are also accepted.</p>
+    <p>This URL loader deliberately covers a smaller format subset than glTF itself. It accepts URI-backed <code>.gltf</code> resources, but rejects binary buffer chunks from <code>.glb</code> files and images stored in buffer views. The demo also depends on the remote Khronos files and network access during startup. Its URL follows the sample repository&rsquo;s <code>main</code> branch rather than a pinned revision.</p>
+
+    <h2 id="traverse-and-merge" tabindex="-1">Traverse the scene and merge its primitives</h2>
+    <p>After loading resources, the code selects the default scene or falls back to the first scene. It visits every root node and recursively computes <code>parent_transform * node_transform</code>. A guard rejects recursion depth greater than 256.</p>
+    <pre tabindex="0" aria-label="Select and traverse the glTF scene"><code><span class="code-keyword">let</span> scene = gltf
+    .default_scene()
+    .or_else(|| gltf.scenes().next())
+    .ok_or_else(|| RenderError::message("glTF file has no scene"))?;
+
+<span class="code-keyword">for</span> node <span class="code-keyword">in</span> scene.nodes() {
+    collect_node(node, glam::Mat4::IDENTITY, /* resources and output */)?;
+}</code></pre>
+    <p>Only triangle primitives are accepted. <code>POSITION</code> is required; missing normals become <code>[0.0, 0.0, 1.0]</code>, and missing <code>TEXCOORD_0</code> values become <code>[0.0, 0.0]</code>. If a primitive has no index accessor, the loader generates sequential indices.</p>
+    <p>Node transforms are applied to positions and normals on the CPU. Normals use <code>transform_vector3</code> followed by normalization, not an inverse-transpose normal matrix, so nonuniform node scaling can produce incorrect lighting. Every primitive is appended to one <code>MeshVertex</code> array and one <code>u32</code> index array, with incoming indices offset by the current vertex count. This makes the sample efficient to draw, but it also means the loader does not preserve separate primitives for separate material draws.</p>
+    <p>The merged positions produce an axis-aligned bounding box. Its center is subtracted in the model matrix, while its radius sets the camera height, camera distance, and far plane. That keeps this cube framed without hard-coding its original dimensions.</p>
+
+    <h2 id="material-and-texture" tabindex="-1">Map the material, texture, and sampler</h2>
+    <p>The loader reads the first primitive material&rsquo;s base-color factor, metallic factor, roughness factor, and <code>doubleSided</code> flag. It also keeps the first base-color image and its sampler for the entire merged mesh. If no base-color texture exists, it uploads a one-pixel white image so the same shader and bind-group layout still work.</p>
+    <pre tabindex="0" aria-label="Read glTF base color and metallic roughness values"><code><span class="code-keyword">let</span> primitive_material = primitive.material();
+<span class="code-keyword">let</span> pbr = primitive_material.pbr_metallic_roughness();
+
+GltfMaterial {
+    base_color_factor: pbr.base_color_factor(),
+    metallic_factor: pbr.metallic_factor(),
+    roughness_factor: pbr.roughness_factor(),
+    double_sided: primitive_material.double_sided(),
+    ..Default::default()
+}</code></pre>
+    <p>The sampler conversion maps glTF wrap modes and minification, magnification, and mip filters to wgpu values. The texture helper uploads the image as <code>Rgba8UnormSrgb</code> with one mip level. The sample asks for nearest minification with linear interpolation between mip levels, but this upload does not generate a mip chain, so only level 0 is available.</p>
+    <p>This is a focused learning loader, not a general material system. Multiple materials are merged under the first material, and the example does not render normal, metallic-roughness, occlusion, or emissive textures. It also does not process alpha modes, animations, skins, morph targets, cameras, or lights. The following <a href="../gltfskinning/">glTF vertex skinning demo</a> handles animation and joints separately.</p>
+
+    <h2 id="render-with-wgsl" tabindex="-1">Upload and render the model with WGSL</h2>
+    <p>Each <code>MeshVertex</code> occupies 32 bytes: a <code>Float32x3</code> position at shader location 0, a <code>Float32x2</code> UV at location 1, and a <code>Float32x3</code> normal at location 2. The CPU mesh becomes one vertex buffer and one <code>u32</code> index buffer during initialization.</p>
+    <p>Bind group 0 contains the uniform buffer at binding 0, the base-color texture at binding 1, and its sampler at binding 2. The uniforms provide view-projection and model matrices, the camera position, the base-color factor, and packed material values. The model pass clears color and depth, then issues one indexed draw:</p>
+    <pre tabindex="0" aria-label="Draw the merged glTF mesh"><code>render_pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+render_pass.set_index_buffer(gpu_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+render_pass.draw_indexed(0..gpu_mesh.index_count, 0, 0..1);</code></pre>
+    <p>The pipeline writes a <code>Depth32Float</code> attachment and uses <code>LessEqual</code> depth testing. Face culling is disabled. A second render pass loads the existing color attachment and draws the GPU device and FPS overlay.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltf.wgsl">WGSL shader</a> samples the sRGB base-color texture, multiplies it by the material factor, and adds ambient, directional diffuse, and white specular terms. Roughness changes the specular exponent:</p>
+    <pre tabindex="0" aria-label="Shade the glTF base color in WGSL"><code><span class="code-keyword">let</span> roughness = clamp(uniforms.metallic_roughness.y, 0.04, 1.0);
+<span class="code-keyword">let</span> specular_power = mix(96.0, 16.0, roughness);
+<span class="code-keyword">let</span> color = base_color.rgb * (0.28 + diffuse * 0.82)
+    + vec3&lt;f32&gt;(specular);</code></pre>
+    <p>Despite the packed uniform name, the current shader does not use the metallic factor or <code>doubleSided</code> flag, and the pipeline disables culling for every model. The shader returns the sampled alpha, but the color target does not enable alpha blending. This is compact teaching lighting rather than a full glTF metallic-roughness implementation.</p>
+    <p>Rotation uses frame delta time, so its intended speed is independent of frame rate. Each update writes new uniforms without rebuilding the mesh. Resizing recreates the depth texture, reframes the projection for the new aspect ratio, and rebuilds the text placement.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed and network access to the Khronos sample repository, run:</p>
+    <pre tabindex="0" aria-label="Run the native glTF example"><code>cargo run --example gltf</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU glTF example"><code>scripts/build-wasm.sh --release gltf
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/gltf/</code>. The browser needs WebGPU support and must be able to fetch the model, buffer, and image from <code>raw.githubusercontent.com</code>. The article and screenshot remain available if live rendering cannot start.</p>
+    <p>Useful next experiments include:</p>
+    <ul>
+      <li>Point <code>BOX_TEXTURED_GLTF_URL</code> at another URI-backed <code>.gltf</code> file that fits the loader&rsquo;s current subset.</li>
+      <li>Keep primitives and materials separate, create one bind group per material, and draw each primitive with its matching material.</li>
+      <li>Generate a mip chain for the base-color image and compare it with the current single-level upload.</li>
+      <li>Add the remaining metallic-roughness inputs before treating the shader as a glTF PBR renderer.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltf.rs">Read the glTF source &nearr;</a>
+      <a href="../htmlmesh/">&larr; Previous: WebGPU HTML mesh</a>
+      <a href="../gears/">Next: Procedural WebGPU gears &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

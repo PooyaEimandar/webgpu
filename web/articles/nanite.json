@@ -1,0 +1,9 @@
+{
+  "title": "Nanite-Style WebGPU Rendering in Rust: Meshlets, LOD, and HZB",
+  "description": "Build a Nanite-style WebGPU renderer in Rust with streamed meshlet pages, projected-error LOD, two-pass HZB occlusion, indirect draws, and GPU skinning.",
+  "breadcrumbName": "WebGPU Nanite-style mesh rendering",
+  "image": "nanite.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Thousands of animated Jax rabbit characters rendered in colored WebGPU meshlet LOD bands with a Nanite diagnostics panel."
+}

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Deferred Shading in Rust: G-Buffer with wgpu",
+  "description": "Build deferred shading in WebGPU with Rust and wgpu: fill position, normal, and albedo G-buffer targets, then light animated Jax with six point lights.",
+  "breadcrumbName": "WebGPU deferred shading",
+  "image": "deferred.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Animated rabbit-like Jax character walking across a checkerboard floor under colored deferred lights."
+}

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU ReSTIR Direct Illumination in Rust and WGSL",
+  "description": "Build ReSTIR direct illumination with WebGPU, Rust, wgpu, and WGSL. Resample local lights across pixels and frames, trace BVHs, and denoise HDR output.",
+  "breadcrumbName": "ReSTIR direct illumination",
+  "image": "restirdi.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Animated Jax character walking through the Crytek Sponza atrium under WebGPU ReSTIR direct illumination, with reservoir controls open."
+}

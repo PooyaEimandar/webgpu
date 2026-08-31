@@ -1,0 +1,124 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 13</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load a glTF skeleton and walking clip in Rust, rebuild its joint palette every frame, and blend four bone influences per vertex in WGSL.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="glTF skinning demo at a glance">
+      <div><dt>Skin joints</dt><dd>46</dd></div>
+      <div><dt>Model triangles</dt><dd>11,960</dd></div>
+      <div><dt>Animation clip</dt><dd>1.0 s</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#gpu-skinned-character">From a glTF skeleton to animated vertices</a></li>
+        <li><a href="#load-jax-asset">Load the Jax mesh, skin, and texture</a></li>
+        <li><a href="#sample-animation">Sample the walking animation</a></li>
+        <li><a href="#build-joint-matrices">Build and upload the joint palette</a></li>
+        <li><a href="#skin-in-wgsl">Blend four joint influences in WGSL</a></li>
+        <li><a href="#render-and-light">Render, texture, and light the skinned mesh</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="gpu-skinned-character" tabindex="-1">From a glTF skeleton to animated vertices</h2>
+    <p>The earlier <a href="../gltf/#about">glTF loading example</a> rendered one rigid textured cube. Vertex skinning adds a hierarchy of animated joints. Each mesh vertex stores up to four joint indices and four weights; every frame, the CPU evaluates the skeleton and the vertex shader blends the corresponding matrices before projection.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/d58e37c192066f69c042fc9cbc3be0260eb0f58d">original glTF skinning commit</a> introduced the technique with the remotely hosted CesiumMan sample. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs">Rust example</a> instead loads the bundled Jax character, turns it 30&deg; around Y, and uses the current direct perspective projection. Its <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltfskinning.wgsl">WGSL shader</a> is unchanged from that commit. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>, loops automatically, and has no mouse, keyboard, camera, or playback controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/gltfskinning.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Jax completes a one-second walking cycle. Rust updates the skeleton and uploads a joint palette; the GPU deforms all 35,880 vertices during the single model draw.</figcaption>
+    </figure>
+
+    <h2 id="load-jax-asset" tabindex="-1">Load the Jax mesh, skin, and texture</h2>
+    <p>The local asset is split across <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>, a 68,324-byte JSON document; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a>, a 1,957,752-byte geometry and animation buffer; and a <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png">1024&times;1024 base-color texture</a>. The glTF describes one scene, 59 nodes, one mesh, one triangle primitive, one material, one skin, and one animation.</p>
+    <p>The primitive has 35,880 positions, normals, UV pairs, joint-index vectors, weight vectors, and sequential unsigned-short indices. That produces 11,960 nondegenerate triangles. The loader converts indices to <code>u32</code>, joint indices to four <code>f32</code> values, and normalizes every four-component weight vector. Of the vertices, 9,287 have one nonzero influence, 9,030 have two, 15,184 have three, and 2,379 use all four. Together they reference every one of the 46 joints. Jax has no <code>COLOR_0</code> attribute, so the loader supplies white vertex colors.</p>
+    <p>The resulting <code>SkinnedVertex</code> uses a 76-byte stride across shader locations 0 through 5: position, normal, UV, RGB color, four joint indices, and four weights. Missing normals, UVs, colors, joints, or weights receive safe defaults. Positions are required; if indices are absent, the loader generates a sequential range. The example accepts triangle primitives and merges the supported data into one CPU mesh.</p>
+    <p><a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs"><code>AssetLoader</code></a> reads the three files from disk on native builds. The WASM build fetches those same three resources from the copied <code>assets</code> directory on the local site. Relative buffer and image URLs are resolved against <code>jax.gltf</code>; base64 data URIs are also supported, but this asset uses external files. The RGB image is decoded and uploaded as a one-level sRGB texture. It has no third-party runtime request.</p>
+    <p>This standalone example keeps its loader inside <code>gltfskinning.rs</code>; it does not call the newer reusable <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs"><code>gltf_skin</code> module</a> used by other demos. Its private loader records one mesh node, skin, material, and base-color texture, so it is suitable for Jax rather than a complete multi-mesh, multi-material scene renderer.</p>
+
+    <h2 id="sample-animation" tabindex="-1">Sample the walking animation</h2>
+    <p>The one-second <code>Walking_1</code> clip contains 138 channels: translation, rotation, and scale for each of the 46 skin joints. Thirty-seven channels contain 25 keys at 1/24-second intervals, while the other 101 contain two. The loader uses the first animation in the file, records the earliest and latest input times, and skips morph-target channels.</p>
+    <p>On every update, animation time advances by the frame delta, capped at 1/15 second so a long stall does not create a large pose jump. Time wraps from the clip end back to its start. Translation and scale values use vector interpolation, while rotations use normalized quaternion spherical interpolation:</p>
+    <pre tabindex="0" aria-label="Interpolate a glTF animation rotation"><code><span class="code-keyword">let</span> factor = ((time - start) / (end - start)).clamp(0.0, 1.0);
+<span class="code-keyword">let</span> rotation = a.slerp(b, factor).normalize();</code></pre>
+    <p>This sampler is intentionally compact rather than fully glTF-conformant. The Jax file marks 91 channels as <code>STEP</code>, but the example does not retain each sampler's interpolation mode and smooths every supported channel. Those STEP endpoints differ only by tiny floating-point noise in this asset, so the visible walk is effectively unaffected. The loader also does not implement <code>CUBICSPLINE</code>, morph animation, clip selection, pausing, blending, or animation events.</p>
+
+    <h2 id="build-joint-matrices" tabindex="-1">Build and upload the joint palette</h2>
+    <p>Each node keeps its parent, children, translation, quaternion rotation, scale, and optional matrix. Its local transform is composed as translation &times; rotation &times; scale &times; matrix. To find a node's world transform, the code walks upward through the parent chain and prepends every ancestor transform.</p>
+    <p>For every joint, the example combines three matrices:</p>
+    <pre tabindex="0" aria-label="Build a skin joint matrix in mesh-local space"><code><span class="code-keyword">let</span> joint = inverse_mesh
+    * node_world_matrix(&amp;self.nodes, joint_node)
+    * inverse_bind;</code></pre>
+    <p>The inverse bind matrix moves vertices from mesh space into the joint's bind space. The animated joint world matrix applies the current pose. Multiplying by the inverse mesh-node world matrix brings the result back into mesh-local coordinates, ready for the model transform used by the shader.</p>
+    <p><code>JointMatrices</code> reserves 128 <code>mat4x4&lt;f32&gt;</code> values, an 8,192-byte read-only storage buffer. Jax fills the first 46; unused entries remain identity matrices. Rust rebuilds this palette and writes the full buffer each frame. The fixed 128-joint capacity is sufficient here, but a general loader should reject or split a skin whose vertices reference a larger palette.</p>
+
+    <h2 id="skin-in-wgsl" tabindex="-1">Blend four joint influences in WGSL</h2>
+    <p>The vertex shader casts the four uploaded joint indices to <code>u32</code>, fetches their matrices, and forms a weighted matrix sum:</p>
+    <pre tabindex="0" aria-label="Blend four skin joint matrices in WGSL"><code><span class="code-keyword">let</span> skin =
+  input.joint_weights.x * joints.matrices[u32(input.joint_indices.x)] +
+  input.joint_weights.y * joints.matrices[u32(input.joint_indices.y)] +
+  input.joint_weights.z * joints.matrices[u32(input.joint_indices.z)] +
+  input.joint_weights.w * joints.matrices[u32(input.joint_indices.w)];</code></pre>
+    <p>That matrix deforms the bind-pose position before the fixed model, view, and projection transforms. The normal receives the same skin, model, and view matrices with <code>w = 0</code>. This is linear blend skinning: simple, fast, and widely used, but it can lose volume around strongly twisting joints. Applying the blended matrix directly to normals also assumes transforms that do not require a separate inverse-transpose normal matrix.</p>
+    <p>Skinning happens during the model's vertex stage, not in a compute pass and not by rewriting the vertex buffer on the CPU. The uploaded mesh stays unchanged while the 46 animated palette matrices deform all 35,880 input vertices.</p>
+
+    <h2 id="render-and-light" tabindex="-1">Render, texture, and light the skinned mesh</h2>
+    <p>One bind group supplies the complete model draw:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="skinning-bindings-caption" tabindex="0">
+      <table>
+        <caption id="skinning-bindings-caption">glTF skinning bind-group resources</caption>
+        <thead>
+          <tr><th scope="col">Binding</th><th scope="col">Resource</th><th scope="col">Shader visibility</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>224-byte uniform buffer</td><td>Vertex + fragment</td><td>Projection, view, model, light, and base-color factor</td></tr>
+          <tr><th scope="row">1</th><td>8,192-byte read-only storage buffer</td><td>Vertex</td><td>Up to 128 joint matrices</td></tr>
+          <tr><th scope="row">2</th><td>2D float texture</td><td>Fragment</td><td>Jax base color</td></tr>
+          <tr><th scope="row">3</th><td>Filtering sampler</td><td>Fragment</td><td>Linear filtering with repeating U and V coordinates</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fragment shader multiplies the texture sample by the material's base-color factor and the vertex color. It adds a simple view-dependent highlight with exponent 16 and keeps diffuse light at a minimum of 0.5, so shadowed surfaces retain half their base color. Metallic and roughness material fields are not evaluated; this is a compact lit-texture shader rather than a PBR renderer.</p>
+    <p>The model uses one indexed draw and one instance. Because Jax is not marked double-sided, the pipeline culls back faces. A single-sampled <code>Depth32Float</code> attachment enables depth writes with <code>LessEqual</code> comparison; alpha blending is disabled. A second color-load pass adds the Vazirmatn overlay with the GPU device string and sampled FPS.</p>
+    <p>Bind-pose bounds have a radius of about 1.581 units. They place the fixed camera near <code>(0, 0.822, 3.872)</code>, looking toward <code>(0, 0.285, 0)</code>, with a 60&deg; field of view, 0.1 near plane, and a far plane about 37.93 units away. Resizing recreates the depth texture, updates the projection, and rebuilds overlay placement without reloading the model.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native glTF vertex skinning example"><code>cargo run --example gltfskinning</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU glTF skinning example"><code>scripts/build-wasm.sh --release gltfskinning
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/gltfskinning/</code> in a browser with WebGPU support. The model, binary buffer, and texture must remain under the same relative <code>assets</code> paths. The shader and overlay font are embedded in the program. The article and screenshot remain available if WebGPU initialization or asset loading fails.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Preserve each glTF sampler's <code>LINEAR</code>, <code>STEP</code>, or <code>CUBICSPLINE</code> mode, then test an asset with visibly changing step keys.</li>
+      <li>Add clip selection, pause, speed, and cross-fade controls while keeping the joint palette format unchanged.</li>
+      <li>Upload only the used 46 matrices, or move animation and palette construction to GPU-friendly buffers for a crowd.</li>
+      <li>Compare linear blend skinning with dual-quaternion skinning around twisting shoulders and limbs.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs">Read the glTF skinning source &nearr;</a>
+      <a href="../stencilbuffer/">&larr; Previous: WebGPU stencil buffer outlines</a>
+      <a href="../instancing/">Next: WebGPU asteroid instancing &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

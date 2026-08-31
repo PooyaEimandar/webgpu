@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Indirect Draw in Rust: 24,576 Plants with wgpu",
+  "description": "Render 24,576 plants with 12 indexed indirect WebGPU commands in Rust, wgpu, and WGSL. Learn command buffers, instancing, glTF, and KTX texture arrays.",
+  "breadcrumbName": "WebGPU indirect draw",
+  "image": "indirectdraw.jpg",
+  "imageWidth": 1920,
+  "imageHeight": 1080,
+  "imageAlt": "Dense WebGPU jungle with palms, red bromeliads, green ground cover, and an indirect-draw statistics overlay."
+}

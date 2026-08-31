@@ -1,0 +1,197 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 22</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Split a 0.5-to-48-unit camera frustum into four practical cascades, fit one orthographic light matrix to each slice, render a 2048&times;2048 depth layer per cascade, and choose the matching layer in WGSL.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Cascaded shadow mapping demo at a glance">
+      <div><dt>Cascades</dt><dd>4</dd></div>
+      <div><dt>Depth per layer</dt><dd>2048&times;2048</dd></div>
+      <div><dt>Filter taps</dt><dd>9</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#why-cascade-a-shadow-map">Why cascade a directional shadow map?</a></li>
+        <li><a href="#build-the-long-scene">Build a long receiver and five casters</a></li>
+        <li><a href="#split-camera-frustum">Split the camera frustum</a></li>
+        <li><a href="#fit-light-projections">Fit four orthographic light projections</a></li>
+        <li><a href="#allocate-depth-array">Allocate a four-layer depth array</a></li>
+        <li><a href="#select-and-filter-cascade">Select and filter one cascade in WGSL</a></li>
+        <li><a href="#frame-work-and-updates">Count passes, draws, and updates</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="why-cascade-a-shadow-map" tabindex="-1">Why cascade a directional shadow map?</h2>
+    <p>The <a href="../shadowmapping/#about">previous WebGPU shadow mapping example</a> uses one light-space image for a compact teapot-and-floor scene. A camera that sees tens or hundreds of world units asks one fixed texture to cover much more area. Nearby shadows then receive only a small fraction of its texels.</p>
+    <p>Cascaded shadow mapping divides the visible camera frustum by depth. A near slice gets a tightly fitted light projection; progressively farther slices get wider projections. This example keeps the algorithm inspectable with four fixed-size layers and a long row of teapots.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/e0b116b9da0d68aaba6681b57b083863563dd1a4">cascade and omni shadow mapping commit</a> introduced the Rust examples, shaders, screenshots, and gallery entries together. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmappingcascade.rs">cascaded shadow mapping source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmappingcascade.wgsl">scene shader</a>, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmappingcascade_depth.wgsl">depth shader</a> run through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/shadowmappingcascade.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Five teapots occupy progressively deeper parts of the view. Each floor fragment selects one of four light-space depth layers before evaluating its directional shadow.</figcaption>
+    </figure>
+
+    <h2 id="build-the-long-scene" tabindex="-1">Build a long receiver and five casters</h2>
+    <p>The only runtime model is the repository&rsquo;s <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf">225,816-byte teapot glTF</a>. Its single primitive contains 4,690 positions and normals plus 27,384 source indices. The shared colored-glTF loader converts indices to <code>u32</code> and produces a 40-byte vertex with position, normal, and RGBA color.</p>
+    <p>Rust clones and transforms that source mesh five times. The teapots sit at Z&nbsp;=&nbsp;0, 6, 11, 18.5, and 27 with different X offsets, rotations, and pastel colors. One procedural floor spans X&nbsp;=&nbsp;&minus;12 to 12 and Z&nbsp;=&nbsp;&minus;6 to 36 at Y&nbsp;=&nbsp;&minus;1.70.</p>
+    <p>The fourth color component is repurposed as a shadow-receiver flag. The floor stores alpha 1; every teapot stores alpha 0. The vertex shader passes it as <code>shadow_receiver</code>, and the fragment shader ultimately writes output alpha 1. The result is intentionally one-way: teapots cast into all four depth layers, but only the floor samples shadow visibility. They do not shadow themselves or each other in the final scene shading.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="cascade-scene-data-caption" tabindex="0">
+      <table>
+        <caption id="cascade-scene-data-caption">Cascaded shadow mapping scene and duplicated GPU mesh payloads</caption>
+        <thead>
+          <tr><th scope="col">Mesh set</th><th scope="col">Meshes</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Logical buffer bytes</th><th scope="col">Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene set</th><td>5 teapots + floor</td><td>23,454</td><td>136,926</td><td>1,485,864</td><td>Visible color and depth pass</td></tr>
+          <tr><th scope="row">Caster set</th><td>5 teapots</td><td>23,450</td><td>136,920</td><td>1,485,680</td><td>Repeated in each cascade depth pass</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The caster vertices and indices are uploaded separately from the identical transformed teapots in the scene set. That makes the two roles straightforward, but it duplicates 1,485,680 bytes of mesh data. The depth pipeline also reads the full 40-byte colored vertex even though its shader uses only position.</p>
+
+    <h2 id="split-camera-frustum" tabindex="-1">Split the camera frustum</h2>
+    <p>The camera is fixed at <code>(-0.4, 3.2, -12)</code>, looks toward <code>(0, -0.65, 12)</code>, and uses a 45&deg; vertical field of view. Near and far planes are 0.5 and 48. For split <code>p</code>, Rust blends a uniform distance with a logarithmic distance:</p>
+    <pre tabindex="0" aria-label="Calculate practical cascade split ratios in Rust"><code><span class="code-keyword">let</span> p = (index + 1) as f32 / CASCADE_COUNT as f32;
+<span class="code-keyword">let</span> log = CAMERA_NEAR * ratio.powf(p);
+<span class="code-keyword">let</span> uniform = CAMERA_NEAR + clip_range * p;
+<span class="code-keyword">let</span> distance = CASCADE_SPLIT_LAMBDA * (log - uniform) + uniform;
+*split = (distance - CAMERA_NEAR) / clip_range;</code></pre>
+    <p><code>CASCADE_SPLIT_LAMBDA</code> is 0.95, so the distribution is close to logarithmic and concentrates three boundaries near the camera.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="cascade-splits-caption" tabindex="0">
+      <table>
+        <caption id="cascade-splits-caption">Four practical cascade depth ranges for near 0.5, far 48, and lambda 0.95</caption>
+        <thead>
+          <tr><th scope="col">Cascade layer</th><th scope="col">Normalized end ratio</th><th scope="col">View-depth range</th><th scope="col">Selection test</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>0.03380</td><td>0.50 to 2.11</td><td>Default layer</td></tr>
+          <tr><th scope="row">1</th><td>0.11298</td><td>2.11 to 5.87</td><td>Depth &gt; first split</td></tr>
+          <tr><th scope="row">2</th><td>0.33419</td><td>5.87 to 16.37</td><td>Depth &gt; second split</td></tr>
+          <tr><th scope="row">3</th><td>1.00000</td><td>16.37 to 48.00</td><td>Depth &gt; third split</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The shader receives all four end depths but compares only X, Y, and Z; anything beyond the third boundary selects layer 3. Camera clipping still limits visible geometry to the fourth split at 48.</p>
+
+    <h2 id="fit-light-projections" tabindex="-1">Fit four orthographic light projections</h2>
+    <p>Rust inverts <code>projection * view</code> and unprojects the eight WebGPU NDC corners with Z at 0 and 1. For each cascade it interpolates the four near-to-far corner rays between the previous and current split ratios. That produces eight world-space corners for one frustum slice.</p>
+    <p>The light fit averages the corners to find a center, then finds the largest corner distance. It rounds that bounding-sphere radius upward to the nearest sixteenth and creates symmetric X, Y, and Z extents. A right-handed light view looks from the slice center opposite the directional-light vector, and a square orthographic projection encloses the sphere.</p>
+    <p>The radius rounding reduces small scale changes, but the light-space center is not snapped to a shadow texel. Camera movement is absent in this demo, yet adding a moving camera without stabilization could still produce shimmering. A sphere fit is rotation-stable but can leave unused texels compared with a tighter axis-aligned fit.</p>
+    <p>The normalized light direction follows:</p>
+    <pre tabindex="0" aria-label="Animate the cascade directional light"><code><span class="code-keyword">let</span> phase = animation_time * std::f32::consts::TAU;
+glam::Vec3::new(
+    phase.cos() * 0.35 - 0.45,
+    -1.0,
+    phase.sin() * 0.35 - 0.25,
+).normalize()</code></pre>
+    <p>Normalized animation time advances by <code>delta_seconds * 0.035</code> and wraps with <code>fract</code>, giving a roughly 28.57-second light cycle.</p>
+
+    <h2 id="allocate-depth-array" tabindex="-1">Allocate a four-layer depth array</h2>
+    <p>The shadow map is one <code>Depth32Float</code> 2D-array texture: 2048&times;2048, four layers, one mip, one sample. Four layer views expose individual slices as render attachments; a single <code>D2Array</code> view exposes all layers to the scene fragment shader. Its logical texel payload is <strong>67,108,864 bytes</strong>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="cascade-resources-caption" tabindex="0">
+      <table>
+        <caption id="cascade-resources-caption">Cascaded shadow mapping bindings and texture resources</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">Bindings</th><th scope="col">Lifetime and updates</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene uniform</th><td>512 bytes</td><td>Scene group binding 0, vertex + fragment</td><td>Fully rewritten every update and resize</td></tr>
+          <tr><th scope="row">Four depth uniforms</th><td>4 &times; 64 bytes</td><td>One depth-pass group per cascade</td><td>All four rewritten every update and resize</td></tr>
+          <tr><th scope="row">Cascade shadow array</th><td>2048&times;2048&times;4 <code>Depth32Float</code></td><td>Scene group binding 1</td><td>Allocated once; every layer cleared and rendered each frame</td></tr>
+          <tr><th scope="row">Comparison sampler</th><td>Linear, clamp-to-edge, <code>LessEqual</code></td><td>Scene group binding 2</td><td>Allocated once</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Scene render attachment</td><td>Recreated on resize</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The depth pipeline is vertex-only, writes no color attachment, uses <code>LessEqual</code>, has no culling, and applies no pipeline depth bias. The scene pipeline back-face culls and writes surface color plus depth with the same depth comparison.</p>
+
+    <h2 id="select-and-filter-cascade" tabindex="-1">Select and filter one cascade in WGSL</h2>
+    <p>The scene vertex shader records positive view depth as <code>-view_position.z</code>. The fragment shader selects a layer from the three interior split boundaries, transforms the world position by that layer&rsquo;s light-space matrix, divides by W, and converts X/Y into shadow UV.</p>
+    <p>A normal-dependent sampling bias moves the comparison reference toward the light. Nine taps cover a 3&times;3 grid with spacing <code>1.2 / textureDimensions(shadow_map)</code>:</p>
+    <pre tabindex="0" aria-label="Filter the selected shadow-map cascade with nine WGSL taps"><code><span class="code-keyword">let</span> slope_bias = max(
+    0.0004 * (1.0 - dot(normal, -light_direction_to_scene)),
+    0.00025,
+);
+<span class="code-keyword">let</span> reference_depth = clamp(projected.z - slope_bias, 0.0, 1.0);
+
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> x = -1; x &lt;= 1; x = x + 1) {
+    <span class="code-keyword">for</span> (<span class="code-keyword">var</span> y = -1; y &lt;= 1; y = y + 1) {
+        sum = sum + textureSampleCompare(
+            shadow_map, shadow_sampler,
+            shadow_uv + vec2&lt;f32&gt;(f32(x), f32(y)) * texel,
+            i32(index), reference_depth,
+        );
+    }
+}</code></pre>
+    <p>The average maps to visibility <code>0.22 + lit * 0.78</code>, leaving ambient detail in full shadow. Positions with invalid W, negative W, UV outside 0&ndash;1, or projected depth outside 0&ndash;1 are treated as lit.</p>
+    <p>Ambient, Lambert diffuse, and a small power-18 specular term shade the vertex color. The scene uniform&rsquo;s debug value is fixed at 0.12, so receiver fragments also receive a subtle red, green, blue, or yellow tint according to cascade. There is no runtime switch for that tint and no blend band across cascade boundaries.</p>
+
+    <h2 id="frame-work-and-updates" tabindex="-1">Count passes, draws, and updates</h2>
+    <p>Each frame renders all five casters into each depth layer, draws the six visible meshes once, then overlays four lines of Vazirmatn text. The framework FPS value measures CPU frame cadence over its sampling interval rather than GPU timestamp duration.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="cascade-passes-caption" tabindex="0">
+      <table>
+        <caption id="cascade-passes-caption">Cascaded shadow mapping passes and submitted indexed work per frame</caption>
+        <thead>
+          <tr><th scope="col">Passes</th><th scope="col">Draws</th><th scope="col">Index invocations</th><th scope="col">Submitted triangles</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">4 cascade depth passes</th><td>20 indexed draws</td><td>547,680</td><td>182,560</td><td>Five teapots written to every array layer</td></tr>
+          <tr><th scope="row">1 scene pass</th><td>6 indexed draws</td><td>136,926</td><td>45,642</td><td>Floor and five colored teapots</td></tr>
+          <tr><th scope="row">1 overlay pass</th><td>1 framework glyph draw when text is visible</td><td>Varies with shaped glyphs</td><td>Instanced glyph quads</td><td>Title, device, FPS, and cascade count</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The example therefore records six render passes and 26 example-owned mesh draws, plus the overlay draw. It submits 228,202 mesh triangles and 684,606 mesh index invocations per frame. Mesh buffers total 2,971,544 logical bytes before uniforms, shadow images, surface attachments, overlay resources, and allocator padding.</p>
+    <p>Every normal update writes the 512-byte scene uniform and four 64-byte light-space uniforms: five queue writes and 768 bytes. Resizing recreates only the surface-size depth image, recalculates the aspect-dependent camera and cascades, rewrites those uniforms, and rebuilds overlay placement. The fixed 2048² array is not resized.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU cascaded shadow mapping example"><code>cargo run --example shadowmappingcascade</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU cascaded shadow mapping example"><code>scripts/build-wasm.sh --release shadowmappingcascade
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/shadowmappingcascade/</code>. Native loading reads the glTF synchronously; WebAssembly fetches it asynchronously from <code>../assets/models/teapot.gltf</code>. Both use the same generated meshes, four depth layers, shaders, animation, and passes. The font and WGSL are compiled into the program. There are no mouse, keyboard, touch, camera, cascade, bias, or light controls.</p>
+    <p>Useful extensions include:</p>
+    <ul>
+      <li>Make the camera interactive, snap light-space centers to texel increments, and compare temporal shimmer before and after stabilization.</li>
+      <li>Blend across split boundaries and expose the currently fixed 0.12 cascade tint as a debug control.</li>
+      <li>Share caster and scene buffers, use a position-only shadow layout, and add depth-pass culling or bias after measuring acne and peter-panning.</li>
+      <li>Let teapots receive shadows, then add more casters and verify that self-shadow bias remains stable across cascade scales.</li>
+      <li>Vary layer resolution by cascade or pack cascades into an atlas and compare memory, sampling, and viewport complexity.</li>
+    </ul>
+    <p>The current example prioritizes a readable CSM data flow. Its fixed 64 MiB depth array, duplicated mesh buffers, abrupt cascade selection, fixed filtering and bias, lack of texel snapping, and floor-only reception are the main limitations to address in a production renderer.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmappingcascade.rs">Read the cascaded shadow mapping source &nearr;</a>
+      <a href="../shadowmapping/">&larr; Previous: WebGPU shadow mapping</a>
+      <a href="../shadowmappingomni/">Next: WebGPU omnidirectional shadow mapping &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

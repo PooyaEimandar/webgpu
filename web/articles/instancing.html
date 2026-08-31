@@ -1,0 +1,129 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 14</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Generate one rocky mesh, pair it with a compact buffer of 2,048 transforms and texture layers, then animate the entire asteroid field in one indexed draw.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Instancing demo at a glance">
+      <div><dt>Asteroids</dt><dd>2,048</dd></div>
+      <div><dt>Rock draw calls</dt><dd>1</dd></div>
+      <div><dt>Rock triangles</dt><dd>442,368</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#one-draw-thousands">One mesh, thousands of asteroids</a></li>
+        <li><a href="#procedural-asteroid-mesh">Generate the asteroid and planet meshes</a></li>
+        <li><a href="#instance-buffer">Pack transforms into an instance buffer</a></li>
+        <li><a href="#texture-array-layers">Generate and select texture-array layers</a></li>
+        <li><a href="#animate-in-wgsl">Animate every instance in WGSL</a></li>
+        <li><a href="#three-scene-draws">Compose the star field, planet, and rocks</a></li>
+        <li><a href="#run-the-example">Run and modify the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="one-draw-thousands" tabindex="-1">One mesh, thousands of asteroids</h2>
+    <p>The <a href="../gltfskinning/#about">glTF skinning example</a> reused one mesh while changing its vertices with a joint palette. Instancing solves a different repetition problem: many objects share identical vertex and index data, but each object needs its own position, rotation, scale, and material choice.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/e541272cf963fe2f0c72dc15a3aff775f4ed7038">original instancing commit</a> introduced the procedural asteroid field. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/instancing.rs">Rust example</a> retains its 2,048-instance design and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/instancing.wgsl">WGSL shader</a>, while adding the central planet draw, direct perspective projection, bounded animation angles, and safer render errors. It runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> with automatic motion and no mouse, keyboard, camera, or speed controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/instancing.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A single 216-triangle asteroid template becomes 2,048 differently placed, rotated, scaled, and textured rocks. The GPU submits 442,368 rock triangles without duplicating the template geometry.</figcaption>
+    </figure>
+
+    <h2 id="procedural-asteroid-mesh" tabindex="-1">Generate the asteroid and planet meshes</h2>
+    <p>No glTF, OBJ, or image file is loaded. At startup, <code>sphere_mesh</code> samples latitude and longitude rings and emits position, radial normal, UV, and RGB color attributes. <code>MeshVertex</code> stores those 11 floats in a 44-byte stride at shader locations 0 through 3.</p>
+    <p>The asteroid starts as a sphere with a 0.34-unit radius, 9 latitude segments, and 12 longitude segments. A deterministic hash displaces each vertex radius by up to 55%, producing a rough silhouette. The generator emits 130 vertices and 648 <code>u32</code> indices, or 216 submitted triangles. Twenty-four pole triangles have zero area because each pole ring repeats the same position, leaving 192 nondegenerate template triangles.</p>
+    <p>The current scene also generates a smooth 2.4-unit planet with 32 latitude and 48 longitude segments. It uses 1,617 vertices and 9,216 indices, or 3,072 submitted triangles. Mesh generation and GPU upload happen once during initialization; neither mesh buffer changes while the scene animates.</p>
+
+    <h2 id="instance-buffer" tabindex="-1">Pack transforms into an instance buffer</h2>
+    <p><code>InstanceData</code> contains eight floats: a three-component position, three rotation angles, one uniform scale, and one texture-layer index stored as <code>f32</code>. Its 32-byte layout occupies shader locations 4 through 7 and uses <code>VertexStepMode::Instance</code>, so wgpu advances to the next record once per asteroid instead of once per mesh vertex.</p>
+    <p>A seeded linear congruential generator makes the layout reproducible. The first 1,024 records use radii from 4.5 to 12 units; the second 1,024 use 8 to 18 units. Both bands receive a random angle, a vertical offset between &minus;0.25 and +0.25, three starting rotations, a varied scale, and one of six texture layers.</p>
+    <p>All records occupy one 65,536-byte static vertex buffer. The render command combines it with the shared rock buffers:</p>
+    <pre tabindex="0" aria-label="Draw 2048 indexed asteroid instances"><code>pass.set_vertex_buffer(0, rock_vertex_buffer.slice(..));
+pass.set_vertex_buffer(1, instance_buffer.slice(..));
+pass.set_index_buffer(rock_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+pass.draw_indexed(0..648, 0, 0..2048);</code></pre>
+    <p>Without instancing, the renderer would need thousands of object draws or a much larger buffer containing duplicated mesh data. Here, one draw reuses the 130 template vertices while the second vertex stream supplies the object-specific values.</p>
+
+    <h2 id="texture-array-layers" tabindex="-1">Generate and select texture-array layers</h2>
+    <p>Rust creates six 256&times;256 rock images from gray, charcoal, brown, and pale palettes. Layered sine-based noise produces grain and cracks. The six RGBA images become one <code>Rgba8UnormSrgb</code> <code>texture_2d_array</code>, using 1,572,864 bytes of source pixel data. A separate one-layer array holds the procedurally generated lava texture for the planet.</p>
+    <p>Each asteroid's floating-point layer value is constant across its vertices. The fragment shader rounds it, clamps it to 0&ndash;5, converts it to <code>i32</code>, and samples that array layer:</p>
+    <pre tabindex="0" aria-label="Select an asteroid texture-array layer in WGSL"><code><span class="code-keyword">let</span> layer = i32(clamp(round(input.texture_layer), 0.0, 5.0));
+<span class="code-keyword">let</span> sample_color = textureSample(
+    texture_array,
+    texture_sampler,
+    input.uv * 2.0,
+    layer,
+);</code></pre>
+    <p>Both arrays have one mip level and use linear filtering with clamp-to-edge addressing. Because the rock shader doubles UVs without a repeating sampler, coordinates above 1 clamp to the border rather than tile. Changing the sampler to <code>Repeat</code> or generating mipmaps would be useful when studying texture detail at this scale.</p>
+
+    <h2 id="animate-in-wgsl" tabindex="-1">Animate every instance in WGSL</h2>
+    <p>The instance buffer remains static. Each frame, Rust writes one 160-byte uniform containing projection, view, light position, local rotation, global rotation, and elapsed time. The frame delta is capped at 1/15 second. Local rotation advances by 0.35 radians per second, global orbit by 0.08 radians per second, and both angles wrap at one full turn.</p>
+    <p><code>vs_rocks</code> composes three local rotations from the starting instance angles and the shared local speed. It scales the template vertex, rotates the rock around itself, adds the instance position, then applies a shared Y rotation to orbit the field. Normals receive the same local and global rotations without translation:</p>
+    <pre tabindex="0" aria-label="Transform one instanced asteroid vertex in WGSL"><code><span class="code-keyword">let</span> local_position = local_rotation
+    * (input.position * input.instance_scale);
+<span class="code-keyword">let</span> world_position = vec4&lt;f32&gt;(
+    global_rotation * (local_position + input.instance_position),
+    1.0,
+);</code></pre>
+    <p>The fragment shader combines the procedural texture and per-vertex color with 40% ambient light, Lambert diffuse light, and a conditional exponent-16 specular highlight. Animation cost is concentrated in vertex math and one small uniform upload; Rust does not loop over or rewrite all 2,048 instance transforms every frame.</p>
+
+    <h2 id="three-scene-draws" tabindex="-1">Compose the star field, planet, and rocks</h2>
+    <p>Three graphics pipelines share one bind-group layout and execute inside the same color-and-depth render pass:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="instancing-draws-caption" tabindex="0">
+      <table>
+        <caption id="instancing-draws-caption">Instancing scene draw breakdown</caption>
+        <thead>
+          <tr><th scope="col">Draw</th><th scope="col">Geometry</th><th scope="col">Draw calls</th><th scope="col">Instances</th><th scope="col">Depth state</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Star field</th><td>Full-screen triangle from <code>vertex_index</code></td><td>1</td><td>1</td><td>No writes; <code>Always</code></td></tr>
+          <tr><th scope="row">Lava planet</th><td>3,072 submitted triangles</td><td>1</td><td>1</td><td>Write; <code>LessEqual</code></td></tr>
+          <tr><th scope="row">Asteroid field</th><td>216 template triangles</td><td>1</td><td>2,048</td><td>Write; <code>LessEqual</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The star pipeline needs no vertex buffer. Its vertex shader expands three vertices into a full-screen triangle, and the fragment shader hashes moving coordinates to reveal rare bright points above a dark blue background. It renders first without changing depth. The rotating lava planet and asteroid instances then write to a single-sampled <code>Depth32Float</code> target.</p>
+    <p>All three pipelines disable face culling and alpha blending. The planet shader samples its one-layer array and applies broad diffuse and specular lighting. The star field reuses the planet bind group even though its shader only reads the uniform time. A second color-load pass renders the diagnostic overlay after the scene pass.</p>
+    <p>Landscape windows use a fixed camera at <code>(5.5, 17, 30)</code>; portrait windows step back to <code>(5, 23, 40)</code>. Both look at the origin through a 60&deg; perspective projection with near and far planes of 0.1 and 256. Resizing recreates depth, chooses the appropriate camera, and rebuilds overlay placement.</p>
+    <p>The overlay literally begins with <q>Vulkan Example - Instanced mesh rendering</q>, then reports frame time, estimated FPS, GPU information, and <q>Rendering 2048 instances</q>. Its milliseconds become <code>1000 / fps</code> after the default sampling interval, so they are not GPU timestamp measurements.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and modify the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU instancing example"><code>cargo run --example instancing</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU instancing example"><code>scripts/build-wasm.sh --release instancing
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/instancing/</code> in a browser with WebGPU support. Geometry and textures are generated at startup, while WGSL and the Vazirmatn overlay font are embedded in the program, so the demo has no runtime model or image download. The article and screenshot remain readable without WebGPU.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Increase <code>INSTANCE_COUNT</code>, measure frame time, and compare the cost of a larger static instance buffer with the unchanged rock draw count.</li>
+      <li>Move positions and velocities into storage buffers, then update or cull instances with a compute shader.</li>
+      <li>Generate mipmaps, use repeating texture coordinates, or add a normal-map texture array for sharper rock detail.</li>
+      <li>Split the field into visible clusters and issue indirect draws after frustum or occlusion culling.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/instancing.rs">Read the instancing source &nearr;</a>
+      <a href="../gltfskinning/">&larr; Previous: WebGPU glTF vertex skinning</a>
+      <a href="../indirectdraw/">Next: WebGPU indirect draw &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

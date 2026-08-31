@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU SSAO in Rust: 32-Sample Ambient Occlusion with wgpu",
+  "description": "Build screen-space ambient occlusion in WebGPU with Rust and wgpu: sample 32 spiral neighbors, blur a full-resolution AO mask, and tune it live with egui.",
+  "breadcrumbName": "WebGPU screen-space ambient occlusion",
+  "image": "ssao.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "WebGPU SSAO demo showing animated Jax on a checkerboard floor under colored spotlights, with ambient occlusion controls open."
+}

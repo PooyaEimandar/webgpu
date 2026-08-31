@@ -1,0 +1,9 @@
+{
+  "title": "Procedural 3D Gears with Rust, wgpu, and WebGPU",
+  "description": "Build and animate procedural 3D gears with Rust, wgpu, and WebGPU. Learn indexed mesh generation, per-object uniforms, depth testing, and WGSL lighting.",
+  "breadcrumbName": "Procedural gears",
+  "image": "gears.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Red, green, and blue toothed 3D gears with lit front faces and side walls on a black WebGPU canvas."
+}

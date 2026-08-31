@@ -1,9 +1,4 @@
-struct GpuLight {
-    position_range: vec4<f32>,
-    color_type: vec4<f32>,
-    direction: vec4<f32>,
-    cone: vec4<f32>,
-}
+//!include light
 
 struct GiParams {
     // xyz = grid origin (probe 0 world position), w = probe count x

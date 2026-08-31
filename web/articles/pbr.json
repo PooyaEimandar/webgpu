@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU PBR in Rust: GGX Metallic-Roughness Grid",
+  "description": "Explore basic WebGPU PBR in Rust with wgpu: 49 instanced spheres compare metallic and roughness using GGX, Schlick Fresnel, and four lights.",
+  "breadcrumbName": "WebGPU PBR Basic",
+  "image": "pbr.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A perspective 7 by 7 grid of gold spheres showing metallic and roughness changes under bright point-light highlights."
+}

@@ -1,0 +1,149 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 41</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load an animated glTF 2.0 character, skin its vertices on the CPU, rebuild a median-split triangle BVH for every animated pose, and traverse that hierarchy from a WebGPU compute shader for shadows and three reflection segments.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL / glTF 2.0</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Ray-traced glTF demo at a glance">
+      <div><dt>Skin joints</dt><dd>46</dd></div>
+      <div><dt>BVH leaf limit</dt><dd>4 triangles</dd></div>
+      <div><dt>Reflection segments</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#meshes-in-rays">Move from analytic objects to a glTF mesh</a></li>
+        <li><a href="#load-jax">Load Jax, its skin, animation, and texture</a></li>
+        <li><a href="#skin-triangles">Skin and repack triangles on the CPU</a></li>
+        <li><a href="#build-bvh">Build a median-split BVH</a></li>
+        <li><a href="#traverse-bvh">Traverse triangles in WGSL</a></li>
+        <li><a href="#shade-reflect">Texture, shadow, and reflect the scene</a></li>
+        <li><a href="#frame-work">Understand per-frame work and resources</a></li>
+        <li><a href="#controls-limitations">Use the controls and read the limitations</a></li>
+        <li><a href="#run-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="meshes-in-rays" tabindex="-1">Move from eleven analytic objects to thousands of glTF triangles</h2>
+    <p>The <a href="../raytracingreflections/#about">previous reflections example</a> linearly tested four spheres, three boxes, and four planes. Ray-traced glTF keeps seven procedural room objects but adds a skinned triangle mesh. Scanning every Jax triangle for every primary, shadow, and reflection ray would be impractical, so Rust builds a bounding-volume hierarchy and WGSL traverses it with a fixed stack.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/d264a535318a399e11a7e11defe9d7fdab1f6043">introducing ray tracing glTF commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracinggltf.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracinggltf_compute.wgsl">compute shader</a>, screenshot, build registration, and gallery entry. It deliberately reuses the preceding <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/raytracingreflections_present.wgsl">full-screen present shader</a>. The current code later received a <a href="https://github.com/PooyaEimandar/webgpu/commit/87394fbddba7686dde0b85898cd414f0420c8f32">camera-basis and full-stack-capacity fix</a>, a <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible settings window</a>, a <a href="https://github.com/PooyaEimandar/webgpu/commit/0a6f61003b053d261bf2e264063527aad3d8ba14">mobile joystick input fix</a>, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a>. Rendering uses <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/raytracinggltf.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>Jax walks between two reflective spheres, two boxes, and a checkerboard floor. The introducing commit's unchanged 1280&times;720 capture is a 59,422-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracinggltf.jpg">JPEG</a> and 30,362-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/raytracinggltf.webp">WebP</a>. At that animated pose, the overlay reports 9,545 accepted triangles, 6,801 BVH nodes, a 900&times;506 trace target, and 66&nbsp;fps. Those are capture values, not fixed cross-device performance or immutable mesh counts.</figcaption>
+    </figure>
+
+    <h2 id="load-jax" tabindex="-1">Load Jax, one skin, one walking clip, and one base-color texture</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs"><code>gltf_skin</code> loader</a> reads the JSON document, resolves its external buffer and image relative to that URL, decodes the PNG to RGBA8, and constructs one merged skinned scene. Native uses filesystem reads. WebAssembly fetches the same three copied files. Data URIs are supported by the loader, but Jax uses external resources.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ray-gltf-assets-caption" tabindex="0">
+      <table>
+        <caption id="ray-gltf-assets-caption">Jax runtime assets and documented repository provenance</caption>
+        <thead><tr><th scope="col">Asset</th><th scope="col">Stored bytes</th><th scope="col">Contents</th><th scope="col">Runtime result</th><th scope="col">Provenance and license</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a></th><td>68,324</td><td>glTF 2.0 JSON; 59 nodes, 1 mesh/material/skin/animation</td><td>Scene hierarchy and accessors</td><td>Generator field: Khronos glTF Blender I/O v5.0.21</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a></th><td>1,957,752</td><td>Geometry, joints, inverse binds, animation keys</td><td>35,880 vertices and indices; 11,960 raw triangles</td><td rowspan="2">Bundled by the <a href="https://github.com/PooyaEimandar/webgpu/commit/a65ec584ad446059707f4c0c9d1f14171540aa7a">Jax asset update</a>; files and repository provide no asset-specific creator or license notice</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png"><code>jax_base_color.png</code></a></th><td>13,008</td><td>1024&times;1024 RGB PNG</td><td>4,194,304-byte one-mip <code>Rgba8UnormSrgb</code> texture</td></tr>
+          <tr><th scope="row">Total runtime files</th><td><strong>2,039,084</strong></td><td>Three relative requests</td><td>CPU scene plus GPU texture</td><td>Resolve licensing before redistributing the model separately</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The primitive carries positions, normals, UVs, four joint indices, and four weights. The skin has 46 joints. <code>Walking_1</code> has 138 supported translation, rotation, and scale channels over one second. The shared sampler linearly interpolates vectors and slerps quaternions; it does not preserve each glTF channel's STEP mode. The one material has a white base-color factor and zero metallic factor, but this ray tracer evaluates only base color.</p>
+    <p>The PNG sampler repeats U and V and uses linear minification and magnification. The uploaded texture has one mip, and WGSL explicitly samples level zero. The glTF's generator string identifies the exporting software, not the character's author or license.</p>
+
+    <h2 id="skin-triangles" tabindex="-1">Skin vertices and repack ray triangles on the CPU every animated frame</h2>
+    <p>At initialization, Rust measures the rest-pose bounds, uniformly scales Jax to 2.05 world units tall, centers X and Z, and places the lowest point on Y&nbsp;=&nbsp;0. Each update advances animation by at most 1/15 second, rebuilds the 46-joint palette, and blends as many as four joint matrices into each vertex position and normal on the CPU.</p>
+    <pre tabindex="0" aria-label="CPU skin one glTF vertex with up to four joint weights"><code><span class="code-keyword">for</span> slot in 0..4 {
+  <span class="code-keyword">let</span> weight = vertex.weights[slot];
+  <span class="code-keyword">if</span> weight &lt;= f32::EPSILON { <span class="code-keyword">continue</span>; }
+  <span class="code-keyword">let</span> joint_matrix = joints.matrices
+    .get(vertex.joints[slot] as usize)
+    .map(glam::Mat4::from_cols_array_2d)
+    .unwrap_or(glam::Mat4::IDENTITY);
+  position += joint_matrix.transform_point3(source_position) * weight;
+  normal += joint_matrix.transform_vector3(source_normal) * weight;
+}</code></pre>
+    <p>Indices are consumed three at a time. Rust transforms the three points, drops a face when its cross-product length squared is at most <code>1e-9</code>, transforms or repairs vertex normals, and packs eight <code>vec4</code> values into a 128-byte <code>RayTriangle</code>. Because the degeneracy test runs after skinning, the ray-tracing triangle count is pose-derived rather than the raw glTF count of 11,960. The screenshot's pose retained 9,545.</p>
+
+    <h2 id="build-bvh" tabindex="-1">Build a median-split BVH with leaves of at most four triangles</h2>
+    <p>For every accepted triangle, Rust records its axis-aligned bounds and centroid. Each node chooses its longest bounds axis, sorts the local slice by centroid, and splits at the midpoint. Recursion stops at four triangles. Leaves copy their triangles into BVH order and store the first index plus count; interior nodes store left and right child indices.</p>
+    <pre tabindex="0" aria-label="Split ray triangles on the longest BVH node axis"><code><span class="code-keyword">let</span> axis = longest_axis(max - min);
+build_triangles.sort_by(|a, b| {
+  axis_value(a.centroid, axis).partial_cmp(&amp;axis_value(b.centroid, axis))
+    .unwrap_or(Ordering::Equal)
+});
+<span class="code-keyword">let</span> midpoint = build_triangles.len() / 2;</code></pre>
+    <p>A node is 48 bytes: two bound vectors and one <code>u32</code> data vector. This is a deterministic, balanced median hierarchy, not a surface-area-heuristic builder. Re-sorting and allocating the full hierarchy every animated frame is straightforward but CPU intensive.</p>
+
+    <h2 id="traverse-bvh" tabindex="-1">Traverse the hierarchy with a fixed 64-entry WGSL stack</h2>
+    <p>The shader first tests all seven procedural objects. It then starts at BVH node zero, rejects nodes with a ray/AABB slab test, and examines at most four M&ouml;ller&ndash;Trumbore triangles per leaf. <code>abs(det)</code> accepts both triangle orientations, so glTF back-face and <code>doubleSided</code> material state do not control ray visibility. Barycentric weights interpolate vertex normals and UVs at the nearest hit.</p>
+    <pre tabindex="0" aria-label="Traverse leaf triangles in the glTF ray tracing BVH"><code><span class="code-keyword">if</span> (leaf_count &gt; 0u) {
+  <span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0u; i &lt; leaf_count; i = i + 1u) {
+    <span class="code-keyword">let</span> candidate = triangle_intersect(ray_o, ray_d,
+                                         gltf_triangles[first + i]);
+    <span class="code-keyword">if</span> (candidate.hit == 1u &amp;&amp; candidate.t &lt; hit.t) {
+      hit = triangle_hit_to_scene_hit(gltf_triangles[first + i], candidate);
+    }
+  }
+}</code></pre>
+    <p>The stack holds 64 node indices. Interior children are pushed only when two entries fit; the later fix changed the check to allow the final two valid slots. This balanced Jax tree is far shallower than 64, but a future builder or malformed node buffer that exhausts the stack would skip those children rather than report an error. Children are not ordered by near distance.</p>
+
+    <h2 id="shade-reflect" tabindex="-1">Texture Jax, cast hard shadows, and accumulate three reflection segments</h2>
+    <p>The scene supplements Jax with two spheres, two boxes, a reflective checker floor, and two wall planes. A moving point light provides diffuse plus a specular highlight. Every visible hit casts another full scene query toward the light; any blocker reduces visibility to 0.42. Jax samples its sRGB base-color texture at interpolated UV and uses fixed reflectivity 0.08.</p>
+    <p>The reflection loop follows at most three segments. Local light contributes <code>1 - reflectivity</code>, throughput receives an 18% material-color tint, and a miss adds the blue sky gradient. Procedural reflectivity ranges from 0 for the walls to 0.42 for the floor. This combines direct hard shadows with mirror-like secondary rays, but it remains a hand-tuned renderer rather than a glTF PBR implementation.</p>
+
+    <h2 id="frame-work" tabindex="-1">Rebuild dynamic geometry, dispatch compute, then draw three overlays</h2>
+    <p>With Skinning enabled, every update advances the clip, skins all vertices, rebuilds accepted triangles, sorts a new BVH, and uploads both buffers. When lengths match, <code>queue.write_buffer</code> updates them in place. If the degeneracy test changes either length, Rust reallocates the buffers and rebuilds the compute bind group. Disabling Skinning rebuilds the rest pose once, then leaves those buffers static until the checkbox changes again.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ray-gltf-resources-caption" tabindex="0">
+      <table>
+        <caption id="ray-gltf-resources-caption">Listed logical GPU payload at the screenshot pose and 900&times;506 target</caption>
+        <thead><tr><th scope="col">Resource</th><th scope="col">Screenshot layout</th><th scope="col">Logical bytes</th><th scope="col">Update</th><th scope="col">Role</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Trace target</th><td>900&times;506 RGBA8</td><td>1,821,600</td><td>Compute writes each frame</td><td>Ray-traced image</td></tr>
+          <tr><th scope="row">Jax triangles</th><td>9,545 &times; 128 bytes</td><td>1,221,760</td><td>CPU rebuild + upload while animated</td><td>Positions, normals, UVs</td></tr>
+          <tr><th scope="row">BVH nodes</th><td>6,801 &times; 48 bytes</td><td>326,448</td><td>CPU rebuild + upload while animated</td><td>Bounds, children, leaf ranges</td></tr>
+          <tr><th scope="row">Jax base color</th><td>1024&times;1024 sRGB RGBA8</td><td>4,194,304</td><td>Uploaded once</td><td>Textured triangle color</td></tr>
+          <tr><th scope="row">Procedural scene</th><td>7 &times; 64 bytes</td><td>448</td><td>Uploaded once</td><td>Spheres, boxes, planes</td></tr>
+          <tr><th scope="row">Uniforms</th><td>5 &times; <code>vec4</code></td><td>80</td><td>Written each frame</td><td>Light, camera, counts, material factor</td></tr>
+          <tr><th scope="row">Total listed payload</th><td>&mdash;</td><td><strong>7,564,640</strong></td><td>&mdash;</td><td>About 7.21 MiB; excludes UI and driver resources</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The target caps its largest dimension at 900, producing 57&times;32 workgroups for the screenshot. That is 466,944 launched invocations: 455,400 active pixels and 11,544 edge lanes that return after the bounds check. A frame records compute, full-screen presentation, a combined text/joystick color-load pass, and an egui pass. The present shader has no depth attachment, blending, or MSAA.</p>
+
+    <h2 id="controls-limitations" tabindex="-1">Use FPS controls and understand the CPU/GPU split</h2>
+    <p>Use W/A/S/D to move on the ground plane and the arrow keys to look. With mouse or touch, drag the left half of the canvas to move and the right half to look; active virtual sticks are drawn over the scene. The initial camera derives from the posed bounds. Its move speed scales with scene radius and look speed is 1.6 radians per second at full input.</p>
+    <p>The collapsible “Ray tracing glTF” window shows frame time, device, current triangle and BVH counts, and storage dimensions. Its Skinning checkbox defaults on. egui consumes its own pointer events and resets active joystick pointers, preventing a settings click from leaving a movement stick engaged.</p>
+    <p>This example recomputes skinning and acceleration on the CPU every animated frame. It supports one selected skinned mesh/material path rather than arbitrary multi-scene glTF, ignores metallic/roughness and most material features, samples one texture level, treats triangles as double-sided, uses hard shadows and mirror-like reflections, and has no hardware ray-tracing API, motion blur, anti-aliasing, accumulation, denoising, HDR tone mapping, or GPU BVH refit. The model files also lack an asset-specific license notice in this repository.</p>
+
+    <h2 id="run-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native ray-traced glTF example"><code>cargo run --example raytracinggltf</code></pre>
+    <p>Build and serve the browser target:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU ray-traced glTF example"><code>scripts/build-wasm.sh --release raytracinggltf
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/raytracinggltf/</code>. Keep <code>jax.gltf</code>, <code>jax.bin</code>, and <code>jax_base_color.png</code> at their existing relative asset paths. Useful extensions are a BVH refit that preserves topology, GPU skinning into ray-ready vertices, near-first traversal, multiple glTF materials, or a profiler that separates CPU build, upload, compute, and presentation time.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/raytracinggltf.rs">Read the ray-traced glTF source &nearr;</a>
+      <a href="../raytracingreflections/">&larr; Previous: WebGPU ray-traced reflections</a>
+      <a href="../nanite/">Next: WebGPU Nanite-style mesh rendering &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

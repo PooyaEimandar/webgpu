@@ -1,0 +1,9 @@
+{
+  "title": "Ray-Traced Shadows in WebGPU with Rust and WGSL",
+  "description": "Add hard ray-traced shadows to WebGPU with Rust and WGSL. Intersect spheres, boxes, and planes, trace light visibility, and present a storage texture.",
+  "breadcrumbName": "Ray-traced shadows",
+  "image": "raytracingshadows.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Three spheres and three colored boxes casting hard ray-traced shadows across a checkerboard floor between red and green walls."
+}

@@ -1,0 +1,143 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 47</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Build an original one-button platform level with deterministic 120 Hz physics, generated triangle geometry, keyboard, mouse, and touch input, and one streamed WebGPU draw.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Geometry Dash-style WebGPU game at a glance">
+      <div><dt>Physics rate</dt><dd>120 Hz</dd></div>
+      <div><dt>Level objects</dt><dd>30</dd></div>
+      <div><dt>Scene draws</dt><dd>1</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#one-button-webgpu-game">Design a one-button WebGPU game</a></li>
+        <li><a href="#fixed-step-loop">Run fixed-step platform physics</a></li>
+        <li><a href="#build-level">Build spikes, blocks, and jump pads</a></li>
+        <li><a href="#resolve-collisions">Resolve the compact collision rules</a></li>
+        <li><a href="#generate-scene">Generate the complete scene in Rust</a></li>
+        <li><a href="#stream-webgpu-vertices">Stream vertices to WebGPU</a></li>
+        <li><a href="#handle-input-and-state">Handle input and game states</a></li>
+        <li><a href="#run-the-example">Run and extend the game</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="one-button-webgpu-game" tabindex="-1">Design a one-button platform game around a WebGPU canvas</h2>
+    <p>The <a href="../residentevil2/#about">previous fixed-camera article</a> combines a skinned 3D actor with bundled backgrounds and directional controls. Geometry Dash returns to a compact 2D problem: the player moves automatically, and one action starts, jumps, retries, or replays according to the current state. Space, Arrow Up, a left mouse press, and a new touch all perform that same action.</p>
+    <p>This original demo was <a href="https://github.com/PooyaEimandar/webgpu/commit/27ff1c98d5f2a353a18376377ee70d47d9b14975">introduced as a complete example</a> with its Rust source, five-line WGSL shader, screenshots, gallery entry, and build registration. A <a href="https://github.com/PooyaEimandar/webgpu/commit/7480c5d82132131eab1b81fb985e65c3922142e0">later update</a> credits Ryan Eimandar in the HUD and README: Ryan designed the concept and gameplay at his request, inspired by the original Geometry Dash game. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/geometrydash.rs">implementation</a> runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/geometrydash.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The mint player square rotates above a neon level while the upper-left HUD reports Attempt 1 and 006% progress. This 1280&times;720 playing-state capture predates the later “Designed by Ryan Eimandar” HUD update; the prompt line is empty during play.</figcaption>
+    </figure>
+
+    <h2 id="fixed-step-loop" tabindex="-1">Run platform physics at a fixed 120 Hz</h2>
+    <p>Rendering follows the display, but gameplay advances in exact 1/120-second ticks. Each update caps the incoming frame delta at 0.1 second, adds it to an accumulator capped at 0.25 second, and consumes as many fixed steps as fit. This keeps jump arcs and collision thresholds stable across ordinary refresh rates while preventing an unbounded catch-up loop after a long pause.</p>
+    <pre tabindex="0" aria-label="Advance Geometry Dash-style physics with a fixed-step accumulator"><code><span class="code-keyword">let</span> dt = self.stats.delta_seconds().min(0.1);
+self.accumulator = (self.accumulator + dt).min(0.25);
+<span class="code-keyword">while</span> self.accumulator &gt;= STEP {
+    self.tick();
+    self.accumulator -= STEP;
+}</code></pre>
+    <p>During play, the level scrolls 5.15 units per second. Gravity subtracts 36 units per second squared from vertical velocity, a normal jump starts at 11.5 units per second, and a pad launches at 14. Ignoring discrete collision checks, a normal jump rises about 1.84 units above takeoff and remains airborne for about 0.64 seconds; a pad raises those figures to 2.72 units and 0.78 seconds.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="dash-physics-caption" tabindex="0">
+      <table>
+        <caption id="dash-physics-caption">Geometry Dash-style simulation constants</caption>
+        <thead>
+          <tr><th scope="col">Quantity</th><th scope="col">Value</th><th scope="col">Applied in</th><th scope="col">Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Fixed step</th><td>1/120 s</td><td>Accumulator loop</td><td>Stable physics and collision sampling</td></tr>
+          <tr><th scope="row">Scroll speed</th><td>5.15 units/s</td><td>Every playing tick</td><td>Moves the level past a fixed player X</td></tr>
+          <tr><th scope="row">Gravity</th><td>36 units/s&sup2;</td><td>Airborne velocity</td><td>Creates the jump arc</td></tr>
+          <tr><th scope="row">Jump velocity</th><td>11.5 units/s</td><td>Ground or block top</td><td>Manual jump</td></tr>
+          <tr><th scope="row">Pad velocity</th><td>14 units/s</td><td>Ground-level pad overlap</td><td>Automatic higher jump</td></tr>
+          <tr><th scope="row">Level end</th><td>120 units</td><td>Scroll progress</td><td>Completes in about 23.3 s without a crash</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="build-level" tabindex="-1">Build one sorted level from spikes, blocks, and jump pads</h2>
+    <p>The <code>level()</code> function creates 18 spikes, eight blocks, and four pads from authored X arrays. Every spike is 0.78 units wide and 0.92 high; blocks are 1.4 by 1.15; pads are 1.0 wide and render as a 0.14-high strip. Rust sorts all 30 records, then inserts 0.35 units before each new object except spikes that form a close double-spike group.</p>
+    <p>That spacing pass shifts the last spike from its authored X of 105 to 113.75 while preserving the paired spike gaps. Completion remains at scroll 120, leaving room after the final obstacle. The level is deterministic, stored on the CPU, and small enough for a direct scan on every physics tick.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="dash-objects-caption" tabindex="0">
+      <table>
+        <caption id="dash-objects-caption">Level object rules and procedural geometry</caption>
+        <thead>
+          <tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Collision rule</th><th scope="col">Visible geometry</th><th scope="col">Color</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Spike</th><td>18</td><td>Crash below 72% of spike height</td><td>One triangle</td><td>Pink</td></tr>
+          <tr><th scope="row">Block</th><td>8</td><td>Land from above; crash into the side or underside</td><td>Filled quad + four-piece frame</td><td>Blue with cyan edge</td></tr>
+          <tr><th scope="row">Jump pad</th><td>4</td><td>Launch when the player is within 0.12 of ground</td><td>One thin quad</td><td>Yellow</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="resolve-collisions" tabindex="-1">Resolve a compact set of platform collision rules</h2>
+    <p>The player remains at screen X 3.1 while <code>scroll</code> advances through level space. Collision uses a narrower horizontal interval than the 0.72-unit visible square: half-width is <code>SIZE * 0.34</code>, about 0.245 units. The forgiving hitbox lets a close visual edge pass without immediately feeling unfair.</p>
+    <p>Only overlapping obstacles enter the kind-specific branch. A descending player whose previous Y was at the block top lands and resets vertical velocity and rotation. Entering a block from the side or below crashes. The player may jump again from ground or from a block whose top lies within 0.04 units of the current Y. A spike crashes below 72% of its height, while a ground-level pad replaces vertical velocity with the stronger launch value.</p>
+    <p>The square rotates clockwise at 3.9 radians per second while airborne and snaps upright on a landing. There is no continuous swept collision, so fixed 120 Hz sampling and the capped catch-up interval are part of the gameplay behavior, not just timing details.</p>
+
+    <h2 id="generate-scene" tabindex="-1">Generate every visible shape as colored triangles in Rust</h2>
+    <p>Each rendered frame rebuilds a CPU <code>Vec&lt;Vertex&gt;</code>. Helper functions expand triangles, quads, rectangles, and frames into a triangle list. The scene starts with a dark background, 30 deterministic star points, a gridded ground strip, and a sine-pulsed horizon. It adds only obstacles inside the current horizontal view, the rotated player quad, and two rectangles for the progress bar.</p>
+    <p>The virtual scene stays 10 units high. Its width follows the physical surface aspect ratio as <code>max(10 * width / height, 7)</code>, then positions convert directly to normalized device coordinates. Wider canvases reveal more level to the right instead of stretching the geometry. There is no camera matrix, depth attachment, texture, sampler, bind group, or index buffer.</p>
+
+    <h2 id="stream-webgpu-vertices" tabindex="-1">Stream one dynamic vertex buffer and issue one scene draw</h2>
+    <p>A vertex stores a two-component <code>f32</code> position and RGBA color for a 24-byte stride. Initialization allocates capacity for 16,384 vertices, or 393,216 bytes. After scene generation, Rust clamps the submitted count to that capacity and writes the active prefix with <code>queue.write_buffer</code>. One non-indexed triangle-list draw renders the complete game scene.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/geometrydash.wgsl">WGSL shader</a> only forwards position and color. Standard alpha blending is enabled, which preserves the translucent stars and ground grid. A second color-load pass renders the shared Vazirmatn text overlay, so the HUD is separate from the one scene draw.</p>
+    <pre tabindex="0" aria-label="Geometry Dash-style WGSL shader"><code>@vertex
+<span class="code-keyword">fn</span> vs_main(@location(0) pos: vec2&lt;f32&gt;,
+           @location(1) color: vec4&lt;f32&gt;) -&gt; Out {
+    <span class="code-keyword">var</span> out: Out;
+    out.pos = vec4&lt;f32&gt;(pos, 0.0, 1.0);
+    out.color = color;
+    <span class="code-keyword">return</span> out;
+}</code></pre>
+
+    <h2 id="handle-input-and-state" tabindex="-1">Handle one action across four game states</h2>
+    <p><code>Ready</code>, <code>Playing</code>, <code>Dead</code>, and <code>Complete</code> define the state machine. An action in Ready starts the level with a jump. During Playing it jumps only when grounded. In Dead or Complete it resets scroll, Y, velocity, angle, and state, then increments the attempt counter; the next action begins the new attempt. The R key resets from any state and also increments attempts.</p>
+    <p>The HUD displays “Designed by Ryan Eimandar,” the attempt count, integer progress from 000% to 100%, and a state-specific prompt. Its text updates when sampled frame statistics change and on every non-playing frame. The progress bar itself is scene geometry and therefore updates every rendered frame.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the game</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native Geometry Dash-style WebGPU example"><code>cargo run --example geometrydash</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the Geometry Dash-style WebGPU example"><code>scripts/build-wasm.sh --release geometrydash
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/geometrydash/</code> in a browser with WebGPU support. Press Space or Arrow Up, click, or touch to act; press R to reset. Because the canvas consumes gameplay input, this article intentionally does not use the static-demo scrolling flag.</p>
+    <p>The game has no audio, beat map, interpolation between physics states, saved progress, level editor, variable game modes, camera effects, particles, textures, or GPU-side simulation. Fixed-step state is drawn at the last completed tick, so very low or uneven frame rates can show temporal stepping. Input uses a boolean action flag: multiple presses between updates collapse into one action.</p>
+    <p>Collision scans all 30 objects and uses discrete overlap tests. That is ample for this level but would need spatial partitioning or a moving index for thousands of obstacles. The dynamic scene is regenerated and uploaded every frame even when Ready, Dead, or Complete; static background and level geometry could be cached or instanced.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Add audio-driven beat markers and keep the fixed-step simulation synchronized with a monotonic song clock.</li>
+      <li>Interpolate visual position and rotation between fixed physics states for smoother high-refresh rendering.</li>
+      <li>Move repeated blocks, spikes, and stars into instance buffers while keeping collision data on the CPU.</li>
+      <li>Create a small level format and editor, then validate that authored jumps are possible at the current physics constants.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/geometrydash.rs">Read the Geometry Dash source &nearr;</a>
+      <a href="../residentevil2/">&larr; Previous: WebGPU Resident Evil fixed-camera scene</a>
+      <a href="../">Next: Browse all WebGPU examples &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

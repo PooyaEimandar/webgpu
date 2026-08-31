@@ -1,0 +1,206 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 23</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Render a moving point light through six 90&deg; views, store normalized radial distance in a 1024&times;1024 floating-point cube map, and sample that cube from every visible surface in a small room.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Omnidirectional shadow mapping demo at a glance">
+      <div><dt>Cube faces</dt><dd>6</dd></div>
+      <div><dt>Face size</dt><dd>1024&times;1024</dd></div>
+      <div><dt>Distance format</dt><dd>RGBA16Float</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#shadow-a-point-light">Shadow a point light in every direction</a></li>
+        <li><a href="#build-room-and-casters">Build the room and four casters</a></li>
+        <li><a href="#allocate-shadow-cube">Allocate a floating-point shadow cube</a></li>
+        <li><a href="#orient-six-face-cameras">Orient six light cameras</a></li>
+        <li><a href="#store-radial-distance">Store radial distance while depth testing</a></li>
+        <li><a href="#sample-distance-and-shade">Sample distance and shade the room</a></li>
+        <li><a href="#animate-and-count-work">Animate the light and count frame work</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="shadow-a-point-light" tabindex="-1">Shadow a point light in every direction</h2>
+    <p>The <a href="../shadowmappingcascade/#about">previous cascaded shadow mapping example</a> uses four orthographic layers for one directional light. A point light needs visibility over a sphere. A cube map approximates that sphere with six square perspective projections and provides direction-based sampling in the final shader.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/e0b116b9da0d68aaba6681b57b083863563dd1a4">cascade and omni shadow mapping commit</a> introduced this example with its companion CSM demo. A later <a href="https://github.com/PooyaEimandar/webgpu/commit/7878b79b3272e38cc2cf469031bea7e307cc6f80">projection-matrix fix</a> adjusted the omnidirectional path. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmappingomni.rs">Rust source</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmappingomni_offscreen.wgsl">offscreen WGSL</a>, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmappingomni.wgsl">scene WGSL</a> run through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/shadowmappingomni.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A small gold cube marks the point light. Four teapots and the floor and walls cast into the six-face distance map, allowing shadows to extend in several directions at once.</figcaption>
+    </figure>
+
+    <h2 id="build-room-and-casters" tabindex="-1">Build the room and four casters</h2>
+    <p>The example loads the same <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf">225,816-byte teapot glTF</a> used by the other shadow demos. Its single primitive contributes 4,690 vertices and 27,384 source indices. Rust transforms four copies to different X/Z positions and Y rotations, and assigns pale blue, salmon, green, and gold colors.</p>
+    <p>Four procedural quads make a floor, back wall, left wall, and right wall. The front and ceiling stay open for the fixed camera. The room spans X&nbsp;=&nbsp;&minus;8 to 8, Z&nbsp;=&nbsp;&minus;7 to 8, and Y&nbsp;=&nbsp;&minus;1.70 to 5.</p>
+    <p>All eight meshes enter both <code>scene_meshes</code> and <code>caster_meshes</code>. Every room surface and teapot therefore casts and receives shadows. A separate 0.32-unit-wide cube marks the light in the visible pass, but that marker is not rendered into the shadow cube.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="omni-scene-data-caption" tabindex="0">
+      <table>
+        <caption id="omni-scene-data-caption">Omnidirectional shadow scene and duplicated mesh storage</caption>
+        <thead>
+          <tr><th scope="col">Mesh set</th><th scope="col">Meshes</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Logical bytes</th><th scope="col">Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Visible scene</th><td>4 teapots + 4 room quads</td><td>18,776</td><td>109,560</td><td>1,189,280</td><td>Camera color and depth pass</td></tr>
+          <tr><th scope="row">Cube casters</th><td>Same 8 meshes</td><td>18,776</td><td>109,560</td><td>1,189,280</td><td>Repeated for each of six light faces</td></tr>
+          <tr><th scope="row">Light marker</th><td>1 box</td><td>24</td><td>36</td><td>1,104</td><td>Visible scene only</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The scene and caster vectors are cloned on the CPU and then uploaded as separate vertex and index buffers. Fixed mesh payload is 2,379,664 logical bytes. The shared 40-byte vertex includes position, normal, and color in both pipelines, even though the offscreen vertex shader needs only position.</p>
+
+    <h2 id="allocate-shadow-cube" tabindex="-1">Allocate a floating-point shadow cube</h2>
+    <p>The shadow resource is a six-layer 2D texture with a cube view for sampling and one 2D view per render face. Each layer is 1024&times;1024 <code>Rgba16Float</code>, one mip, and one sample. At eight bytes per texel, the six layers occupy <strong>50,331,648 logical bytes</strong>.</p>
+    <p>Only the red channel stores shadow distance. Green and blue are written as zero and alpha as one, so three quarters of the 64-bit texel is not needed by the comparison. The format is convenient as a filterable render target, but a production implementation can evaluate a narrower supported format or a depth-cube approach.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="omni-resources-caption" tabindex="0">
+      <table>
+        <caption id="omni-resources-caption">Omnidirectional shadow mapping uniforms, textures, and bindings</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Format or size</th><th scope="col">Purpose</th><th scope="col">Update cadence</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scene uniform</th><td>224 bytes</td><td>Camera matrices, identity model, light position/far range, and camera position</td><td>Fully rewritten every update and resize</td></tr>
+          <tr><th scope="row">Marker uniform</th><td>224 bytes</td><td>Same scene data with a translation model at the light</td><td>Fully rewritten every update and resize</td></tr>
+          <tr><th scope="row">Six face uniforms</th><td>6 &times; 80 bytes</td><td>One light-space matrix and point-light vector per cube face</td><td>All six rewritten every update and resize</td></tr>
+          <tr><th scope="row">Distance cube</th><td>1024&times;1024&times;6 <code>Rgba16Float</code></td><td>Render target and filterable cube texture</td><td>Every face cleared and rendered each frame</td></tr>
+          <tr><th scope="row">Offscreen depth</th><td>1024&times;1024 <code>Depth32Float</code>; 4,194,304 logical bytes</td><td>Selects the nearest rasterized surface for one face</td><td>Shared sequentially; cleared for every face and discarded after each pass</td></tr>
+          <tr><th scope="row">Scene depth</th><td>Surface-size <code>Depth32Float</code></td><td>Camera depth testing</td><td>Recreated on resize</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The scene bind group exposes its uniform, the cube view, and a linear clamp-to-edge filtering sampler. The light marker receives a second bind group with its own model uniform but the same cube and sampler. Six small face bind groups each expose one offscreen uniform.</p>
+
+    <h2 id="orient-six-face-cameras" tabindex="-1">Orient six light cameras</h2>
+    <p>Each face uses a 90&deg; right-handed perspective with aspect 1, near 0.1, and far 32. Rust prepends a Y-axis flip to the projection for rendering into the cube texture. The light view targets one cardinal direction with an up vector chosen to keep cube orientation consistent:</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="omni-face-cameras-caption" tabindex="0">
+      <table>
+        <caption id="omni-face-cameras-caption">The six cube-face view directions and up vectors</caption>
+        <thead>
+          <tr><th scope="col">Array layer</th><th scope="col">View direction</th><th scope="col">Up vector</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>+X</td><td>&minus;Y</td></tr>
+          <tr><th scope="row">1</th><td>&minus;X</td><td>&minus;Y</td></tr>
+          <tr><th scope="row">2</th><td>+Y</td><td>+Z</td></tr>
+          <tr><th scope="row">3</th><td>&minus;Y</td><td>&minus;Z</td></tr>
+          <tr><th scope="row">4</th><td>+Z</td><td>&minus;Y</td></tr>
+          <tr><th scope="row">5</th><td>&minus;Z</td><td>&minus;Y</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <pre tabindex="0" aria-label="Build one light-space matrix for each shadow cube face"><code><span class="code-keyword">let</span> projection = glam::Mat4::from_scale(
+    glam::Vec3::new(1.0, -1.0, 1.0),
+) * glam::Mat4::perspective_rh(
+    90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR,
+);
+
+<span class="code-keyword">for</span> (index, (direction, up)) <span class="code-keyword">in</span> faces.into_iter().enumerate() {
+    <span class="code-keyword">let</span> view = glam::Mat4::look_at_rh(
+        light_position, light_position + direction, up,
+    );
+    matrices[index] = projection * view;
+}</code></pre>
+    <p>The complete set of face matrices is recalculated as the point light moves. Six separate passes and bind groups are used instead of multiview, a geometry stage, or a layered draw.</p>
+
+    <h2 id="store-radial-distance" tabindex="-1">Store radial distance while depth testing</h2>
+    <p>Scene meshes are already transformed into world coordinates on the CPU, so the offscreen vertex shader directly applies the face matrix to <code>input.position</code> and also passes that position to the fragment stage. The fragment shader stores Euclidean distance from light to fragment, normalized by the 32-unit far range:</p>
+    <pre tabindex="0" aria-label="Write normalized point-light distance into the shadow cube"><code><span class="code-keyword">let</span> light_to_fragment =
+    input.world_position - uniforms.light_position.xyz;
+<span class="code-keyword">let</span> normalized_distance = clamp(
+    length(light_to_fragment) / uniforms.light_position.w,
+    0.0,
+    1.0,
+);
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(normalized_distance, 0.0, 0.0, 1.0);</code></pre>
+    <p>A conventional perspective depth attachment still decides which surface is nearest for each rasterized face pixel. Its value is not sampled later. The same 1024² depth image is cleared before each face and stored with <code>Discard</code>, allowing sequential reuse instead of allocating six depth layers.</p>
+    <p>The offscreen pipeline uses triangle lists, no face culling, <code>LessEqual</code> depth writes, no pipeline depth bias, and one sample. Disabling culling helps render the inward-facing room alongside the teapots, but it also submits both sides of all triangles.</p>
+
+    <h2 id="sample-distance-and-shade" tabindex="-1">Sample distance and shade the room</h2>
+    <p>The visible fragment shader forms <code>world_position - light_position</code> and uses that 3D vector directly as the cube lookup direction. It explicitly samples mip level 0 with a linear sampler. Current fragment distance is normalized by the same 32-unit range and compared with the sampled red channel.</p>
+    <pre tabindex="0" aria-label="Compare current radial distance with the sampled shadow cube"><code><span class="code-keyword">let</span> sampled_distance = textureSampleLevel(
+    shadow_cube_map, shadow_sampler, light_to_fragment, 0.0,
+).r;
+<span class="code-keyword">let</span> normalized_distance = distance / uniforms.light_position.w;
+<span class="code-keyword">let</span> normal_light = max(dot(normal, light_direction), 0.0);
+<span class="code-keyword">let</span> world_bias = max(0.08 * (1.0 - normal_light), 0.035);
+<span class="code-keyword">let</span> lit = normalized_distance &lt;= sampled_distance
+    + world_bias / uniforms.light_position.w;
+<span class="code-keyword">return</span> select(0.38, 1.0, lit);</code></pre>
+    <p>Fragments within 0.0001 units of the light or at least 32 units away are treated as lit. Full shadow retains 38% visibility. There is one filtered lookup, not a multi-direction PCF kernel or a hardware depth comparison. Linear distance filtering softens texel transitions slightly but can blend unrelated depths, especially across cube-face seams.</p>
+    <p>Visible lighting combines 7% ambient with Lambert diffuse scaled by 3.1 and a small power-24 specular highlight. Diffuse and specular share quadratic attenuation <code>1 / (1 + 0.035 * distance²)</code>; ambient is not attenuated or shadowed. The scene pipeline also has no culling, writes depth with <code>LessEqual</code>, and renders directly to the surface without HDR or post-processing.</p>
+
+    <h2 id="animate-and-count-work" tabindex="-1">Animate the light and count frame work</h2>
+    <p>The camera remains at <code>(0, 4.6, -10.8)</code>, looks toward <code>(0, -0.55, 0.75)</code>, and uses a 45&deg; perspective with 0.1-to-64 clipping. The light moves around center <code>(0, 4.05, 0.35)</code>:</p>
+    <pre tabindex="0" aria-label="Animate the omnidirectional point light"><code>LIGHT_CENTER + glam::Vec3::new(
+    phase.cos() * 3.6,
+    phase.sin() * 0.28,
+    phase.sin() * 2.8,
+)</code></pre>
+    <p>Animation time advances by <code>delta_seconds * 0.08</code> and wraps at one, producing a 12.5-second loop. Y and Z use the same sine phase, while X uses cosine, so the light follows a slightly tilted ellipse.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="omni-passes-caption" tabindex="0">
+      <table>
+        <caption id="omni-passes-caption">Omnidirectional shadow mapping passes and indexed work per frame</caption>
+        <thead>
+          <tr><th scope="col">Passes</th><th scope="col">Draws</th><th scope="col">Index invocations</th><th scope="col">Submitted triangles</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">6 cube-face passes</th><td>48 indexed draws</td><td>657,360</td><td>219,120</td><td>Radial distance for all eight casters in every direction</td></tr>
+          <tr><th scope="row">1 scene pass</th><td>9 indexed draws</td><td>109,596</td><td>36,532</td><td>Eight scene meshes plus light marker</td></tr>
+          <tr><th scope="row">1 overlay pass</th><td>1 framework glyph draw when text is visible</td><td>Varies with shaped glyphs</td><td>Instanced glyph quads</td><td>Title, device, FPS, and face count</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>A frame records eight render passes, 57 example-owned mesh draws, and 766,956 mesh index invocations, submitting 255,652 triangles before the overlay. There is no visibility culling per cube face; every one of the eight caster meshes is drawn six times.</p>
+    <p>Each normal update rewrites the 224-byte scene uniform, 224-byte marker uniform, and six 80-byte face uniforms: eight queue writes and 928 bytes. Resizing recreates the surface-size depth image, recalculates the aspect-dependent camera data, rewrites all eight buffers, and rebuilds overlay placement. The cube and its shared offscreen depth image remain fixed at 1024².</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native example from the repository root:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU omnidirectional shadow mapping example"><code>cargo run --example shadowmappingomni</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU omnidirectional shadow mapping example"><code>scripts/build-wasm.sh --release shadowmappingomni
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/shadowmappingomni/</code>. Native loading reads the teapot glTF synchronously; WebAssembly fetches it asynchronously from <code>../assets/models/teapot.gltf</code>. Rendering, geometry construction, cube faces, shaders, and animation are otherwise shared. The Vazirmatn font and both WGSL files are compiled in. There are no pointer, keyboard, touch, camera, light, bias, or quality controls.</p>
+    <p>Useful extensions include:</p>
+    <ul>
+      <li>Replace the single filtered distance sample with a small 3D PCF kernel and compare seam behavior and cost.</li>
+      <li>Test a narrower renderable and filterable distance format, or a depth cube, to reduce the current 48 MiB color payload.</li>
+      <li>Share visible and caster buffers, use a position-only offscreen layout, and cull meshes against each cube-face frustum.</li>
+      <li>Add per-face culling and suitable bias controls, then inspect acne, detached shadows, and inward-facing room geometry.</li>
+      <li>Skip or cache cube faces when the light and casters are static, and compare six-pass rendering with a supported multiview design.</li>
+    </ul>
+    <p>The example makes radial cube-map shadows easy to trace, but its six complete caster passes, duplicated meshes, four-channel distance texture, single filtered lookup, fixed bias/range, lack of culling, and absent runtime controls leave clear room for a production renderer.</p>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmappingomni.rs">Read the omnidirectional shadow mapping source &nearr;</a>
+      <a href="../shadowmappingcascade/">&larr; Previous: WebGPU cascaded shadow mapping</a>
+      <a href="../pbr/">Next: WebGPU PBR Basic &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

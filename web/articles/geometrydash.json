@@ -1,0 +1,9 @@
+{
+  "title": "Build a Geometry Dash-Style WebGPU Game in Rust",
+  "description": "Build a one-button WebGPU platform game in Rust with 120 Hz physics, CPU-generated procedural geometry streamed to WebGPU, collisions, and touch input.",
+  "breadcrumbName": "WebGPU Geometry Dash-style game",
+  "image": "geometrydash.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A neon WebGPU rhythm platform game with a green square jumping over pink spikes, cyan blocks, and a progress bar."
+}

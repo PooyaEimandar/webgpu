@@ -1,0 +1,167 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 18</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Count the samples that survive a depth test, resolve two 64-bit WebGPU query results, and use asynchronous CPU readback to visualize whether a teapot and sphere remain visible.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Occlusion query demo at a glance">
+      <div><dt>Native query slots</dt><dd>2</dd></div>
+      <div><dt>Readback payload</dt><dd>16 B</dd></div>
+      <div><dt>Scene triangles</dt><dd>13,642</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#test-visibility-with-queries">Test visibility with sample counts</a></li>
+        <li><a href="#load-occlusion-meshes">Load the occluder and test meshes</a></li>
+        <li><a href="#create-query-resources">Create the query and readback resources</a></li>
+        <li><a href="#record-query-pass">Record the native query pass</a></li>
+        <li><a href="#resolve-and-map-results">Resolve and map results asynchronously</a></li>
+        <li><a href="#render-visible-scene">Visualize visibility in the main pass</a></li>
+        <li><a href="#browser-fallback">Understand the browser fallback</a></li>
+        <li><a href="#move-the-camera">Move the FPS camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="test-visibility-with-queries" tabindex="-1">Test visibility with sample counts</h2>
+    <p>The <a href="../particlesystem/#about">previous CPU particle system example</a> sends updated simulation data from Rust to WebGPU. Occlusion queries move a small result in the opposite direction. The GPU counts samples that pass depth and stencil tests while a query is active; Rust resolves those counts into buffers and later reads them on the CPU. A zero count means the tested draw was fully hidden for that view. Any nonzero value means at least part of it survived.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/982afb7012500ff4cb26ae6cb6307e96e59dadbd">original occlusion query commit</a> introduced the two-query scene, model assets, camera controls, asynchronous readback, and browser fallback. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/occlusionquery.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/occlusionquery.wgsl">WGSL shader</a> preserve that query lifecycle. Later changes corrected projection setup and specular view direction, improved the shared mobile joystick, and moved overlay refreshes to the regular statistics cadence. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/occlusionquery.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The browser screenshot shows the deterministic WebAssembly fallback: zero samples for the dark teapot and 18,432 samples for the partly visible green sphere.</figcaption>
+    </figure>
+
+    <h2 id="load-occlusion-meshes" tabindex="-1">Load the occluder and test meshes</h2>
+    <p>The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs">colored glTF loader</a> reads three top-level files in sequence. Each file embeds its binary buffer as a Base64 data URI, so there are no secondary buffer, image, material-texture, or texture requests.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="occlusion-assets-caption" tabindex="0">
+      <table>
+        <caption id="occlusion-assets-caption">Occlusion query runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">File size</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Triangles</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plane_z.gltf"><code>plane_z.gltf</code></a></th><td>4,072 bytes</td><td>4</td><td>6</td><td>2</td><td>Blue translucent occluder</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf"><code>teapot.gltf</code></a></th><td>225,816 bytes</td><td>4,690</td><td>27,384</td><td>9,128</td><td>Query slot 0</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sphere.gltf"><code>sphere.gltf</code></a></th><td>141,450 bytes</td><td>2,399</td><td>13,536</td><td>4,512</td><td>Query slot 1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three files total 371,338 bytes and contain 7,093 vertices, 40,926 indices, and 13,642 triangles. The loader applies each glTF node transform, supplies white when vertex colors are absent, combines the material base-color factor, and converts every index stream to <code>u32</code>. A 40-byte GPU vertex stores position, normal, and RGBA color. The resulting vertex and index buffers occupy 447,424 bytes.</p>
+    <p>The plane's glTF transform rotates it into the XY plane at Z&nbsp;=&nbsp;0, and its object transform scales it by 6. The teapot is translated to <code>(0, 0, -3)</code>; the sphere moves to <code>(0, 0, 3)</code>. Their red, green, and blue tints come from per-object uniforms rather than textures.</p>
+
+    <h2 id="create-query-resources" tabindex="-1">Create the query and readback resources</h2>
+    <p>Initialization creates one <code>QuerySet</code> with <code>QueryType::Occlusion</code> and two slots. WebGPU stores each result as an eight-byte unsigned count, but a query resolve destination must obey a larger alignment requirement. The example therefore separates the aligned GPU resolve allocation from the compact CPU-readable payload.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="occlusion-resources-caption" tabindex="0">
+      <table>
+        <caption id="occlusion-resources-caption">Occlusion query resources</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Size or count</th><th scope="col">Usage</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Occlusion query set</th><td>2 slots</td><td><code>QueryType::Occlusion</code></td><td>Counts passing teapot and sphere samples</td></tr>
+          <tr><th scope="row">Resolve buffer</th><td>256 bytes</td><td><code>QUERY_RESOLVE | COPY_SRC</code></td><td>Meets the query-resolve alignment</td></tr>
+          <tr><th scope="row">Readback buffer</th><td>16 bytes</td><td><code>MAP_READ | COPY_DST</code></td><td>Exposes two little-endian <code>u64</code> values to Rust</td></tr>
+          <tr><th scope="row">Object uniforms</th><td>3 &times; 256 bytes</td><td><code>UNIFORM | COPY_DST</code></td><td>Projection, view, model, lighting, color, and visibility</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>All three object uniforms are rewritten after the camera and visibility state update, for 768 bytes of uniform traffic per frame. The query buffers are created on every target, although the current WebAssembly path does not execute or map them.</p>
+
+    <h2 id="record-query-pass" tabindex="-1">Record the native query pass</h2>
+    <p>Native rendering begins with a depth-writing query pass. It draws the scaled plane first, outside either query, so the plane establishes the occluder's depth. Query slot 0 then wraps the complete teapot draw, and slot 1 wraps the complete sphere draw:</p>
+    <pre tabindex="0" aria-label="Record two WebGPU occlusion queries"><code>pass.set_pipeline(&amp;pipelines.query);
+draw_object(&amp;<span class="code-keyword">mut</span> pass, plane);
+
+pass.begin_occlusion_query(0);
+draw_object(&amp;<span class="code-keyword">mut</span> pass, teapot);
+pass.end_occlusion_query();
+
+pass.begin_occlusion_query(1);
+draw_object(&amp;<span class="code-keyword">mut</span> pass, sphere);
+pass.end_occlusion_query();</code></pre>
+    <p>The query pipeline uses triangle lists, one sample, no face culling, and a <code>Depth32Float</code> attachment with <code>LessEqual</code>. Depth writes remain enabled, while the color write mask is empty. The pass therefore performs the rasterization and depth work needed for sample counting without preserving shaded color. It tests the full 9,128-triangle teapot and 4,512-triangle sphere rather than cheaper bounds or proxy meshes.</p>
+
+    <h2 id="resolve-and-map-results" tabindex="-1">Resolve and map results asynchronously</h2>
+    <p>After the query pass, Rust resolves both slots at offset zero, then copies only the first 16 bytes into the readback buffer:</p>
+    <pre tabindex="0" aria-label="Resolve and copy WebGPU occlusion query results"><code>encoder.resolve_query_set(query_set, 0..2, resolve_buffer, 0);
+encoder.copy_buffer_to_buffer(
+    resolve_buffer,
+    0,
+    readback_buffer,
+    0,
+    16,
+);</code></pre>
+    <p>The update loop polls without blocking and starts <code>map_async</code> only when the readback buffer is idle. An atomic status moves through idle, pending, ready, or failed. Once mapping completes, Rust reads two little-endian <code>u64</code> values, releases the mapped view, unmaps the buffer, and converts each count into a boolean with <code>count &gt; 0</code>.</p>
+    <p>Only one readback can be in flight. Query passes continue while a mapping request is pending, but resolve and copy wait until the same readback buffer becomes available again. The visibility flag therefore describes an earlier frame and can lag behind camera movement by multiple frames. The raw count also changes with resolution, viewpoint, rasterization, and sample count; this example needs only its zero-versus-nonzero meaning.</p>
+
+    <h2 id="render-visible-scene" tabindex="-1">Visualize visibility in the main pass</h2>
+    <p>A separate visible pass clears the query pass's color and depth, draws the teapot and sphere with the solid pipeline, then blends the blue plane over them. The solid WGSL shader does not discard a hidden object or skip its draw. It returns opaque dark gray when the uploaded visibility flag is zero; visible objects receive simple diffuse and specular lighting from a fixed point at <code>(10, -10, 10)</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="occlusion-passes-caption" tabindex="0">
+      <table>
+        <caption id="occlusion-passes-caption">Occlusion query render passes</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Target</th><th scope="col">Scene draws</th><th scope="col">Triangles</th><th scope="col">Depth writes</th><th scope="col">Color</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Query test</th><td>Native only</td><td>3 indexed</td><td>13,642</td><td>Yes</td><td>Writes disabled</td></tr>
+          <tr><th scope="row">Visible scene</th><td>Native and WASM</td><td>3 indexed</td><td>13,642</td><td>Objects yes; plane no</td><td>Opaque objects + alpha plane</td></tr>
+          <tr><th scope="row">Overlay</th><td>Native and WASM</td><td>Text and active sticks</td><td>UI-generated</td><td>No attachment</td><td>Loads existing scene color</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Excluding the overlay, a native frame submits six draws and 27,284 submitted triangles because it renders all three meshes twice. The WASM fallback submits three scene draws and 13,642 triangles. Every object still enters the visible pass, so this is a visibility-result visualization rather than an occlusion-culling optimization.</p>
+
+    <h2 id="browser-fallback" tabindex="-1">Understand the browser fallback</h2>
+    <p>The current source sets <code>USE_GPU_OCCLUSION_QUERY</code> to false for <code>wasm32</code>. wgpu 29 does not yet forward <code>RenderPassDescriptor::occlusion_query_set</code> to the browser render-pass descriptor, so the WebAssembly build skips the query pass, resolve, copy, mapping, and polling paths.</p>
+    <p>Instead, every browser update assigns <code>[0, 18_432]</code>: the teapot is always marked hidden and the sphere always marked visible. That keeps the same visual explanation and overlay layout without claiming unsupported readback. Moving the browser camera changes the view but cannot change those two sample counts. Run the native example to exercise the real query lifecycle described above.</p>
+
+    <h2 id="move-the-camera" tabindex="-1">Move the FPS camera</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">FPS camera and virtual joystick</a> make this an interactive demo. Use <kbd>W</kbd>/<kbd>S</kbd> to move forward and backward, <kbd>A</kbd>/<kbd>D</kbd> to strafe, and the arrow keys to look. With a pointer or touch screen, drag on the left half of the canvas to move and the right half to look; active sticks receive a GPU-drawn overlay.</p>
+    <p>The initial camera sits about 7.5 units from the origin at a yaw of &minus;123.75&deg;. Movement speed is 4 units per second, look speed is 1.6 radians per second, and the update delta is capped at 1/15 second. The right-handed projection uses a 60&deg; field of view with near and far planes of 1 and 256. The text overlay reports CPU frame cadence, the adapter name, and both sample counts; it refreshes on the 500 ms statistics interval rather than through GPU timestamp queries.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>Run the native build to execute the real WebGPU occlusion queries and asynchronous readback:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU occlusion query example"><code>cargo run --example occlusionquery</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve the illustrative fallback:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU occlusion query example"><code>scripts/build-wasm.sh --release occlusionquery
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/occlusionquery/</code> in a browser with WebGPU support. The page requests the three glTF files listed above. WGSL, the joystick shader, and the Vazirmatn overlay font are compiled into the WebAssembly binary, while this article and screenshot remain readable without WebGPU.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Query simple bounding boxes instead of the full meshes, then skip an object's visible-pass draw when a later result reports zero samples.</li>
+      <li>Double-buffer the readback path so mapping one result does not delay resolving a newer query set.</li>
+      <li>Add hysteresis or require repeated zero results before hiding an object to reduce flicker near visibility boundaries.</li>
+      <li>Compare per-object queries with a depth-pyramid approach as the number of test objects grows.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/occlusionquery.rs">Read the occlusion query source &nearr;</a>
+      <a href="../particlesystem/">&larr; Previous: WebGPU CPU particle system</a>
+      <a href="../radialblur/">Next: WebGPU radial blur &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

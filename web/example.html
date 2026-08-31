@@ -490,6 +490,13 @@
         }
       }
 
+      @media (max-width: 720px) {
+        /* Keep the Persian label clear of the reading link on narrow screens. */
+        #demo[data-example="textoverlay"] .more-info {
+          bottom: max(136px, env(safe-area-inset-bottom));
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         html.has-article {
           scroll-behavior: auto;
@@ -579,7 +586,7 @@
   </head>
   <body>
     <main>
-      <section id="demo" data-example="__EXAMPLE__" aria-label="Live __EXAMPLE__ WebGPU demo" tabindex="-1">
+      <section id="demo" data-example="__EXAMPLE__" aria-label="Live WebGPU demo: __EXAMPLE_LABEL__" tabindex="-1">
         <div id="loading-screen" role="status" aria-live="polite" data-nosnippet>
           <div class="loading-content">
             <div class="loading-spinner" aria-hidden="true"></div>
@@ -644,7 +651,7 @@
           // inside their viewport-sized demo, above the reading section.
           if (article && canvas.parentElement !== demo) {
             demo.prepend(canvas);
-            canvas.setAttribute("aria-label", "Live __EXAMPLE__ WebGPU rendering");
+            canvas.setAttribute("aria-label", "Live WebGPU rendering: __EXAMPLE_LABEL__");
             if (demo.classList.contains("is-static")) {
               canvas.setAttribute("tabindex", "-1");
               canvas.setAttribute("role", "img");

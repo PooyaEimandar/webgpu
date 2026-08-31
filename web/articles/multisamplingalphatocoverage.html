@@ -1,0 +1,219 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 29</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Convert sampled leaf alpha into a four-sample coverage mask, draw 25 oak-tree instances in two indexed calls, and resolve smoother cutout foliage into the presentation surface without fragment discard or color blending.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU alpha-to-coverage demo at a glance">
+      <div><dt>Rasterization samples</dt><dd>4&times;</dd></div>
+      <div><dt>Tree instances</dt><dd>25</dd></div>
+      <div><dt>Submitted triangles</dt><dd>132,550</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#turn-alpha-into-coverage">Turn leaf alpha into sample coverage</a></li>
+        <li><a href="#load-oak-asset">Load one self-contained oak asset</a></li>
+        <li><a href="#flatten-tree-primitives">Flatten bark and leaf primitives</a></li>
+        <li><a href="#instance-oak-grove">Instance a 5 by 5 oak grove</a></li>
+        <li><a href="#upload-material-textures">Upload bark, leaf, and fallback textures</a></li>
+        <li><a href="#allocate-msaa-targets">Allocate four-sample targets</a></li>
+        <li><a href="#convert-alpha-to-samples">Convert fragment alpha to a sample mask</a></li>
+        <li><a href="#render-resolve-overlay">Render, resolve, and overlay</a></li>
+        <li><a href="#control-camera">Control the first-person camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="turn-alpha-into-coverage" tabindex="-1">Turn leaf alpha into four-sample coverage</h2>
+    <p>The <a href="../multisampling/#about">previous WebGPU multisampling example</a> uses 4x MSAA to soften the polygon edges of an opaque Voyager model. This example keeps the same four-sample color, depth, and resolve structure, then enables alpha-to-coverage so a texture can also control which samples survive inside each leaf triangle. Transparent areas of the rectangular leaf cards preserve the background and depth already stored in uncovered samples; fractional edge texels produce partial sample coverage.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/a4f0c4e5d8beb0f70420b89d1b111b52aa47fc36">introducing multisampling commit</a> added both MSAA examples, the oak model, their Rust and WGSL sources, and their original gallery registrations. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisamplingalphatocoverage.rs">Rust source</a> later received a <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry point</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">direct WebGPU projection</a>, and a <a href="https://github.com/PooyaEimandar/webgpu/commit/de16e06e35263457f2b71db9ab55b4f2376f21f8">corrected row offset and stable fallback material</a>. The <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/multisamplingalphatocoverage.wgsl">WGSL shader</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/oaktree.gltf">oak glTF</a> remain byte-identical to their introducing versions. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/multisamplingalphatocoverage.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>A dense oak grove exposes the problem alpha-to-coverage solves: every canopy contains many textured polygons whose transparent regions must not write color or depth. This 1280&times;720 capture arrived in a <a href="https://github.com/PooyaEimandar/webgpu/commit/88837b4e9f531bbe7b8b157803747708d169e88d">later screenshot update</a> and predates two subsequent source fixes, so it documents the demo rather than proving the exact pixels produced by today's startup state.</figcaption>
+    </figure>
+
+    <h2 id="load-oak-asset" tabindex="-1">Load one self-contained oak glTF asset</h2>
+    <p>The demo makes one runtime request through the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a>. Native startup reads <code>assets/models/oaktree.gltf</code> from disk. WebAssembly awaits one browser fetch for <code>../assets/models/oaktree.gltf</code> before starting the renderer. The geometry and both PNG images occupy one Base64 data-URI buffer, so neither texture causes another request.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="alpha-coverage-assets-caption" tabindex="0">
+      <table>
+        <caption id="alpha-coverage-assets-caption">Alpha-to-coverage runtime asset and compiled inputs</caption>
+        <thead>
+          <tr><th scope="col">Input</th><th scope="col">Delivery</th><th scope="col">Stored bytes</th><th scope="col">Decoded shape</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>oaktree.gltf</code></th><td>Runtime request 1</td><td>1,706,820</td><td>JSON plus a 1,275,656-byte embedded buffer</td><td>Scene, geometry, materials, and two PNG images</td></tr>
+          <tr><th scope="row">Geometry views</th><td>Inside the glTF buffer</td><td>207,780</td><td>5,499 vertices and 15,906 source indices</td><td>Two triangle primitives</td></tr>
+          <tr><th scope="row"><code>oak_bark</code></th><td>Embedded PNG</td><td>852,536</td><td>512&times;512 RGBA8; 1,048,576 texel bytes</td><td>Fully opaque bark color</td></tr>
+          <tr><th scope="row"><code>oak_leafs</code></th><td>Embedded PNG</td><td>215,340</td><td>512&times;512 RGBA8; 1,048,576 texel bytes</td><td>Leaf color and coverage alpha</td></tr>
+          <tr><th scope="row">WGSL</th><td>Compiled into the program</td><td>1,780</td><td>61 source lines</td><td>Instanced transforms and diffuse texturing</td></tr>
+          <tr><th scope="row">Vazirmatn font</th><td>Compiled into the program</td><td>122,752</td><td>TrueType font</td><td>Title, device, FPS, and sample-count overlay</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The glTF describes one default scene, two root nodes, two meshes, two triangle primitives, two materials, two images and textures, ten buffer views, and eight accessors. It declares no external buffer, image, or sampler. The loader accepts embedded Base64 buffers and images, rejects external resources and GLB binary chunks, flips texture V, and bakes node transforms into the uploaded positions and normals.</p>
+
+    <h2 id="flatten-tree-primitives" tabindex="-1">Flatten bark and leaf primitives into one mesh</h2>
+    <p>Each root node contributes one indexed primitive. Rust appends both into a shared 44-byte vertex stream and converts their indices to <code>u32</code>, while retaining a draw range and material index for each primitive. Every vertex contains position, normal, UV, and RGB color. The current asset has no vertex colors, so the loader supplies white and multiplies it by each material's white base-color factor.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="alpha-coverage-geometry-caption" tabindex="0">
+      <table>
+        <caption id="alpha-coverage-geometry-caption">Oak geometry, materials, and instanced draw work</caption>
+        <thead>
+          <tr><th scope="col">Draw</th><th scope="col">Material</th><th scope="col">Vertices</th><th scope="col">Indices</th><th scope="col">Triangles per tree</th><th scope="col">Triangles across 25 instances</th><th scope="col">Alpha behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><code>bark03</code></td><td>3,119</td><td>12,846</td><td>4,282</td><td>107,050</td><td>All 262,144 texels are opaque</td></tr>
+          <tr><th scope="row">2</th><td><code>oak leaf</code></td><td>2,380</td><td>3,060</td><td>1,020</td><td>25,500</td><td>Transparent, opaque, and fractional texels</td></tr>
+          <tr><th scope="row">Total</th><td>2 active materials</td><td><strong>5,499</strong></td><td><strong>15,906</strong></td><td><strong>5,302</strong></td><td><strong>132,550</strong></td><td>Alpha-to-coverage runs for both draws</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two indexed instanced draws submit 397,650 index references per frame: 321,150 for bark and 76,500 for leaves. That count describes submitted index work, not guaranteed vertex-shader invocations, because a GPU can reuse post-transform vertex results. The pipeline disables face culling, matching the two current double-sided materials without implementing material-specific cull state.</p>
+    <p>The leaf material declares glTF <code>alphaMode: BLEND</code>, but this focused loader does not implement glTF blending. Its only material inputs are RGB base-color factor, base-color texture, and sampler settings. The pipeline deliberately replaces conventional transparency with alpha-to-coverage, which is appropriate for cutout-like foliage but is not a general implementation of layered translucent blending.</p>
+
+    <h2 id="instance-oak-grove" tabindex="-1">Instance a 5 by 5 oak grove</h2>
+    <p>A second vertex buffer contains 25 three-component translations. Nested loops place trees at integer grid coordinates from &minus;2 through 2 in X and Z, multiply both axes by 1.25, and shift odd Z rows by +0.25 in X. The resulting grove spans X &minus;2.5 through 2.75 and Z &minus;2.5 through 2.5 before each tree's own geometry bounds are included.</p>
+    <pre tabindex="0" aria-label="Generate the alpha-to-coverage oak instance grid"><code><span class="code-keyword">for</span> x <span class="code-keyword">in</span> -2..3 {
+    <span class="code-keyword">for</span> z <span class="code-keyword">in</span> -2i32..3 {
+        instances.push(InstanceData {
+            position: [
+                x <span class="code-keyword">as</span> f32 * 1.25 + z.rem_euclid(2) <span class="code-keyword">as</span> f32 * 0.25,
+                0.0,
+                z <span class="code-keyword">as</span> f32 * 1.25,
+            ],
+        });
+    }
+}</code></pre>
+    <p>All instances share the same scale, orientation, geometry, and two material bind groups. There is no random placement, wind animation, level of detail, culling, or per-instance color. Instancing reduces CPU draw submission and duplicate geometry storage, but the GPU still rasterizes all 132,550 submitted triangles.</p>
+
+    <h2 id="upload-material-textures" tabindex="-1">Upload bark, leaf, and fallback textures</h2>
+    <p>The two embedded PNGs decode to 2,097,152 RGBA bytes. The loader also appends a generated 1&times;1 white image and fallback material, then creates a separate GPU texture, sampler, and bind group for every material. The resulting 2,097,156 logical texture bytes include an unused four-byte fallback: both current primitives already select their bark or leaf material.</p>
+    <p>All three images become single-sample, one-mip <code>Rgba8UnormSrgb</code> textures. Because the glTF has no sampler declarations, its defaults repeat U and V, clamp W, linearly magnify and minify, and select the only mip with nearest mip filtering. Automatic sRGB decoding applies to RGB; the stored alpha remains the value returned for coverage. The missing mip chain can still make distant leaf cards shimmer even when polygon and alpha edges use MSAA.</p>
+    <p>The leaf texture makes the coverage case measurable. Of its 262,144 texels, 210,634 are fully transparent, 48,915 are fully opaque, and 2,595 use one of 43 intermediate non-endpoint values. Alpha-to-coverage removes the large transparent card regions and quantizes that narrow fractional border across four raster samples.</p>
+
+    <h2 id="allocate-msaa-targets" tabindex="-1">Allocate four-sample color and depth targets</h2>
+    <p>Initialization creates a surface-sized color attachment in the current presentation format and a surface-sized <code>Depth32Float</code> attachment. Both contain one mip, one array layer, and four samples, and both are used only as render attachments. A resize recreates the pair, rebuilds the text overlay, and uploads the current 144-byte camera uniform.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="alpha-coverage-resources-caption" tabindex="0">
+      <table>
+        <caption id="alpha-coverage-resources-caption">Alpha-to-coverage explicit GPU resources</caption>
+        <thead>
+          <tr><th scope="col">Resource</th><th scope="col">Extent or elements</th><th scope="col">Format</th><th scope="col">Logical bytes</th><th scope="col">Lifetime or update</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Tree vertices</th><td>5,499 &times; 44-byte stride</td><td>Four vertex attributes</td><td>241,956</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Tree indices</th><td>15,906 <code>u32</code> values</td><td><code>Uint32</code></td><td>63,624</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Instances</th><td>25 &times; 12-byte translation</td><td>Instance vertex attribute</td><td>300</td><td>Uploaded once</td></tr>
+          <tr><th scope="row">Scene uniform</th><td>Two matrices + light vector</td><td>Vertex-visible uniform</td><td>144</td><td>Rewritten every update</td></tr>
+          <tr><th scope="row">Material texels</th><td>2 &times; 512&times;512 + 1 &times; 1&times;1</td><td><code>Rgba8UnormSrgb</code></td><td>2,097,156</td><td>Three initialization uploads</td></tr>
+          <tr><th scope="row">MSAA color at 1280&times;720</th><td>4 samples per pixel</td><td>Four-byte surface format assumed</td><td>14,745,600</td><td>Recreated on resize; resolved then discarded</td></tr>
+          <tr><th scope="row">MSAA depth at 1280&times;720</th><td>4 samples per pixel</td><td><code>Depth32Float</code></td><td>14,745,600</td><td>Recreated on resize; discarded</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The fixed mesh, index, instance, uniform, and decoded texture payloads total 2,403,180 bytes, about 2.292 MiB. At the screenshot resolution, four-sample color and depth add 29,491,200 logical bytes, or 28.125 MiB, for about 30.417 MiB of explicit core resources. These calculations omit the presentation surface, overlay atlas and buffers, descriptor objects, allocator padding, and implementation-specific storage.</p>
+
+    <h2 id="convert-alpha-to-samples" tabindex="-1">Convert fragment alpha to a four-sample mask</h2>
+    <p>The scene pipeline uses a four-sample count, full sample mask, and <code>alpha_to_coverage_enabled: true</code>. Color blending is disabled. Depth writes use <code>LessEqual</code>. The fragment shader samples the material texture, multiplies its RGB by vertex and material color, applies diffuse lighting with a 0.5 floor, and returns the sampled alpha unchanged.</p>
+    <pre tabindex="0" aria-label="Enable alpha-to-coverage in wgpu and return texture alpha from WGSL"><code>multisample: wgpu::MultisampleState {
+    count: 4,
+    mask: !0,
+    alpha_to_coverage_enabled: <span class="code-keyword">true</span>,
+},
+
+<span class="code-keyword">let</span> color = textureSample(color_map, color_sampler, input.uv)
+    * vec4&lt;f32&gt;(input.color, 1.0);
+<span class="code-keyword">return</span> vec4&lt;f32&gt;(diffuse * color.rgb, color.a);</code></pre>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="alpha-coverage-pipeline-caption" tabindex="0">
+      <table>
+        <caption id="alpha-coverage-pipeline-caption">How sampled alpha affects the four-sample pipeline</caption>
+        <thead>
+          <tr><th scope="col">Fragment alpha</th><th scope="col">Alpha-derived coverage</th><th scope="col">Color behavior</th><th scope="col">Depth behavior</th><th scope="col">Typical oak region</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>No samples survive</td><td>Existing sample colors remain</td><td>No sample depth is written</td><td>Transparent space around leaves</td></tr>
+          <tr><th scope="row">Between 0 and 1</th><td>A subset of 4 samples survives</td><td>Resolve mixes covered leaf samples with uncovered contents</td><td>Only covered sample depths update</td><td>Fractional leaf silhouette</td></tr>
+          <tr><th scope="row">1</th><td>All geometrically covered samples survive</td><td>Opaque shaded color</td><td>Covered sample depths update</td><td>Bark and solid leaf interior</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>At four samples, an alpha value can select only zero through four surviving samples before the mask intersects ordinary triangle coverage and the pipeline's full sample mask. The exact threshold and sample pattern are implementation dependent, so alpha-to-coverage approximates fractional coverage rather than storing continuous transparency. It works especially well for many small cutout edges, but it does not reproduce correct order-independent blending through several translucent layers.</p>
+    <p>There is no fragment <code>discard</code>, shader-written sample mask, <code>sample_index</code>, or sample-qualified interpolation. The shader does not request per-sample execution. Alpha-to-coverage is a fixed-function step after the fragment shader produces target-zero alpha. For this source, it is also what prevents transparent leaf-card fragments from writing the dark shaded RGB and near depth that they would write if the feature were simply disabled.</p>
+
+    <h2 id="render-resolve-overlay" tabindex="-1">Render, resolve, then draw a single-sample overlay</h2>
+    <p>The encoder records two render passes. The first clears four-sample color to <code>(0, 0, 0.2, 1)</code> and depth to 1, draws bark and leaves for all 25 instances, and resolves color into the single-sample surface. Both multisampled attachments use discard stores because no later pass reads them. The second pass loads the resolved surface and draws the text and any active joystick rings without depth or another resolve.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="alpha-coverage-passes-caption" tabindex="0">
+      <table>
+        <caption id="alpha-coverage-passes-caption">Alpha-to-coverage passes and submitted scene work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Samples</th><th scope="col">Attachments</th><th scope="col">Fixed scene work</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Oak grove</th><td>4&times;</td><td>MSAA color + <code>Depth32Float</code>; resolve to surface</td><td>2 indexed instanced draws; 397,650 index references; 132,550 triangles</td><td>Resolved geometry and alpha coverage</td></tr>
+          <tr><th scope="row">Text and joystick</th><td>1&times;</td><td>Load and store presentation surface; no depth</td><td>Framework-managed overlay draws</td><td>Title, device, CPU-side FPS, 4x label, and active sticks</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The overlay reports “Multisampling alpha to coverage,” GPU device information, an averaged FPS value, and “rasterization samples: 4x.” Its 500 ms frame statistic comes from CPU event-loop timing rather than GPU timestamp queries. The screenshot's 120.2 FPS label is therefore capture text, not a portable benchmark.</p>
+
+    <h2 id="control-camera" tabindex="-1">Control the first-person camera</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">first-person camera and virtual joystick</a> starts at <code>(0, 1, 4)</code>, looking along negative Z. A right-handed 60&deg; perspective projection uses near and far planes of 0.1 and 256. The camera moves four world units per second, looks at 1.6 radians per second, clamps pitch to &plusmn;1.45 radians, and caps a movement update at 1/15 second.</p>
+    <ul>
+      <li>Press W and S to move forward and backward, and A and D to strafe.</li>
+      <li>Use the arrow keys to look up, down, left, and right.</li>
+      <li>Press and drag on the left half of the canvas to move or the right half to look. Touch can operate both virtual sticks; mouse controls one at a time.</li>
+    </ul>
+    <p>The complete 144-byte projection, view, and light uniform is rewritten every update even while the camera is still. Losing focus clears active input. There is no vertical movement, collision, camera reset, tree animation, or sample-count control.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU alpha-to-coverage example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU alpha-to-coverage example"><code>cargo run --example multisamplingalphatocoverage</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU alpha-to-coverage example"><code>scripts/build-wasm.sh --release multisamplingalphatocoverage
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/multisamplingalphatocoverage/</code> in a browser with WebGPU support. Native and WebAssembly builds load the same self-contained glTF before calling <code>sib::render</code>, upload the same three textures, allocate the same surface-sized four-sample targets, and record the same scene and overlay passes.</p>
+    <p>The sample count is fixed at four, with no runtime capability branch, selector, 1x comparison, or lower-sample fallback. The example requires four-sample support for both the chosen surface format and <code>Depth32Float</code>. Alpha-to-coverage is enabled for bark as well as leaves, although opaque bark alpha makes its mask full. There is no conventional alpha blend, sorting, stochastic mask, temporal accumulation, foliage-specific alpha cutoff, or depth resolve.</p>
+    <p>The compact shader has no attenuation, specular term, shadows, normal mapping, physically based material response, HDR intermediate, or tone mapping. Its 3&times;3 view rotation transforms the configured light vector but drops view translation, then subtracts a translated view-space position; the effective light therefore follows camera translation instead of behaving as the configured world-space point. The interpolated view vector is unused. General nonuniform model scaling would also need an inverse-transpose normal matrix, while the current baked node scales are uniform.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Add a split-screen or hotkey comparison among opaque rendering, alpha discard, conventional blending, and alpha-to-coverage.</li>
+      <li>Query supported sample counts and rebuild the pipeline and attachments for 1x, 2x, 4x, or 8x where available.</li>
+      <li>Generate texture mipmaps and apply alpha-coverage preservation so distant foliage retains density with less shimmer.</li>
+      <li>Add wind animation, per-instance variation, frustum culling, and level of detail while retaining the two-material instanced structure.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisamplingalphatocoverage.rs">Read the Alpha-to-coverage source &nearr;</a>
+      <a href="../multisampling/">&larr; Previous: WebGPU 4x MSAA multisampling</a>
+      <a href="../deferred/">Next: WebGPU deferred shading &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

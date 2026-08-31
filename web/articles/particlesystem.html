@@ -1,0 +1,183 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 17</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Simulate 512 flame and smoke particles in Rust, stream one compact instance record per particle, and expand them into camera-facing WebGPU billboards in a single instanced draw.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Particle system demo at a glance">
+      <div><dt>Particles</dt><dd>512</dd></div>
+      <div><dt>Particle draws</dt><dd>1</dd></div>
+      <div><dt>Streamed each update</dt><dd>24 KiB</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#cpu-particles-one-draw">Separate CPU simulation from GPU rendering</a></li>
+        <li><a href="#load-fireplace-assets">Load the fireplace and sprite assets</a></li>
+        <li><a href="#initialize-emitter">Initialize a deterministic emitter</a></li>
+        <li><a href="#update-particles-on-cpu">Recycle flame and smoke on the CPU</a></li>
+        <li><a href="#stream-instance-buffer">Stream one instance buffer</a></li>
+        <li><a href="#billboard-sprites">Build camera-facing billboards in WGSL</a></li>
+        <li><a href="#blend-fire-and-smoke">Blend fire and smoke over depth</a></li>
+        <li><a href="#light-fireplace">Light and draw the fireplace</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="cpu-particles-one-draw" tabindex="-1">Separate CPU simulation from GPU rendering</h2>
+    <p>The <a href="../pipelines/#about">previous multiple render pipelines example</a> switches graphics state while drawing a scene. A particle system adds continuous state changes: update many small objects, then draw them without issuing a command for every object. This example keeps the simulation in Rust. The CPU owns a fixed pool of 512 particles, advances their lifetimes, turns some expired flames into smoke, and uploads the resulting instance records. WebGPU handles rendering with one six-vertex quad and one instanced particle draw.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/7644ad9ca461bf78c5c286ad842b6681855180df">particle system improvement commit</a> introduced the current fireplace scene, fire and smoke sprites, custom asset decoders, and revised particle shading. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/particlesystem.rs">Rust example</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/particlesystem.wgsl">WGSL shader</a> retain that design. Subsequent changes corrected projection setup and slowed the point light to one orbit every eight seconds. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a> with a fixed camera and no keyboard, pointer, touch, or scene controls.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/particlesystem.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1272" height="690" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The fireplace is an indexed mesh. Flame and smoke are textured quad instances generated from the same 512-particle CPU pool.</figcaption>
+    </figure>
+
+    <h2 id="load-fireplace-assets" tabindex="-1">Load the fireplace and sprite assets</h2>
+    <p>The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a> fetches five files before renderer initialization. Native builds load them concurrently on worker threads, while the WebAssembly path requests the same URLs together with <code>Promise.all</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="particle-assets-caption" tabindex="0">
+      <table>
+        <caption id="particle-assets-caption">Particle system runtime assets</caption>
+        <thead>
+          <tr><th scope="col">Asset</th><th scope="col">File size</th><th scope="col">Runtime role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/fireplace.obj"><code>fireplace.obj</code></a></th><td>70,361 bytes</td><td>Logs, stones, and surrounding ground geometry</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_colormap_bc3.ktx"><code>fireplace_colormap_bc3.ktx</code></a></th><td>1,398,268 bytes</td><td>1024&times;1024 color map with 11 mip levels</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_normalmap_bc3.ktx"><code>fireplace_normalmap_bc3.ktx</code></a></th><td>1,398,268 bytes</td><td>1024&times;1024 tangent-space normal map with 11 mip levels</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_fire.ktx"><code>particle_fire.ktx</code></a></th><td>87,540 bytes</td><td>256&times;256 flame sprite with 9 mip levels</td></tr>
+          <tr><th scope="row"><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_smoke.ktx"><code>particle_smoke.ktx</code></a></th><td>87,540 bytes</td><td>256&times;256 smoke sprite with 9 mip levels</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The five files total 3,041,977 bytes, about 2.90 MiB. The OBJ parser reads 391 faces, fan-triangulates its quads and larger polygons, generates tangent frames, scales positions by 10, and emits 3,426 vertices plus 3,426 sequential 32-bit indices. It does not deduplicate shared vertices, so the environment draw contains 1,142 triangles.</p>
+    <p>All four textures are KTX1 files containing BC3/DXT5 data. The example decodes every mip on the CPU and uploads uncompressed <code>Rgba8Unorm</code> texels rather than sampling a GPU-compressed format. That expands the four mip chains to 11,883,856 RGBA bytes. The fireplace maps repeat and use linear mip filtering; the two particle sprites clamp to their edges.</p>
+
+    <h2 id="initialize-emitter" tabindex="-1">Initialize a deterministic emitter</h2>
+    <p>The particle pool starts with 512 flames around <code>(0, -6, 0)</code>. A linear congruential generator seeded with <code>0x6c8e_9cf5</code> supplies the initial position, velocity, size, rotation, and opacity, so a fresh run begins from the same sequence.</p>
+    <p>For each particle, Rust selects two angles and a radius between 0 and 8, then converts them into a three-dimensional position around the emitter. The radius itself is sampled uniformly, which concentrates points toward the center rather than distributing them uniformly by volume. Vertical speed ranges from 0.5 to 7, size from 1 to 1.5, and rotation from 0 to 2&pi;.</p>
+    <pre tabindex="0" aria-label="Initialize a particle around the fire emitter"><code><span class="code-keyword">let</span> theta = rng.range(2.0 * PI);
+<span class="code-keyword">let</span> phi = rng.range(PI) - FRAC_PI_2;
+<span class="code-keyword">let</span> r = rng.range(FLAME_RADIUS);
+
+<span class="code-keyword">let</span> position = vec3(
+    r * theta.cos() * phi.cos(),
+    r * phi.sin(),
+    r * theta.sin() * phi.cos(),
+) + EMITTER_POS;</code></pre>
+    <p>Every pool entry begins as a flame. Smoke appears later when an expired flame reaches the tail of the fire and passes a probability test; there is no separate smoke allocation or dynamic particle count.</p>
+
+    <h2 id="update-particles-on-cpu" tabindex="-1">Recycle flame and smoke on the CPU</h2>
+    <p>Each update clamps elapsed time between 1/240 and 1/30 of a second, then multiplies it by 0.45 for the lifetime calculations. That clamp limits sudden jumps, but it also means the simulation intentionally stops tracking wall-clock time outside that frame-rate range.</p>
+    <p>Flames move along Y, grow their phase alpha toward 2, shrink, and rotate. Once a flame expires, it normally respawns at the emitter. A flame at or beyond the tail threshold has a 24% chance to become smoke instead. The transition narrows its XZ position, chooses a gray color and a small lateral drift, and resets its opacity, size, and spin. Smoke then moves, fades, darkens, and shrinks until its opacity reaches 0.08 or its size reaches 0.16; that slot is recycled as a flame.</p>
+    <pre tabindex="0" aria-label="Update flame and smoke particles on the CPU"><code><span class="code-keyword">match</span> particle.particle_type {
+    ParticleType::Flame =&gt; {
+        particle.position.y -= particle.velocity.y * particle_timer * 3.5;
+        particle.alpha += particle_timer * 2.5;
+        particle.size -= particle_timer * 0.5;
+    }
+    ParticleType::Smoke =&gt; {
+        particle.position -= particle.velocity * frame_timer;
+        particle.alpha -= particle_timer * SMOKE_ALPHA_DECAY;
+        particle.size -= particle_timer * SMOKE_SIZE_DECAY;
+    }
+}</code></pre>
+    <p>Before upload, smoke opacity is multiplied by a squared tail-distance fade, which hides newly converted particles until they have separated from the flame. Rust sorts instances by particle type so smoke is written before flame, but it does not sort transparent particles back-to-front by camera depth.</p>
+
+    <h2 id="stream-instance-buffer" tabindex="-1">Stream one instance buffer</h2>
+    <p>One <code>ParticleInstance</code> occupies 48 bytes. Its two four-component vectors store position and color; four scalar values store alpha, size, sprite rotation, and particle type. Shader locations 1 through 6 use <code>VertexStepMode::Instance</code>, so each record applies to all six vertices of one quad.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="particle-buffers-caption" tabindex="0">
+      <table>
+        <caption id="particle-buffers-caption">Particle system buffers and update traffic</caption>
+        <thead>
+          <tr><th scope="col">Data</th><th scope="col">Layout or size</th><th scope="col">How it changes</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Billboard quad</th><td>6 &times; 16-byte vertices = 96 bytes</td><td>Static vertex buffer</td></tr>
+          <tr><th scope="row">Particle instances</th><td>512 &times; 48 bytes = 24,576 bytes</td><td>Fully rewritten every update</td></tr>
+          <tr><th scope="row">Environment uniforms</th><td>208 bytes</td><td>Projection, view, normal matrix, and light</td></tr>
+          <tr><th scope="row">Particle uniforms</th><td>208 bytes</td><td>Projection, view, and billboard scale</td></tr>
+          <tr><th scope="row">Fireplace mesh</th><td>164,448-byte vertices + 13,704-byte indices</td><td>Static after loading</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Rust rebuilds the entire 24,576-byte instance array and calls <code>queue.write_buffer</code> once per update. The two uniform writes add 416 bytes, for 24,992 bytes of primary queue traffic per normal update before the separate text overlay. This is simple and predictable for 512 particles, but it is not a compute-shader simulation, a partially updated ring buffer, or a GPU-generated particle list.</p>
+
+    <h2 id="billboard-sprites" tabindex="-1">Build camera-facing billboards in WGSL</h2>
+    <p>The quad vertex buffer stores six corners and matching UV coordinates. The vertex shader first transforms an instance center into view space, then adds the corner only in view-space X and Y. Because the offset is applied after the view transform, every quad faces the camera without storing an orientation basis per particle. A uniform scale of 4.8 multiplied by the instance size controls its width and height.</p>
+    <pre tabindex="0" aria-label="Expand each particle instance into a view-space billboard"><code><span class="code-keyword">let</span> center = uniforms.matrix1 * vec4&lt;f32&gt;(input.position.xyz, 1.0);
+<span class="code-keyword">let</span> billboard_size = max(uniforms.vector0.x, 0.001) * input.size;
+<span class="code-keyword">let</span> view_position = center + vec4&lt;f32&gt;(
+    input.corner * billboard_size,
+    0.0,
+    0.0,
+);
+
+output.position = uniforms.matrix0 * view_position;</code></pre>
+    <p>Instance rotation changes the UV coordinates in the fragment shader rather than rotating the quad geometry. Rotated coordinates are clamped for safe sampling, and an explicit border mask makes fragments outside the original sprite rectangle transparent instead of stretching edge texels.</p>
+
+    <h2 id="blend-fire-and-smoke" tabindex="-1">Blend fire and smoke over depth</h2>
+    <p>The particle bind group supplies both smoke and fire textures. The fragment shader samples both sprites, selects one from the instance type, and applies different coverage rules. Flame phase runs from 0 to 2 and folds into a rise-and-fall opacity curve. Flame alpha also uses sprite brightness so dark texels do not create a large translucent rectangle. Smoke uses the sprite alpha multiplied by the CPU-generated fade.</p>
+    <p>The particle pipeline tests against the fireplace's <code>Depth32Float</code> attachment with <code>LessEqual</code>, but disables depth writes so one billboard does not prevent later particles from rendering. Color blending uses source <code>One</code> and destination <code>OneMinusSrcAlpha</code>. This works well for the stylized fire and smoke, although type-only sorting is an approximation for overlapping transparency.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="particle-pipelines-caption" tabindex="0">
+      <table>
+        <caption id="particle-pipelines-caption">Particle system scene pipelines</caption>
+        <thead>
+          <tr><th scope="col">Pipeline</th><th scope="col">Submission</th><th scope="col">Triangles</th><th scope="col">Depth write</th><th scope="col">Blend</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Fireplace</th><td>1 indexed draw</td><td>1,142</td><td>Yes</td><td>Disabled</td></tr>
+          <tr><th scope="row">Particles</th><td>1 draw, 512 instances</td><td>1,024</td><td>No</td><td>One / OneMinusSrcAlpha</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The main scene therefore submits two draw calls and 2,166 authored triangles: 1,142 for the environment and 1,024 from two triangles across each of 512 billboards. A second color-load pass composites the text overlay and is separate from those scene totals.</p>
+
+    <h2 id="light-fireplace" tabindex="-1">Light and draw the fireplace</h2>
+    <p>The environment vertex format is 48 bytes: position, UV, normal, and a four-component tangent containing handedness. WGSL reconstructs a tangent-space basis, samples the color and normal maps, and combines attenuated diffuse and specular light. The point light moves in a 1.5-unit circle and completes one orbit every eight seconds.</p>
+    <p>A fixed 60&deg; perspective camera looks at the scene with near and far planes of 0.001 and 256. Resizing recreates the depth texture and rewrites both uniform blocks. The overlay displays the title, CPU frame duration and estimated FPS, plus the adapter name. Its timing is derived from frame cadence rather than a GPU timestamp query.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU particle system example"><code>cargo run --example particlesystem</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU particle system example"><code>scripts/build-wasm.sh --release particlesystem
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/particlesystem/</code> in a browser with WebGPU support. The page requests the five model and texture assets listed above. WGSL and the Vazirmatn overlay font are compiled into the WebAssembly binary, while this article and its screenshot remain readable without WebGPU.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Move simulation and recycling into a compute shader, then compare CPU time and upload traffic with the 24,992-byte update path.</li>
+      <li>Sort particles back-to-front in camera space, or compare weighted blended transparency with the current type-only ordering.</li>
+      <li>Add curl noise, acceleration, collision, or soft-particle depth fading while keeping the fixed pool easy to profile.</li>
+      <li>Sample only the selected sprite in separate shader paths and compare fragment cost with the current two-texture sampling design.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/particlesystem.rs">Read the particle system source &nearr;</a>
+      <a href="../pipelines/">&larr; Previous: WebGPU multiple render pipelines</a>
+      <a href="../occlusionquery/">Next: WebGPU occlusion queries &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

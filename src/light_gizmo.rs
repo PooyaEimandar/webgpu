@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
-use sib::render::{RenderContext, glam, render_pass, shader, wgpu};
+use sib::render::{RenderContext, glam, render_pass, wgpu};
+
+use crate::shader_include;
 
 const GIZMO_SHADER: &str = include_str!("../shaders/light_gizmo.wgsl");
 const GIZMO_CAPACITY: usize = 8192;
@@ -104,7 +106,7 @@ impl LightGizmoRenderer {
                     bind_group_layouts: &[Some(&bind_group_layout)],
                     immediate_size: 0,
                 });
-        let module = shader::wgsl_module(
+        let module = shader_include::module_from(
             &context.device,
             Some("shared light gizmo shader"),
             GIZMO_SHADER,

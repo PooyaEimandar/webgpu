@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Deferred MSAA in Rust: Manual 4x Resolve with wgpu",
+  "description": "Build 4x MSAA deferred shading in WebGPU with Rust and wgpu: store four G-buffer samples, shade each with six lights, and manually average the result.",
+  "breadcrumbName": "WebGPU deferred multisampling",
+  "image": "deferredmultisampling.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "Animated rabbit-like Jax character walking across a checkerboard floor under colored lights with 4x deferred multisampling."
+}

@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Compute Cloth in Rust: Spring Simulation with wgpu",
+  "description": "Build a WebGPU cloth simulation in Rust with 3,600 GPU particles, ping-pong storage buffers, spring forces, sphere collision, and live controls.",
+  "breadcrumbName": "WebGPU compute cloth",
+  "image": "computecloth.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "imageAlt": "A checkered WebGPU cloth draped over a sphere beside controls for compute iterations, time step, stiffness, damping, and collision radius."
+}

@@ -1,0 +1,222 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1">
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 33</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Preserve depth beside a world-space G-buffer, probe 32 hash-rotated neighbors for nearby occluders, soften the result with a 25-tap blur, and tune the full-resolution ambient occlusion mask while animated Jax walks through eight colored spotlights.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="WebGPU SSAO demo at a glance">
+      <div><dt>SSAO neighbors</dt><dd>32</dd></div>
+      <div><dt>Blur taps</dt><dd>25</dd></div>
+      <div><dt>Render passes</dt><dd>8</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#add-ssao">Add screen-space ambient occlusion</a></li>
+        <li><a href="#load-jax-assets">Load the animated Jax scene</a></li>
+        <li><a href="#preserve-gbuffer">Preserve the G-buffer depth</a></li>
+        <li><a href="#sample-spiral">Sample a 32-point spiral</a></li>
+        <li><a href="#blur-mask">Blur the raw AO mask</a></li>
+        <li><a href="#compose-lighting">Compose AO, lights, and shadows</a></li>
+        <li><a href="#tune-live">Tune the effect with egui</a></li>
+        <li><a href="#record-eight-passes">Record eight render passes</a></li>
+        <li><a href="#control-camera">Control the camera</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="add-ssao" tabindex="-1">Add screen-space ambient occlusion after deferred shadows</h2>
+    <p>The <a href="../deferredshadows/#about">previous Deferred Shadows example</a> evaluates eight spotlights and filters three shadow maps, but local contact can still look detached where small creases and nearby surfaces receive little direct shadowing. This example keeps that lighting system and adds screen-space ambient occlusion, or SSAO, between the G-buffer and final composition. The new stage estimates how much nearby visible geometry surrounds each pixel, blurs that estimate, and darkens the composed result.</p>
+    <p>This implementation is deliberately compact. It does not upload a hemisphere kernel or a noise texture, and it does not reconstruct positions from depth. Instead, WGSL reads stored world position and normal, rotates a two-dimensional golden-angle spiral with a per-pixel hash, and tests 32 neighboring screen positions. The result is a practical study of the data dependencies and costs behind SSAO rather than a production ambient-light model.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/fd8bf279df47abbdbd4579f2945aeb23a2a58709">introducing SSAO commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/ssao.rs">Rust example</a>, <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/ssao.wgsl">WGSL shader</a>, screenshots, build registration, README entry, and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/web/index.html">web gallery registration</a>. The WGSL and screenshots remain unchanged. Current Rust also includes the <a href="https://github.com/PooyaEimandar/webgpu/commit/550d035fd99724bb9da48c041c06feac5aee3c80">modern WebAssembly entry</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">direct WebGPU projection</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible egui window</a>, and <a href="https://github.com/PooyaEimandar/webgpu/commit/0a6f61003b053d261bf2e264063527aad3d8ba14">mobile pointer-input fix</a>. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/ssao.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>The 1280&times;720 capture shows animated Jax on the checkerboard under eight spotlights, with the live SSAO and shadow controls open. The 72,320-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/ssao.jpg">JPEG</a> and 31,114-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/ssao.webp">WebP</a> remain unchanged from the introducing commit and predate all four later Rust changes linked above.</figcaption>
+    </figure>
+
+    <h2 id="load-jax-assets" tabindex="-1">Load three Jax files before rendering</h2>
+    <p>The shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset helper</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs">skinned glTF loader</a> first read <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf"><code>jax.gltf</code></a>. They then execute a one-item external-buffer batch for <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin"><code>jax.bin</code></a>, followed by a one-item image batch for <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png"><code>jax_base_color.png</code></a>. Native startup performs those batches sequentially. WebAssembly dispatches a temporary asset Worker for each batch in the same sequence, then starts <code>sib::render</code>.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ssao-assets-caption" tabindex="0">
+      <table>
+        <caption id="ssao-assets-caption">SSAO runtime assets and compiled inputs</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Input</th><th scope="col">Stored bytes</th><th scope="col">Encoded structure</th><th scope="col">Decoded or compiled result</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><code>jax.gltf</code></td><td>68,324</td><td>JSON; 146 accessor declarations</td><td>59 nodes, one mesh, one skin, one animation</td><td>Scene, material, skin, and animation description</td></tr>
+          <tr><th scope="row">2</th><td><code>jax.bin</code></td><td>1,957,752</td><td>Binary data backing 146 buffer views</td><td>Attributes, indices, inverse binds, and keyframes</td><td>Geometry and animation payload</td></tr>
+          <tr><th scope="row">3</th><td><code>jax_base_color.png</code></td><td>13,008</td><td>1024&times;1024 RGB8 PNG</td><td>4,194,304-byte RGBA8 image</td><td>One-mip sRGB character texture</td></tr>
+          <tr><th scope="row">Compiled</th><td><code>ssao.wgsl</code></td><td>16,832</td><td>452 lines of WGSL</td><td>Six graphics pipelines</td><td>Shadows, MRT output, SSAO, blur, and composition</td></tr>
+          <tr><th scope="row">Embedded</th><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf">Vazirmatn font</a></td><td>122,752</td><td>TrueType font; <a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-LICENSE.txt">SIL OFL 1.1</a></td><td>egui-managed font atlas</td><td>Live settings and performance panel</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three runtime files total 2,039,084 stored bytes, about 1.9446 MiB. The glTF scene contains one mesh and triangle primitive, one material, texture, image, sampler, 46-joint skin, and one-second <code>Walking_1</code> animation with 138 channels. Its 35,880 source <code>u16</code> indices become <code>u32</code> on the GPU and describe 11,960 triangles. The loader supplies white vertex color because the primitive has no <code>COLOR_0</code> attribute.</p>
+    <p>The RGB texture decodes to 4,194,304 RGBA8 bytes and uploads as one-mip <code>Rgba8UnormSrgb</code>. Its sampler repeats U and V, clamps W, and uses linear minification and magnification. The Jax files arrived in the <a href="https://github.com/PooyaEimandar/webgpu/commit/a65ec584ad446059707f4c0c9d1f14171540aa7a">repository's Jax asset update</a>; the repository does not include separate provenance or licensing for them.</p>
+
+    <h2 id="preserve-gbuffer" tabindex="-1">Preserve depth with the world-space G-buffer</h2>
+    <p>The geometry pass draws a generated two-triangle checkerboard and the skinned character into three color attachments. World position and normal use half-float RGBA targets. Albedo and fixed specular strength share an eight-bit RGBA target. Unlike the previous page, this pass stores its <code>Depth32Float</code> attachment because SSAO uses depth to reject the clear value and invalid neighbor samples.</p>
+    <p>Jax contributes a 2,726,880-byte vertex buffer, a 143,520-byte <code>u32</code> index buffer, an 8,192-byte joint palette with 46 of 128 matrices used, and 11,960 triangles. The generated floor contributes 184 bytes and two triangles without another file request. Together with camera, shadow, composition, and the new 32-byte SSAO uniform, explicit buffers total 2,880,536 bytes. Adding the base texture gives 7,074,840 fixed logical bytes before render targets and GUI resources.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ssao-targets-caption" tabindex="0">
+      <table>
+        <caption id="ssao-targets-caption">Full-resolution G-buffer and SSAO targets at 1280 by 720</caption>
+        <thead>
+          <tr><th scope="col">Target</th><th scope="col">Format</th><th scope="col">Bytes per pixel</th><th scope="col">Logical bytes</th><th scope="col">End-of-pass action</th><th scope="col">Consumer</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">World position</th><td><code>Rgba16Float</code></td><td>8</td><td>7,372,800</td><td>Store</td><td>SSAO and composition</td></tr>
+          <tr><th scope="row">World normal</th><td><code>Rgba16Float</code></td><td>8</td><td>7,372,800</td><td>Store</td><td>SSAO and composition</td></tr>
+          <tr><th scope="row">Albedo/specular</th><td><code>Rgba8Unorm</code></td><td>4</td><td>3,686,400</td><td>Store</td><td>Composition</td></tr>
+          <tr><th scope="row">Geometry depth</th><td><code>Depth32Float</code></td><td>4</td><td>3,686,400</td><td>Store</td><td>SSAO validity tests</td></tr>
+          <tr><th scope="row">Raw AO</th><td><code>Rgba8Unorm</code></td><td>4</td><td>3,686,400</td><td>Store</td><td>Blur pass</td></tr>
+          <tr><th scope="row">Blurred AO</th><td><code>Rgba8Unorm</code></td><td>4</td><td>3,686,400</td><td>Store</td><td>Composition and SSAO debug view</td></tr>
+          <tr><th scope="row">Total</th><td>Six single-sample targets</td><td><strong>32</strong></td><td><strong>29,491,200</strong></td><td>All stored</td><td>28.125 MiB before allocation overhead</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The two AO masks are full-resolution RGBA8 textures even though only the red channel is consumed. They add 8 bytes per physical pixel, or 7.03125 MiB at 1280&times;720. Resizing recreates both masks, the four G-buffer attachments, and their bind groups. The three fixed 1024&times;1024 shadow depth maps and shared throwaway shadow color target remain allocated.</p>
+
+    <h2 id="sample-spiral" tabindex="-1">Sample a hash-rotated 32-point screen-space spiral</h2>
+    <p>The first SSAO fullscreen pass reads the current world position, normal, and stored depth. A depth value at or beyond 0.999 or a near-zero normal returns white immediately. Despite the shader variable name <code>linear_depth</code>, this value is normalized device depth; the algorithm uses it only to reject cleared background and neighbor samples. Occlusion distance and hemisphere tests operate on the stored world positions.</p>
+    <p>For visible geometry, a sine-based hash rotates the pattern independently at each pixel. Sample angle advances by the golden angle, 2.39996323 radians. The normalized sample index is squared before multiplying the screen-pixel radius, concentrating probes near the center while still reaching the selected outer radius. Integer texture coordinates mean the earliest, nearest probes can address the same source pixel. This is a two-dimensional screen-space spiral, not a projected three-dimensional hemisphere kernel.</p>
+    <pre tabindex="0" aria-label="Generate the 32-point SSAO spiral in WGSL"><code><span class="code-keyword">for</span> (<span class="code-keyword">var</span> i: u32 = 0u; i &lt; 32u; i = i + 1u) {
+    <span class="code-keyword">let</span> radius_step = (f32(i) + 1.0) / 32.0;
+    <span class="code-keyword">let</span> angle = f32(i) * 2.39996323 + random * 6.2831853;
+    <span class="code-keyword">let</span> spiral = vec2&lt;f32&gt;(cos(angle), sin(angle));
+    <span class="code-keyword">let</span> sample_uv = input.uv
+        + spiral * radius_step * radius_step * texel * sample_radius;
+}</code></pre>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ssao-sampling-caption" tabindex="0">
+      <table>
+        <caption id="ssao-sampling-caption">Normal-path SSAO and blur source work per output pixel</caption>
+        <thead>
+          <tr><th scope="col">Stage</th><th scope="col">Center loads</th><th scope="col">Neighbor loads</th><th scope="col">Source texture operations</th><th scope="col">Logical source bytes</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Raw SSAO</th><td>Position + normal + depth</td><td>32 &times; (position + depth)</td><td>67 <code>textureLoad</code> calls</td><td>404</td><td>One RGBA8 occlusion value</td></tr>
+          <tr><th scope="row">Blur</th><td>None</td><td>5&times;5 raw AO neighborhood</td><td>25 <code>textureLoad</code> calls</td><td>100</td><td>One RGBA8 blurred value</td></tr>
+          <tr><th scope="row">Composition</th><td>Position + normal + albedo + AO</td><td>Up to 27 shadow comparisons</td><td>4 ordinary loads + comparison taps</td><td>24 before shadow data</td><td>Lit surface color</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Each valid neighbor contributes a smooth hemisphere term from <code>dot(sample_position - position, normal)</code> and a world-distance range term. The bias opens the hemisphere threshold, while range limits distant contributions. The shader divides by all 32 samples, scales by intensity, and clamps AO between 0.05 and 1. At full 1280&times;720 coverage, the raw source path describes 61,747,200 texture loads and 372,326,400 logical bytes, about 355.078 MiB, before compiler elimination, cache reuse, compression, or physical bandwidth behavior. These are source counts, not measured GPU traffic.</p>
+
+    <h2 id="blur-mask" tabindex="-1">Blur the raw mask with 25 weighted taps</h2>
+    <p>A second fullscreen pass reads a fixed 5&times;5 neighborhood from the raw AO texture. Weight falls with the length of the integer kernel offset. The blur-radius control scales and rounds those offsets, so a value of one uses offsets from &minus;2 to 2, zero makes every tap read the center, and fractional values can make several taps address the same texel. The weights are always calculated from the original 5&times;5 coordinates and normalized before output.</p>
+    <p>The blur is spatial rather than bilateral: it does not compare depth, position, or normal. That makes it inexpensive to understand, but it can spread dark values across object silhouettes and unrelated surfaces. Its 25 RGBA8 loads describe 100 logical bytes per output pixel, or 92,160,000 bytes at 1280&times;720, before caching and optimization.</p>
+
+    <h2 id="compose-lighting" tabindex="-1">Compose ambient occlusion with eight lights and three shadows</h2>
+    <p>The final fullscreen shader reads world position, normal, albedo/specular, and blurred AO. Its inherited lighting loop evaluates eight moving spotlights. The first three use separate 1024&times;1024 <code>Depth32Float</code> maps and up to nine <code>textureSampleCompareLevel</code> taps each; five fill lights have no shadow lookup. Three depth maps occupy 12 MiB, and a shared 1024&times;1024 RGBA8 color target required by the current shadow fragment pipeline adds another 4 MiB. Only Jax is rendered as a caster; the checkerboard receives shadows but does not cast them.</p>
+    <p>At the defaults, SSAO visibility is <code>0.56 + 0.44 * ao</code>. The final-mix slider interpolates from no AO toward that factor. Because AO is clamped to at least 0.05, the darkest possible default factor is 0.582. The factor multiplies the complete lit color, including ambient, diffuse, specular, and already shadowed direct light. It is not limited to an indirect ambient term.</p>
+    <p>The shadow checkbox disables comparison lookups during composition, but the three shadow producer passes still execute. Turning SSAO off makes the raw pass return white before its 32-sample loop and removes AO from final composition, yet the raw fullscreen pass, 25-tap blur pass, blurred-texture load, and two AO targets remain active.</p>
+
+    <h2 id="tune-live" tabindex="-1">Tune SSAO and debug targets with egui</h2>
+    <p>The live egui panel exposes both effect toggles, seven debug views, and six SSAO parameters. Controls update uniforms without rebuilding pipelines or textures. “Reset SSAO” restores the SSAO toggle and six numeric defaults; it does not reset the shadow toggle or selected debug view.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ssao-controls-caption" tabindex="0">
+      <table>
+        <caption id="ssao-controls-caption">Live SSAO controls, defaults, and shader effects</caption>
+        <thead>
+          <tr><th scope="col">Control</th><th scope="col">Default</th><th scope="col">UI range</th><th scope="col">Shader role</th><th scope="col">Practical effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">SSAO</th><td>On</td><td>Off / on</td><td>Enables sampling and final mix</td><td>Off returns a white mask</td></tr>
+          <tr><th scope="row">Shadow maps</th><td>On</td><td>Off / on</td><td>Enables comparison lookup</td><td>Producer passes still run when off</td></tr>
+          <tr><th scope="row">Sample radius</th><td>44 px</td><td>8&ndash;96</td><td>Outer spiral radius in screen pixels</td><td>Controls neighborhood scale</td></tr>
+          <tr><th scope="row">Intensity</th><td>2.15</td><td>0&ndash;4</td><td>Scales accumulated occlusion</td><td>Controls mask contrast</td></tr>
+          <tr><th scope="row">Bias</th><td>0.015</td><td>0&ndash;0.08</td><td>Offsets hemisphere threshold</td><td>Rejects shallow self-occlusion</td></tr>
+          <tr><th scope="row">Range</th><td>2.15</td><td>0.35&ndash;4</td><td>World-distance falloff endpoint; shader minimum 0.36</td><td>Limits unrelated geometry</td></tr>
+          <tr><th scope="row">Final mix</th><td>1</td><td>0&ndash;1</td><td>Blends the visibility multiplier</td><td>Controls final AO strength</td></tr>
+          <tr><th scope="row">Blur radius</th><td>1</td><td>0&ndash;2</td><td>Scales and rounds 5&times;5 offsets</td><td>Changes blur footprint</td></tr>
+          <tr><th scope="row">Debug view</th><td>Final</td><td>7 choices</td><td>Final, position, normal, albedo, specular, shadow mask, SSAO</td><td>Inspects intermediate data</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The GUI receives window input before the shared virtual joystick. When egui consumes a pointer event, the current mobile fix resets joystick pointer state so a settings gesture does not leave movement active. The window is fixed-width and non-resizable, but can be collapsed.</p>
+    <p>Position, normal, albedo, and specular debug targets return before the lighting loop. Shadow Mask and SSAO return afterward, so both still evaluate all eight lights first. With shadows enabled and all three projections in bounds, Shadow Mask can perform the normal 27 comparison taps and then repeat another 27 while rebuilding the diagnostic mask.</p>
+
+    <h2 id="record-eight-passes" tabindex="-1">Record eight render passes per frame</h2>
+    <p>Three shadow passes render Jax once per map. The G-buffer pass draws the floor and Jax. Raw SSAO, blur, and composition each draw one vertexless fullscreen triangle. The optional joystick renders after composition in the same pass, and egui opens an eighth pass that loads the presented surface and draws the settings panel.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="ssao-passes-caption" tabindex="0">
+      <table>
+        <caption id="ssao-passes-caption">SSAO frame passes and explicit scene or fullscreen draws</caption>
+        <thead>
+          <tr><th scope="col">Order</th><th scope="col">Pass</th><th scope="col">Main output</th><th scope="col">Explicit draw</th><th scope="col">Submitted triangles</th><th scope="col">Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1&ndash;3</th><td>Shadow maps</td><td>3 depth maps + reused color</td><td>Jax &times;3</td><td>35,880</td><td>Real fragment stage; color discarded</td></tr>
+          <tr><th scope="row">4</th><td>G-buffer</td><td>3 colors + stored depth</td><td>Floor + Jax</td><td>11,962</td><td>Single-sample MRT</td></tr>
+          <tr><th scope="row">5</th><td>Raw SSAO</td><td>Raw AO mask</td><td>Fullscreen triangle</td><td>1</td><td>32 neighbor probes on visible geometry</td></tr>
+          <tr><th scope="row">6</th><td>SSAO blur</td><td>Blurred AO mask</td><td>Fullscreen triangle</td><td>1</td><td>25 weighted RGBA8 loads</td></tr>
+          <tr><th scope="row">7</th><td>Composition</td><td>Presentation surface</td><td>Fullscreen triangle</td><td>1</td><td>Eight lights, shadows, AO, then joystick</td></tr>
+          <tr><th scope="row">8</th><td>egui</td><td>Loaded presentation surface</td><td>Framework-managed GUI</td><td>Not included</td><td>Settings and diagnostics</td></tr>
+          <tr><th scope="row">Frame total</th><td>8 passes</td><td>One presented frame</td><td>8 explicit scene/fullscreen draws</td><td><strong>47,845</strong></td><td>Excludes joystick and egui geometry</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>At 1280&times;720, fixed buffers and the base texture use 7,074,840 logical bytes; fixed shadow resources use 16,777,216; the G-buffer uses 22,118,400; and the AO pair uses 7,372,800. Their total is 53,343,256 bytes, about 50.8721 MiB, before the presentation surface, egui and joystick resources, retained CPU data, row padding, and driver overhead. On a controls-stable frame, the listed uniform and joint buffers receive eight queue writes totaling 9,952 bytes before joystick or egui uploads. A GUI control change immediately repeats 1,760 bytes of uniform writes.</p>
+
+    <h2 id="control-camera" tabindex="-1">Control the first-person camera</h2>
+    <p>The example shares the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs">first-person camera and virtual joystick helper</a> used by the preceding deferred pages. It starts at <code>(0, 1.35, 5)</code>, with zero yaw and a slight &minus;0.04-radian pitch. Projection is right-handed with a 60&deg; field of view and near and far planes of 0.1 and 256.</p>
+    <ul>
+      <li>Use W and S to move forward and backward, and A and D to strafe at four world units per second.</li>
+      <li>Use the arrow keys to look at 1.6 radians per second.</li>
+      <li>Drag the left half of the canvas to move or the right half to look. Mouse and touch share 44 px virtual sticks.</li>
+    </ul>
+    <p>Pitch clamps to &plusmn;1.45 radians, combined input clamps to unit length, and camera movement and Jax animation each cap their delta at 1/15 second. The five-second light phase uses the uncapped frame delta. Focus loss resets input. There is no collision, camera reset, animation pause, light editor, SSAO resolution selector, sample-count selector, or GPU timing query.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native WebGPU SSAO example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU SSAO example"><code>cargo run --example ssao</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU SSAO example"><code>scripts/build-wasm.sh --release ssao
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/ssao/</code> in a browser with WebGPU support. Both targets load the same three Jax files before entering <code>sib::render</code>, then use the same single-sample frame graph and live controls.</p>
+    <p>SSAO only sees geometry present in the current frame's position and depth buffers. Off-screen occluders cannot contribute, disoccluded regions can change suddenly, and a radius measured in screen pixels changes its world-space reach with depth and resolution. Edge coordinates clamp, so samples beyond the viewport repeat edge texels. Thin geometry, view changes, and the per-pixel hash can produce noise or halos.</p>
+    <p>The 5&times;5 blur is not depth- or normal-aware, so it can bleed across silhouettes. Both AO targets store four channels although one is used. SSAO-off still records both fullscreen passes, and shadows-off still records all three shadow producer passes. A lower-resolution single-channel mask, bilateral blur, pass scheduling tied to toggles, temporal accumulation, and blue-noise rotation would improve cost or stability.</p>
+    <p>The variable called <code>linear_depth</code> is raw device depth, and the example stores world position instead of reconstructing it. Half-float position loses absolute precision as world coordinates grow, while half-float normal quantizes normalized directions. The composition shader normalizes the cleared zero background normal without the safe guard used by newer deferred shaders, so its behavior can depend on how the GPU handles that undefined direction.</p>
+    <p>AO multiplies direct and specular lighting as well as ambient, so this is a stylized visibility term rather than a physically isolated indirect-light approximation. The renderer has no temporal rejection, horizon search, bent normals, normal mapping, HDR intermediate, exposure, tone mapping, physically based material model, or light culling. The shadow limitations remain: only Jax casts, three of eight lights are shadowed, each PCF kernel costs up to nine comparisons, and a shared 4 MiB color attachment is written and discarded.</p>
+    <p>Jax writes fixed 0.45 specular strength instead of material or texture alpha. Its white base-color factor hides a loader/shader double multiplication that would affect non-white materials. Normals are not inverse-transpose transformed, specular is not gated by positive <code>N dot L</code>, and the retained scene keeps CPU mesh and cloned image data after GPU upload. The animation helper also interpolates the file's STEP channels rather than preserving their declared transitions.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Switch the AO targets to a supported single-channel format, render at half resolution, and profile the bandwidth difference.</li>
+      <li>Replace the spatial blur with a depth- and normal-aware bilateral filter.</li>
+      <li>Reconstruct view-space position from depth, then compare precision and G-buffer memory.</li>
+      <li>Add temporal reprojection and expose the sample count, pattern rotation, and resolution scale.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/ssao.rs">Read the SSAO source &nearr;</a>
+      <a href="../deferredshadows/">&larr; Previous: WebGPU deferred shadows</a>
+      <a href="../computeparticles/">Next: WebGPU compute particles &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

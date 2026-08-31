@@ -1,0 +1,9 @@
+{
+  "title": "WebGPU Metropolis Renderer in Rust: GPU-Driven Sponza Crowds",
+  "description": "Build a WebGPU Metropolis renderer in Rust with Sponza, GPU-skinned crowds, clustered Forward+, indirect draws, shadows, fog, GI, and TAA.",
+  "breadcrumbName": "WebGPU Metropolis renderer",
+  "image": "metropolis.jpg",
+  "imageWidth": 1155,
+  "imageHeight": 720,
+  "imageAlt": "Crowd of animated Jax characters filling the colorful Sponza atrium in the WebGPU Metropolis renderer, with the live settings panel open."
+}

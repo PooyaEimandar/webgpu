@@ -1,0 +1,186 @@
+<article id="about" class="example-article" aria-labelledby="article-title" tabindex="-1" data-static-demo>
+  <div class="article-inner">
+    <div class="article-nav">
+      __ARTICLE_BREADCRUMBS__
+      <a href="#demo">Back to the demo &uarr;</a>
+    </div>
+
+    <header class="article-header">
+      <p class="eyebrow">WebGPU notes &nbsp; / &nbsp; 27</p>
+      <h1 id="article-title">__ARTICLE_TITLE__</h1>
+      <p class="article-lead">Load a four-vertex glTF plane and two uncompressed KTX textures, march through up to 48 uniform depth layers against an alpha-derived height field, refine the surface crossing, and light the shifted color and normal samples without changing the mesh.</p>
+      <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
+    </header>
+
+    <dl class="demo-facts" aria-label="Parallax occlusion mapping demo at a glance">
+      <div><dt>Height layers</dt><dd>48</dd></div>
+      <div><dt>Plane triangles</dt><dd>2</dd></div>
+      <div><dt>Asset requests</dt><dd>3</dd></div>
+    </dl>
+
+    <nav class="article-toc" aria-labelledby="contents-title">
+      <p id="contents-title">On this page</p>
+      <ol>
+        <li><a href="#simulate-depth-on-flat-plane">Simulate depth on a flat plane</a></li>
+        <li><a href="#load-three-runtime-assets">Load three runtime assets</a></li>
+        <li><a href="#decode-plane-gltf">Decode the plane glTF</a></li>
+        <li><a href="#build-tangent-frame">Build the tangent frame</a></li>
+        <li><a href="#trace-height-layers">Trace 48 height layers</a></li>
+        <li><a href="#shade-shifted-surface">Shade the shifted surface</a></li>
+        <li><a href="#render-plane-and-overlay">Render the plane and overlay</a></li>
+        <li><a href="#run-the-example">Run and extend the example</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="simulate-depth-on-flat-plane" tabindex="-1">Simulate rocky depth on a flat plane</h2>
+    <p>The <a href="../pbribl/#about">previous WebGPU PBR image-based-lighting example</a> changes a sphere's reflections with environment data. Parallax Mapping instead asks how much apparent surface detail a fragment shader can recover from one flat rectangle. The mesh still contains two triangles. Its rocky relief comes from moving texture coordinates along the tangent-space view direction before the color and normal maps are sampled.</p>
+    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/d83b56f5dedf7bb510adec31b6be026e8b20cd85">introducing parallax mapping commit</a> added the example, plane, textures, shader, screenshots, and web registration. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/parallaxmapping.rs">Rust source</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/parallaxmapping.wgsl">WGSL shader</a> include several later corrections: an <a href="https://github.com/PooyaEimandar/webgpu/commit/c46fad85c97dc6995740d02cf54629dbe7bb5a44">obsolete clip-space adjustment was removed</a>, <a href="https://github.com/PooyaEimandar/webgpu/commit/b10569567075cab56dcd860da874050f3b0eab34">glTF UVs now pass through without a V flip</a>, and the <a href="https://github.com/PooyaEimandar/webgpu/commit/3201d1cd31dd20865d03c29c409a2aec075f1339">tangent-frame and intersection fix</a> honors <code>tangent.w</code> while preserving signed crossing depths. Rendering runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+
+    <figure class="article-figure">
+      <picture>
+        <source srcset="../screenshots/parallaxmapping.webp" type="image/webp" />
+        <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="960" height="540" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>An oblique camera makes the UV offset visible: a flat two-triangle plane appears to contain rows of deep rocks. The base mesh stays planar; discarded UVs can trim its rectangular outline inward but cannot extend it or create side walls.</figcaption>
+    </figure>
+
+    <h2 id="load-three-runtime-assets" tabindex="-1">Load three runtime assets</h2>
+    <p>The example submits one batch to the shared <a href="https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs">asset loader</a>. Native code reads the three local files on separate worker threads. WebAssembly starts an asset Worker, resolves the browser-relative URLs, fetches them concurrently with <code>Promise.all</code>, and transfers the buffers back before starting the renderer.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="parallaxmapping-assets-caption" tabindex="0">
+      <table>
+        <caption id="parallaxmapping-assets-caption">Parallax Mapping runtime asset requests in batch order</caption>
+        <thead>
+          <tr><th scope="col">Request</th><th scope="col">Asset</th><th scope="col">File bytes</th><th scope="col">Encoded contents</th><th scope="col">Decoded or uploaded bytes</th><th scope="col">Shader role</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plane.gltf"><code>plane.gltf</code></a></td><td>2,652</td><td>JSON with one 204-byte Base64 buffer</td><td>216-byte GPU mesh</td><td>Four tangent-space vertices and six indices</td></tr>
+          <tr><th scope="row">2</th><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/rocks_color_rgba.ktx"><code>rocks_color_rgba.ktx</code></a></td><td>5,592,544</td><td>1024&times;1024 KTX1 RGBA8; 11 mips</td><td>5,592,404 texel bytes</td><td>Rock color with derivative-selected mip filtering</td></tr>
+          <tr><th scope="row">3</th><td><a href="https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/rocks_normal_height_rgba.ktx"><code>rocks_normal_height_rgba.ktx</code></a></td><td>4,194,404</td><td>1024&times;1024 KTX1 RGBA8; one mip</td><td>4,194,304 texel bytes</td><td>Tangent normal in RGB and inverse height in alpha</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The three requests transfer 9,789,600 bytes, about 9.336 MiB. The 5,690-byte shader and 122,752-byte Vazirmatn font are embedded into the executable rather than requested at runtime. The model, textures, and 960&times;540 screenshots are byte-identical to the versions in the introducing commit.</p>
+    <p>The example's focused KTX1 parser accepts little-endian, uncompressed <code>GL_RGBA8</code> input and uploads it as <code>Rgba8Unorm</code>. The color image includes the complete 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, and 1-pixel mip chain. The combined normal-height image contains only its 1024&times;1024 base. This is not a compressed KTX2 or general-purpose texture pipeline.</p>
+
+    <h2 id="decode-plane-gltf" tabindex="-1">Decode and upload the plane glTF</h2>
+    <p>The glTF has one default scene, one node, one mesh, and one indexed triangle primitive. Its four positions form a ten-unit square in the XZ plane, from &minus;5 through 5 with Y&nbsp;=&nbsp;0. Rust traverses the scene, bakes node transforms into each attribute, and scales the complete model by 0.2, producing a world-space square from &minus;1 through 1.</p>
+    <p>The custom loader requires positions, normals, tangents, and texture coordinate set zero. It accepts triangle primitives and embedded Base64 data-URI buffers, converts the source six <code>u16</code> indices to <code>u32</code>, and rejects external buffers and GLB binary chunks.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="parallaxmapping-buffers-caption" tabindex="0">
+      <table>
+        <caption id="parallaxmapping-buffers-caption">Parallax Mapping geometry and explicit uniform buffers</caption>
+        <thead>
+          <tr><th scope="col">Buffer</th><th scope="col">Items</th><th scope="col">Stride or size</th><th scope="col">GPU payload</th><th scope="col">Update cadence</th><th scope="col">Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Plane vertices</th><td>4</td><td>48 bytes</td><td>192 bytes</td><td>Initialization only</td><td>Position, UV, normal, and four-component tangent</td></tr>
+          <tr><th scope="row">Plane indices</th><td>6</td><td>4-byte <code>u32</code></td><td>24 bytes</td><td>Initialization only</td><td>Two triangle-list primitives</td></tr>
+          <tr><th scope="row">Vertex uniforms</th><td>1 block</td><td>160 bytes</td><td>160 bytes</td><td>Every update and resize</td><td>View-projection, model, light, and camera</td></tr>
+          <tr><th scope="row">Fragment uniforms</th><td>1 block</td><td>16 bytes</td><td>16 bytes</td><td>Initialization only</td><td>Height scale, bias, layers, and mapping mode</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>These example-owned buffers total only 392 bytes. The two sampled textures contribute 9,786,708 logical texel bytes, while the surface-size <code>Depth32Float</code> image adds four bytes per output pixel. CPU copies of the parsed KTX mips and glTF data are dropped after initialization.</p>
+
+    <h2 id="build-tangent-frame" tabindex="-1">Build the tangent-space coordinate frame</h2>
+    <p>Parallax movement must follow the texture surface rather than world axes. The vertex shader transforms the supplied normal and three-component tangent by the model matrix, then reconstructs the bitangent with the glTF handedness sign:</p>
+    <pre tabindex="0" aria-label="Build the tangent frame for WebGPU parallax mapping"><code><span class="code-keyword">let</span> normal = normalize(model3 * input.normal);
+<span class="code-keyword">let</span> tangent = normalize(model3 * input.tangent.xyz);
+<span class="code-keyword">let</span> bitangent = normalize(cross(normal, tangent))
+    * input.tangent.w;
+<span class="code-keyword">let</span> tbn = transpose(mat3x3&lt;f32&gt;(
+    tangent, bitangent, normal,
+));</code></pre>
+    <p>The transposed basis transforms light position, camera position, and fragment position into tangent space. The fragment stage can then subtract those positions to construct view and light directions in the same coordinate system as the normal-height texture.</p>
+    <p>The current implementation deliberately preserves the glTF UV values. A former <code>1 - V</code> conversion reversed the tangent-space V direction and made the parallax march travel incorrectly. A later shader fix multiplied the reconstructed bitangent by <code>tangent.w</code>, preserving handedness for mirrored UV islands. This plane uses a uniform model scale, so multiplying its normal by the model's upper-left 3&times;3 block gives the expected direction; a nonuniformly scaled model would need an inverse-transpose normal matrix.</p>
+
+    <h2 id="trace-height-layers" tabindex="-1">Trace 48 height layers in WGSL</h2>
+    <p>The fragment uniform defaults to height scale 0.1, parallax bias &minus;0.02, 48 layers, and mapping mode 4. The bias belongs only to mode 2's basic parallax offset and does not affect the visible mode 4 path. The value is uploaded once and the demo exposes no input or user interface, so every visible frame uses parallax occlusion mapping. Other branches remain in WGSL for code comparison.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="parallaxmapping-modes-caption" tabindex="0">
+      <table>
+        <caption id="parallaxmapping-modes-caption">Mapping modes implemented by the Parallax Mapping shader</caption>
+        <thead>
+          <tr><th scope="col">Mode</th><th scope="col">Name</th><th scope="col">UV operation</th><th scope="col">Maximum height-search reads</th><th scope="col">Crossing refinement</th><th scope="col">Used by demo</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">0</th><td>Color only</td><td>Returns the original color sample immediately</td><td>0</td><td>None</td><td>No</td></tr>
+          <tr><th scope="row">1</th><td>Normal mapping</td><td>Keeps the original UV for normal and color</td><td>0</td><td>None</td><td>No</td></tr>
+          <tr><th scope="row">2</th><td>Basic parallax</td><td>Applies one height-scaled view offset</td><td>1</td><td>None</td><td>No</td></tr>
+          <tr><th scope="row">3</th><td>Steep parallax</td><td>Marches equal-depth layers until the ray enters the height field</td><td>49</td><td>Uses the first crossed UV</td><td>No</td></tr>
+          <tr><th scope="row">4</th><td>Parallax occlusion</td><td>Runs the same march and blends the two UVs around the crossing</td><td>50</td><td>Linear interpolation</td><td><strong>Yes</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><code>height_at</code> returns <code>1 - alpha</code> from the combined normal-height texture at LOD 0. The 48-layer search gives each layer depth <code>1 / 48</code>. It divides the view-direction XY offset by <code>max(view.z, 0.001)</code>, so a grazing view produces a larger march across the texture.</p>
+    <pre tabindex="0" aria-label="March through the WebGPU parallax height field"><code><span class="code-keyword">let</span> layer_depth = 1.0 / f32(layer_count);
+<span class="code-keyword">let</span> delta_uv = view_dir.xy * uniforms.height_scale /
+    (max(view_dir.z, 0.001) * f32(layer_count));
+
+<span class="code-keyword">for</span> (<span class="code-keyword">var</span> i = 0; i &lt; 128; i = i + 1) {
+    <span class="code-keyword">if</span> i &gt;= layer_count { <span class="code-keyword">break</span>; }
+    curr_layer_depth = curr_layer_depth + layer_depth;
+    curr_uv = curr_uv - delta_uv;
+    height = height_at(curr_uv);
+    <span class="code-keyword">if</span> height &lt; curr_layer_depth { <span class="code-keyword">break</span>; }
+}</code></pre>
+    <p>The loop has a compile-time ceiling of 128 iterations, but the fixed uniform stops it at 48. Parallax occlusion then samples the previous UV, compares the signed depths on each side of the crossing, and mixes the two coordinates. The denominator remains negative and no closer to zero than &minus;0.0001 because the next point is below the surface and the previous point is above it. That signed bound avoids division by a nearly zero value while preserving the crossing interpolation.</p>
+
+    <h2 id="shade-shifted-surface" tabindex="-1">Shade the shifted color and normal samples</h2>
+    <p>After mode 4 returns its refined UV, WGSL reads normal RGB from the one-level combined texture and color from the mipmapped color texture. Coordinates outside zero through one are discarded, cutting away fragments whose simulated view ray leaves the authored surface. The repeat-addressed sampler performs those reads before the bounds test, but discarded values do not reach the color target.</p>
+    <p>The sampled normal is remapped from zero-to-one RGB into &minus;1-to-1 tangent space. Lighting then adds three compact terms: 20% ambient color, Lambert-like diffuse color multiplied by <code>max(N dot L, 0)</code>, and a gray Blinn-style highlight with exponent 32 and strength 0.15. A single positional light moves around the plane at radius 1.5 and Y&nbsp;=&nbsp;2.</p>
+    <p>Animation time advances by <code>delta_seconds * 0.5</code> and feeds a full-turn sine and cosine, producing a two-second light orbit. The camera remains at <code>(0, 1.25, -1.5)</code>, looks at the origin, and uses a 60&deg; right-handed perspective with near and far planes of 0.1 and 256. There are no camera, light, height, layer, or mode controls.</p>
+    <p>This lighting is intentionally small and readable. It has no physically based BRDF, light color, intensity, distance attenuation, light-ray self-shadowing, geometric occlusion, HDR intermediate, exposure, or tone mapping. The color KTX is uploaded as linear <code>Rgba8Unorm</code> and the shader applies no source gamma decode, so its color handling is approximate.</p>
+
+    <h2 id="render-plane-and-overlay" tabindex="-1">Render one plane and a text overlay</h2>
+    <p>One five-entry bind group holds the 160-byte vertex uniform, color texture, combined normal-height texture, filtering sampler, and 16-byte fragment uniform. The color texture's sampler repeats U and V and uses linear magnification, minification, and mip interpolation. A second sampler is created with the normal-height texture wrapper but remains unbound.</p>
+
+    <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
+    <div class="article-table" role="region" aria-labelledby="parallaxmapping-passes-caption" tabindex="0">
+      <table>
+        <caption id="parallaxmapping-passes-caption">Parallax Mapping render passes and submitted draw work</caption>
+        <thead>
+          <tr><th scope="col">Pass</th><th scope="col">Attachments</th><th scope="col">Pipeline and draw</th><th scope="col">Submitted work</th><th scope="col">Depth behavior</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Parallax scene</th><td>Surface color + surface-size depth</td><td>One indexed plane draw</td><td>6 indices; 2 triangles</td><td><code>Depth32Float</code>, write enabled, <code>LessEqual</code></td><td>Lit rocky surface on near-black clear color</td></tr>
+          <tr><th scope="row">Text overlay</th><td>Load surface color; no depth</td><td>Framework glyph draw</td><td>Glyph count varies with device and FPS text</td><td>No depth attachment</td><td>Title, GPU, FPS, and active mapping mode</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The scene pipeline uses triangle-list topology, one sample, no face culling, no blending, and no post-processing. It clears color to <code>(0.02, 0.02, 0.024, 1)</code> and depth to 1 before drawing the six indices once. Apparent rock depth therefore changes fragment sampling cost, not vertex count or submitted triangle count.</p>
+    <p>The second pass loads the scene color and renders a 22 px Vazirmatn overlay. It shows “Parallax mapping,” GPU adapter information, CPU frame cadence, and “mode: Parallax occlusion mapping.” The displayed FPS refreshes on the framework's roughly 500 ms statistics cadence, while overlay preparation and the scene draw still occur every frame. Resizing recreates depth, updates the view-projection uniform, and rebuilds text placement.</p>
+
+    <h2 id="run-the-example" tabindex="-1">Run and extend the example</h2>
+    <p>From a local checkout with Rust installed, run the native parallax occlusion mapping example:</p>
+    <pre tabindex="0" aria-label="Run the native WebGPU parallax occlusion mapping example"><code>cargo run --example parallaxmapping</code></pre>
+    <p>For WebAssembly, install the <code>wasm32-unknown-unknown</code> target and the <code>wasm-bindgen</code> CLI version matching <code>Cargo.lock</code>, then build and serve:</p>
+    <pre tabindex="0" aria-label="Build and serve the WebGPU parallax occlusion mapping example"><code>scripts/build-wasm.sh --release parallaxmapping
+cargo run --bin serve</code></pre>
+    <p>Open <code>http://127.0.0.1:8080/parallaxmapping/</code> in a browser with WebGPU support. Native startup joins its three loader threads before calling <code>sib::render</code>. WebAssembly awaits the Worker batch and starts the same renderer asynchronously. Both targets parse the same source assets, upload the same mesh buffers and decoded texel payloads, and execute the same WGSL and two-pass frame with no rendering fallback.</p>
+    <p>The demo fixes the search at 48 layers instead of adapting work to view angle. Its normal-height texture has no lower-resolution mips, and the search explicitly samples LOD zero even when the plane recedes. Parallax does not change geometry, extend the base silhouette, or create real side walls; out-of-range UV discard can only clip the rectangle inward. It also provides no light-ray self-shadowing. Near grazing angles, dividing by a view Z clamped to 0.001 can create long UV marches and discarded edges.</p>
+    <p>The loaders are deliberately narrow: the glTF path expects embedded data and mandatory tangent-space attributes, while the texture path supports uncompressed RGBA8 KTX1 rather than compressed KTX2. Combined with approximate color transfer, fixed Blinn-style lighting, an unattenuated moving light, no MSAA, and no controls, this keeps the algorithm inspectable rather than production-complete.</p>
+    <p>Useful changes to try:</p>
+    <ul>
+      <li>Choose the layer count from view angle, then compare fixed stepping, binary refinement, cone-step mapping, and relief mapping.</li>
+      <li>Add parallax self-shadowing from the light direction and compare its cost with a real displaced or tessellated mesh.</li>
+      <li>Store color in an sRGB-capable format, build filtered normal-height mips with normal renormalization, and inspect distant-surface aliasing.</li>
+      <li>Add orbit-camera and live controls for mapping mode, layer count, height scale, and bias so every implemented branch can be compared.</li>
+    </ul>
+
+    <footer class="article-footer">
+      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/parallaxmapping.rs">Read the Parallax Mapping source &nearr;</a>
+      <a href="../pbribl/">&larr; Previous: WebGPU PBR image-based lighting</a>
+      <a href="../multisampling/">Next: WebGPU 4x MSAA multisampling &rarr;</a>
+      <p class="copyright">&copy; <span data-current-year>__CURRENT_YEAR__</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+    </footer>
+  </div>
+</article>

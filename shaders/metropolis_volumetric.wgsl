@@ -1,17 +1,8 @@
 const PI: f32 = 3.141592653589793;
 
-struct GpuLight {
-    position_range: vec4<f32>, // xyz world position, w range
-    color_type: vec4<f32>,     // rgb colour×intensity, w type (0 point, 1 spot)
-    direction: vec4<f32>,      // xyz spot direction, w cos(outer)
-    cone: vec4<f32>,           // x cos(inner), y atlas slot (-1 = none)
-}
+//!include light
 
-// Per-spot shadow matrices and their atlas tiles (xy = offset, zw = scale).
-struct SpotShadows {
-    matrices: array<mat4x4<f32>, 4>,
-    tiles: array<vec4<f32>, 4>,
-}
+//!include spot_shadow
 
 struct VolumeParams {
     inv_projection: mat4x4<f32>,
@@ -113,10 +104,7 @@ fn spot_visibility(world_position: vec3<f32>, slot: f32) -> f32 {
     return textureSampleCompareLevel(spot_atlas, shadow_sampler, atlas_uv, ndc.z - 0.0015);
 }
 
-fn range_attenuation(dist: f32, range: f32) -> f32 {
-    let window = clamp(1.0 - pow(dist / max(range, 1e-3), 4.0), 0.0, 1.0);
-    return window * window / (dist * dist + 0.01);
-}
+//!include attenuation
 
 @compute @workgroup_size(8, 8, 1)
 fn cs_inject(@builtin(global_invocation_id) gid: vec3<u32>) {

@@ -8,7 +8,7 @@ pub use tier::{AntiAliasing, GiMode, QualityTier, TierConfig};
 use bytemuck::{Pod, Zeroable};
 use sib::render::{
     Example, ExampleSettings, FrameStats, RenderContext, RenderError, RenderResult, buffer, glam,
-    render_pass, shader, text, texture, wgpu, winit,
+    render_pass, text, texture, wgpu, winit,
 };
 
 use crate::{
@@ -16,6 +16,7 @@ use crate::{
     joystick::{FpsCamera, JoystickOverlay, VirtualJoystick},
     light_gizmo::{LightGizmo, LightGizmoRenderer},
     restir::{RestirAssets, StaticScene, load_restir_assets},
+    shader_include,
 };
 use particles::ParticleSystem;
 use physics::PhysicsWorld;
@@ -1838,7 +1839,7 @@ impl Example for MetropolisExample {
                     },
                 ],
             });
-        let ground_shader = shader::wgsl_module(
+        let ground_shader = shader_include::module_from(
             &context.device,
             Some("metropolis ground shader"),
             GROUND_SHADER,
@@ -1921,7 +1922,7 @@ impl Example for MetropolisExample {
             Some("metropolis cluster params"),
             &ClusterParams::zeroed(),
         );
-        let cluster_shader = shader::wgsl_module(
+        let cluster_shader = shader_include::module_from(
             &context.device,
             Some("metropolis cluster shader"),
             CLUSTER_SHADER,
@@ -2011,7 +2012,7 @@ impl Example for MetropolisExample {
             &GiParams::zeroed(),
         );
         let gi_shader =
-            shader::wgsl_module(&context.device, Some("metropolis GI shader"), GI_SHADER);
+            shader_include::module_from(&context.device, Some("metropolis GI shader"), GI_SHADER);
         let gi_layout = context
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2351,7 +2352,7 @@ impl Example for MetropolisExample {
                               source: &'static str,
                               layout: &wgpu::BindGroupLayout,
                               entry: &'static str| {
-            let module = shader::wgsl_module(&context.device, Some(label), source);
+            let module = shader_include::module_from(&context.device, Some(label), source);
             let pipeline_layout =
                 context
                     .device
@@ -2414,7 +2415,7 @@ impl Example for MetropolisExample {
                     },
                 ],
             });
-        let shadow_shader = shader::wgsl_module(
+        let shadow_shader = shader_include::module_from(
             &context.device,
             Some("metropolis shadow shader"),
             SHADOW_SHADER,
@@ -2516,8 +2517,11 @@ impl Example for MetropolisExample {
             Some("metropolis cull uniform"),
             &CullUniform::zeroed(),
         );
-        let cull_shader =
-            shader::wgsl_module(&context.device, Some("metropolis cull shader"), CULL_SHADER);
+        let cull_shader = shader_include::module_from(
+            &context.device,
+            Some("metropolis cull shader"),
+            CULL_SHADER,
+        );
         let cull_layout =
             context
                 .device
@@ -2576,12 +2580,12 @@ impl Example for MetropolisExample {
 
         let light_gizmo_renderer = LightGizmoRenderer::new(context);
 
-        let forward_shader = shader::wgsl_module(
+        let forward_shader = shader_include::module_from(
             &context.device,
             Some("metropolis forward shader"),
             FORWARD_SHADER,
         );
-        let present_shader = shader::wgsl_module(
+        let present_shader = shader_include::module_from(
             &context.device,
             Some("metropolis present shader"),
             PRESENT_SHADER,
@@ -2738,7 +2742,7 @@ impl Example for MetropolisExample {
 
         // Static environment (Sponza) pipeline: shares the frame uniforms,
         // reads a per-material storage buffer and a base-color texture array.
-        let static_shader = shader::wgsl_module(
+        let static_shader = shader_include::module_from(
             &context.device,
             Some("metropolis static shader"),
             STATIC_SHADER,
@@ -3042,7 +3046,7 @@ impl Example for MetropolisExample {
 
         // --- Screen-space reflections -------------------------------------
         let ssr_shader =
-            shader::wgsl_module(&context.device, Some("metropolis SSR shader"), SSR_SHADER);
+            shader_include::module_from(&context.device, Some("metropolis SSR shader"), SSR_SHADER);
         let ssr_layout =
             context
                 .device
@@ -3148,8 +3152,11 @@ impl Example for MetropolisExample {
                 Some("metropolis RT uniforms"),
                 &RtParams::zeroed(),
             );
-            let rt_shader =
-                shader::wgsl_module(&context.device, Some("metropolis RT shader"), RT_SHADER);
+            let rt_shader = shader_include::module_from(
+                &context.device,
+                Some("metropolis RT shader"),
+                RT_SHADER,
+            );
             let rt_layout =
                 context
                     .device
@@ -3228,7 +3235,7 @@ impl Example for MetropolisExample {
         }
 
         // --- Bloom ---------------------------------------------------------
-        let bloom_shader = shader::wgsl_module(
+        let bloom_shader = shader_include::module_from(
             &context.device,
             Some("metropolis bloom shader"),
             BLOOM_SHADER,
@@ -3300,8 +3307,11 @@ impl Example for MetropolisExample {
         self.bloom_layout = Some(bloom_layout);
 
         // --- FXAA resolve --------------------------------------------------
-        let fxaa_shader =
-            shader::wgsl_module(&context.device, Some("metropolis FXAA shader"), FXAA_SHADER);
+        let fxaa_shader = shader_include::module_from(
+            &context.device,
+            Some("metropolis FXAA shader"),
+            FXAA_SHADER,
+        );
         let fxaa_layout =
             context
                 .device
@@ -3367,7 +3377,7 @@ impl Example for MetropolisExample {
 
         // --- TAA ------------------------------------------------------------
         let taa_shader =
-            shader::wgsl_module(&context.device, Some("metropolis TAA shader"), TAA_SHADER);
+            shader_include::module_from(&context.device, Some("metropolis TAA shader"), TAA_SHADER);
         let color_tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
