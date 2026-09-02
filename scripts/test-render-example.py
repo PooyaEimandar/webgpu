@@ -75,7 +75,8 @@ class HeadParser(HTMLParser):
         if tag == "h1":
             self.h1_count += 1
         if tag == "meta":
-            self.metadata[attrs.get("name", attrs.get("property"))] = attrs.get("content")
+            self.metadata[attrs.get("name", attrs.get(
+                "property"))] = attrs.get("content")
         elif tag == "link" and attrs.get("rel") == "canonical":
             self.canonical = attrs.get("href")
         elif tag == "script":
@@ -84,7 +85,8 @@ class HeadParser(HTMLParser):
 
 class RenderExampleTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="webgpu-article-test-")
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="webgpu-article-test-")
         self.addCleanup(self.temporary.cleanup)
         self.web_root = Path(self.temporary.name)
         (self.web_root / "example.html").write_text(TEMPLATE, encoding="utf-8")
@@ -95,7 +97,8 @@ class RenderExampleTests(unittest.TestCase):
         article_path.with_suffix(".json").write_text(
             json.dumps(METADATA if metadata is None else metadata), encoding="utf-8"
         )
-        article_path.with_suffix(".html").write_text(fragment, encoding="utf-8")
+        article_path.with_suffix(".html").write_text(
+            fragment, encoding="utf-8")
 
     def render(self, example="triangle", build_id="123456"):
         return renderer.render_example(example, build_id, self.web_root)
@@ -121,11 +124,13 @@ class RenderExampleTests(unittest.TestCase):
         self.assertIn(f'<h1>{METADATA["title"]}</h1>', document)
         self.assertIn('<a class="more-info" href="#about"', document)
         self.assertIn('aria-hidden="true" focusable="false"', document)
-        self.assertIn(f'<title>{METADATA["title"]} | Pooya Eimandar</title>', document)
+        self.assertIn(
+            f'<title>{METADATA["title"]} | Pooya Eimandar</title>', document)
         self.assertEqual(head.canonical, canonical)
         self.assertEqual(head.metadata["description"], METADATA["description"])
         self.assertEqual(head.metadata["author"], "Pooya Eimandar")
-        self.assertEqual(head.metadata["robots"], "index, follow, max-image-preview:large")
+        self.assertEqual(head.metadata["robots"],
+                         "index, follow, max-image-preview:large")
         self.assertEqual(head.metadata["og:type"], "article")
         self.assertEqual(head.metadata["og:url"], canonical)
         self.assertEqual(head.metadata["og:image"], image_url)
@@ -152,7 +157,8 @@ class RenderExampleTests(unittest.TestCase):
         self.add_article(dict(METADATA, breadcrumbName="Triangle"))
         document = self.render()
         breadcrumbs = self.json_ld(document, "BreadcrumbList")
-        self.assertEqual(breadcrumbs["@id"], "https://pooya.ai/webgpu/triangle/#breadcrumbs")
+        self.assertEqual(
+            breadcrumbs["@id"], "https://pooya.ai/webgpu/triangle/#breadcrumbs")
         self.assertEqual(breadcrumbs["itemListElement"], [
             {
                 "@type": "ListItem", "position": 1,
@@ -174,16 +180,20 @@ class RenderExampleTests(unittest.TestCase):
         self.add_article()
         document = self.render()
         self.assertEqual(
-            self.json_ld(document, "BreadcrumbList")["itemListElement"][-1]["name"],
+            self.json_ld(document, "BreadcrumbList")[
+                "itemListElement"][-1]["name"],
             METADATA["title"],
         )
-        self.assertIn(f'<li aria-current="page">{METADATA["title"]}</li>', document)
+        self.assertIn(
+            f'<li aria-current="page">{METADATA["title"]}</li>', document)
 
     def test_articles_without_visible_breadcrumbs_do_not_emit_breadcrumb_schema(self):
-        self.add_article(fragment=ARTICLE.replace("__ARTICLE_BREADCRUMBS__", ""))
+        self.add_article(fragment=ARTICLE.replace(
+            "__ARTICLE_BREADCRUMBS__", ""))
         document = self.render()
         self.assertNotIn("BreadcrumbList", document)
-        self.assertNotIn("breadcrumb", self.json_ld(document)["mainEntityOfPage"])
+        self.assertNotIn("breadcrumb", self.json_ld(
+            document)["mainEntityOfPage"])
 
     def test_image_dimensions_are_optional_and_exported_for_social_previews(self):
         self.add_article()
@@ -208,11 +218,14 @@ class RenderExampleTests(unittest.TestCase):
                     self.render()
 
     def test_image_url_and_alt_text_are_safe_in_article_html(self):
-        self.add_article(dict(METADATA, image='triangle <&".jpg', imageAlt='RGB <triangle> & "colors"'))
+        self.add_article(dict(METADATA, image='triangle <&".jpg',
+                         imageAlt='RGB <triangle> & "colors"'))
         head = HeadParser(self.render())
-        self.assertEqual(head.images[0]["src"], "../screenshots/triangle%20%3C%26%22.jpg")
+        self.assertEqual(head.images[0]["src"],
+                         "../screenshots/triangle%20%3C%26%22.jpg")
         self.assertEqual(head.images[0]["alt"], 'RGB <triangle> & "colors"')
-        self.assertEqual(urljoin(head.canonical, head.images[0]["src"]), head.metadata["og:image"])
+        self.assertEqual(
+            urljoin(head.canonical, head.images[0]["src"]), head.metadata["og:image"])
 
     def test_no_article_preserves_the_fullscreen_demo_shell(self):
         document = self.render("texture")
@@ -238,7 +251,8 @@ class RenderExampleTests(unittest.TestCase):
         for missing_suffix in (".json", ".html"):
             with self.subTest(missing=missing_suffix):
                 self.add_article()
-                (self.web_root / "articles" / f"triangle{missing_suffix}").unlink()
+                (self.web_root / "articles" /
+                 f"triangle{missing_suffix}").unlink()
                 with self.assertRaisesRegex(ValueError, rf"Incomplete article.*triangle\{missing_suffix}"):
                     self.render()
 
@@ -254,7 +268,8 @@ class RenderExampleTests(unittest.TestCase):
         self.assertEqual(head.metadata["description"], dangerous)
         self.assertEqual(head.metadata["og:image:alt"], dangerous)
         self.assertEqual(self.json_ld(document)["headline"], dangerous)
-        self.assertEqual(self.json_ld(document, "BreadcrumbList")["itemListElement"][-1]["name"], dangerous)
+        self.assertEqual(self.json_ld(document, "BreadcrumbList")[
+                         "itemListElement"][-1]["name"], dangerous)
         self.assertEqual(head.images[0]["alt"], dangerous)
         self.assertNotIn('<script>alert(1)</script>', document)
         self.assertIn('&lt;/script&gt;&lt;script&gt;', document)
@@ -289,7 +304,8 @@ class RenderExampleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unresolved template token.*triangle.html"):
             self.render()
         self.add_article()
-        (self.web_root / "example.html").write_text(TEMPLATE + "__MISSING_TOKEN__", encoding="utf-8")
+        (self.web_root / "example.html").write_text(TEMPLATE +
+                                                    "__MISSING_TOKEN__", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "Unresolved template token.*example.html"):
             self.render()
 
@@ -297,13 +313,17 @@ class RenderExampleTests(unittest.TestCase):
         examples = renderer.WEB_ROOT.parent / "examples"
         for source in sorted(examples.glob("*.rs")):
             with self.subTest(example=source.stem):
-                document = renderer.render_example(source.stem, "integration-test")
+                document = renderer.render_example(
+                    source.stem, "integration-test")
                 page = HeadParser(document)
                 self.assertIsNone(renderer.TOKEN_PATTERN.search(document))
-                self.assertEqual(len(page.ids), len(set(page.ids)), "Duplicate element IDs")
+                self.assertEqual(len(page.ids), len(
+                    set(page.ids)), "Duplicate element IDs")
                 for target in page.fragment_links:
-                    self.assertIn(target, page.ids, f"Missing anchor target #{target}")
-                has_article = (renderer.WEB_ROOT / "articles" / f"{source.stem}.html").exists()
+                    self.assertIn(target, page.ids,
+                                  f"Missing anchor target #{target}")
+                has_article = (renderer.WEB_ROOT / "articles" /
+                               f"{source.stem}.html").exists()
                 self.assertEqual(page.h1_count, 1 if has_article else 0)
                 self.assertEqual("about" in page.ids, has_article)
 
@@ -365,10 +385,12 @@ class RenderExampleTests(unittest.TestCase):
 
         for index, (example, _) in enumerate(articles):
             with self.subTest(example=example):
-                article_path = renderer.WEB_ROOT / "articles" / f"{example}.html"
+                article_path = renderer.WEB_ROOT / \
+                    "articles" / f"{example}.html"
                 metadata_path = article_path.with_suffix(".json")
                 self.assertTrue(article_path.is_file(), "Missing article HTML")
-                self.assertTrue(metadata_path.is_file(), "Missing article metadata")
+                self.assertTrue(metadata_path.is_file(),
+                                "Missing article metadata")
                 source = article_path.read_text(encoding="utf-8")
                 self.assertIn(
                     f'<p class="eyebrow">WebGPU notes &nbsp; / &nbsp; {index + 1:02d}</p>',
@@ -387,7 +409,8 @@ class RenderExampleTests(unittest.TestCase):
                 )
 
                 if index == 0:
-                    self.assertEqual(previous, [], "The first article has no predecessor")
+                    self.assertEqual(
+                        previous, [], "The first article has no predecessor")
                 else:
                     previous_slug, previous_label = articles[index - 1]
                     self.assertEqual(
@@ -397,14 +420,17 @@ class RenderExampleTests(unittest.TestCase):
 
                 if index + 1 < len(articles):
                     next_slug, next_label = articles[index + 1]
-                    self.assertEqual(following, [(f"../{next_slug}/", next_label)])
+                    self.assertEqual(
+                        following, [(f"../{next_slug}/", next_label)])
                     self.assertNotEqual(next_slug, example)
                     self.assertTrue(
-                        (renderer.WEB_ROOT.parent / "examples" / f"{next_slug}.rs").is_file(),
+                        (renderer.WEB_ROOT.parent / "examples" /
+                         f"{next_slug}.rs").is_file(),
                         f"Next destination {next_slug} has no example source",
                     )
                 else:
-                    self.assertEqual(following, [("../", "Browse all WebGPU examples")])
+                    self.assertEqual(
+                        following, [("../", "Browse all WebGPU examples")])
 
     def test_repository_articles_have_crawlable_content_and_consistent_metadata(self):
         for metadata_path in sorted((renderer.WEB_ROOT / "articles").glob("*.json")):
@@ -412,53 +438,70 @@ class RenderExampleTests(unittest.TestCase):
                 example = metadata_path.stem
                 document = renderer.render_example(example, "seo-test")
                 page = HeadParser(document)
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                self.assertEqual(page.canonical, f"https://pooya.ai/webgpu/{example}/")
+                metadata = json.loads(
+                    metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    page.canonical, f"https://pooya.ai/webgpu/{example}/")
                 self.assertEqual(page.metadata["og:url"], page.canonical)
-                self.assertEqual(page.metadata["description"], metadata["description"])
+                self.assertEqual(
+                    page.metadata["description"], metadata["description"])
                 self.assertEqual(page.metadata["og:title"], metadata["title"])
-                self.assertEqual(page.metadata["twitter:title"], metadata["title"])
-                self.assertEqual(self.json_ld(document)["headline"], metadata["title"])
+                self.assertEqual(
+                    page.metadata["twitter:title"], metadata["title"])
+                self.assertEqual(self.json_ld(document)[
+                                 "headline"], metadata["title"])
                 self.assertEqual(page.h1_count, 1)
                 self.assertEqual(len(page.images), 1)
                 screenshot = page.images[0]
                 self.assertEqual(screenshot["alt"], metadata["imageAlt"])
-                self.assertEqual(int(screenshot["width"]), metadata["imageWidth"])
-                self.assertEqual(int(screenshot["height"]), metadata["imageHeight"])
-                self.assertEqual(urljoin(page.canonical, screenshot["src"]), page.metadata["og:image"])
-                self.assertTrue((renderer.WEB_ROOT.parent / "screenshots" / metadata["image"]).is_file())
-                self.assertIn("data-nosnippet", page.elements_by_id["loading-screen"])
-                self.assertNotIn("data-nosnippet", page.elements_by_id["about"])
+                self.assertEqual(
+                    int(screenshot["width"]), metadata["imageWidth"])
+                self.assertEqual(
+                    int(screenshot["height"]), metadata["imageHeight"])
+                self.assertEqual(
+                    urljoin(page.canonical, screenshot["src"]), page.metadata["og:image"])
+                self.assertTrue((renderer.WEB_ROOT.parent /
+                                "screenshots" / metadata["image"]).is_file())
+                self.assertIn("data-nosnippet",
+                              page.elements_by_id["loading-screen"])
+                self.assertNotIn("data-nosnippet",
+                                 page.elements_by_id["about"])
                 self.assertGreater(len(page.h2_ids), 0)
                 for target in page.h2_ids:
                     self.assertIn(target, page.fragment_links)
                 self.assertIn("../", page.links)
-                self.assertIn("https://github.com/PooyaEimandar/sib", page.links)
+                self.assertIn(
+                    "https://github.com/PooyaEimandar/sib", page.links)
                 self.assertIn("https://pooya.ai", page.links)
                 self.assertEqual(
-                    self.json_ld(document, "BreadcrumbList")["itemListElement"][-1]["name"],
+                    self.json_ld(document, "BreadcrumbList")[
+                        "itemListElement"][-1]["name"],
                     metadata["breadcrumbName"],
                 )
 
     def test_repository_gallery_matches_every_article_metadata_record(self):
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
-            "<title>47 Rust WebGPU Examples and Tutorials | wgpu &amp; WGSL</title>",
+            "<title>Rust WebGPU Examples & Tutorials | wgpu &amp; WGSL</title>",
             gallery,
         )
-        self.assertIn("<h1>47 Rust WebGPU examples and tutorials</h1>", gallery)
-        self.assertIn('content="index, follow, max-image-preview:large"', gallery)
+        self.assertIn("<h1>Rust WebGPU examples & tutorials</h1>", gallery)
+        self.assertIn(
+            'content="index, follow, max-image-preview:large"', gallery)
         nodes = [
             json.loads(source) for source in re.findall(
                 r'<script type="application/ld\+json">(.*?)</script>', gallery, re.S
             )
         ]
-        collections = [node for node in nodes if node.get("@type") == "CollectionPage"]
+        collections = [node for node in nodes if node.get(
+            "@type") == "CollectionPage"]
         self.assertEqual(len(collections), 1)
         collection = collections[0]
         self.assertEqual(collection["author"]["url"], "https://pooya.ai")
         items = collection["mainEntity"]["itemListElement"]
-        self.assertEqual([item["position"] for item in items], list(range(1, 48)))
+        self.assertEqual([item["position"]
+                         for item in items], list(range(1, 48)))
         items_by_url = {item["url"]: item for item in items}
         self.assertEqual(len(items_by_url), 47)
         new_article_names = {
@@ -480,12 +523,14 @@ class RenderExampleTests(unittest.TestCase):
             "shadowmappingomni": "WebGPU omnidirectional shadow mapping",
         }
 
-        metadata_paths = sorted((renderer.WEB_ROOT / "articles").glob("*.json"))
+        metadata_paths = sorted(
+            (renderer.WEB_ROOT / "articles").glob("*.json"))
         self.assertEqual(len(metadata_paths), 47)
         for metadata_path in metadata_paths:
             with self.subTest(example=metadata_path.stem):
                 example = metadata_path.stem
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata = json.loads(
+                    metadata_path.read_text(encoding="utf-8"))
                 url = f"https://pooya.ai/webgpu/{example}/"
                 self.assertIn(url, items_by_url)
                 self.assertTrue(items_by_url[url]["name"].strip())
@@ -520,12 +565,14 @@ class RenderExampleTests(unittest.TestCase):
         )
         for example in examples:
             with self.subTest(example=example):
-                fragment_path = renderer.WEB_ROOT / "articles" / f"{example}.html"
+                fragment_path = renderer.WEB_ROOT / \
+                    "articles" / f"{example}.html"
                 metadata_path = fragment_path.with_suffix(".json")
                 self.assertTrue(fragment_path.is_file())
                 self.assertTrue(metadata_path.is_file())
                 fragment = fragment_path.read_text(encoding="utf-8")
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata = json.loads(
+                    metadata_path.read_text(encoding="utf-8"))
                 document = renderer.render_example(example, "batch-qa")
                 page = HeadParser(document)
 
@@ -533,17 +580,20 @@ class RenderExampleTests(unittest.TestCase):
                 self.assertEqual(len(page.h2_ids), len(set(page.h2_ids)))
                 self.assertIn('class="article-toc"', fragment)
                 self.assertIn('class="article-figure"', fragment)
-                self.assertGreaterEqual(fragment.count('<div class="article-table"'), 1)
+                self.assertGreaterEqual(fragment.count(
+                    '<div class="article-table"'), 1)
                 self.assertIn(
                     f"https://github.com/PooyaEimandar/webgpu/blob/main/examples/{example}.rs",
                     page.links,
                 )
                 self.assertTrue(
-                    any(link.startswith("https://github.com/PooyaEimandar/webgpu/commit/") for link in page.links),
+                    any(link.startswith("https://github.com/PooyaEimandar/webgpu/commit/")
+                        for link in page.links),
                     "Missing source-history link",
                 )
                 self.assertIn(f"cargo run --example {example}", document)
-                self.assertIn(f"scripts/build-wasm.sh --release {example}", document)
+                self.assertIn(
+                    f"scripts/build-wasm.sh --release {example}", document)
                 self.assertIn("cargo run --bin serve", document)
                 self.assertIn('<footer class="article-footer">', fragment)
                 self.assertIn("data-current-year", fragment)
@@ -557,8 +607,10 @@ class RenderExampleTests(unittest.TestCase):
         page = HeadParser(document)
         self.assertEqual(len(page.h2_ids), 5)
         self.assertIn("../vertexattributes/", page.links)
-        self.assertIn("https://youtu.be/VswCpKw4fc8?si=DQ5V61z_IxTkm_Q4", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/triangle.rs", page.links)
+        self.assertIn(
+            "https://youtu.be/VswCpKw4fc8?si=DQ5V61z_IxTkm_Q4", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/triangle.rs", page.links)
 
     def test_repository_vertex_attributes_has_its_own_article_and_navigation(self):
         document = renderer.render_example("vertexattributes", "seo-test")
@@ -568,16 +620,21 @@ class RenderExampleTests(unittest.TestCase):
             "wgsl-vertex-inputs", "choosing-a-layout", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "vertexattributes")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "vertexattributes")
         self.assertIn("attribute-layout-caption", page.ids)
-        self.assertIn('role="region" aria-labelledby="attribute-layout-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="attribute-layout-caption" tabindex="0"', document)
         self.assertIn("../triangle/#about", page.links)
         self.assertIn("../triangle/", page.links)
         self.assertIn("../texture/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/vertexattributes.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/vertexattributes.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/vertexattributes.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/vertexattributes.wgsl", page.links)
         self.assertIn("cargo run --example vertexattributes", document)
-        self.assertIn("scripts/build-wasm.sh --release vertexattributes", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release vertexattributes", document)
         self.assertIn("./vertexattributes.js?build=seo-test", document)
         self.assertIn("./vertexattributes_bg.wasm?build=seo-test", document)
         self.assertNotIn("screenshots/triangle", document)
@@ -590,15 +647,19 @@ class RenderExampleTests(unittest.TestCase):
             "texture-bind-group", "wgsl-texture-sampling", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "texture")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "texture")
         self.assertIn("texture-bindings-caption", page.ids)
-        self.assertIn('role="region" aria-labelledby="texture-bindings-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="texture-bindings-caption" tabindex="0"', document)
         self.assertIn("../vertexattributes/#about", page.links)
         self.assertIn("../vertexattributes/", page.links)
         self.assertIn("../texturecubemap/", page.links)
         self.assertIn("../texturemipmapgen/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/texture.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texture.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/texture.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texture.wgsl", page.links)
         self.assertIn("cargo run --example texture", document)
         self.assertIn("scripts/build-wasm.sh --release texture", document)
         self.assertIn("./texture.js?build=seo-test", document)
@@ -613,17 +674,23 @@ class RenderExampleTests(unittest.TestCase):
             "skybox-depth", "environment-reflections", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "texturecubemap")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "texturecubemap")
         self.assertIn("cubemap-faces-caption", page.ids)
-        self.assertIn('role="region" aria-labelledby="cubemap-faces-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="cubemap-faces-caption" tabindex="0"', document)
         self.assertIn("../texture/#about", page.links)
         self.assertIn("../texture/", page.links)
         self.assertIn("../texturearray/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturecubemap.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturecubemap.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/skybox.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturecubemap.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturecubemap.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/skybox.rs", page.links)
         self.assertIn("cargo run --example texturecubemap", document)
-        self.assertIn("scripts/build-wasm.sh --release texturecubemap", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release texturecubemap", document)
         self.assertIn("./texturecubemap.js?build=seo-test", document)
         self.assertIn("./texturecubemap_bg.wasm?build=seo-test", document)
         self.assertNotIn("screenshots/texture.jpg", document)
@@ -636,15 +703,20 @@ class RenderExampleTests(unittest.TestCase):
             "instanced-quads", "wgsl-layer-selection", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "texturearray")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "texturearray")
         self.assertIn("texture-array-layers-caption", page.ids)
-        self.assertIn('role="region" aria-labelledby="texture-array-layers-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="texture-array-layers-caption" tabindex="0"', document)
         self.assertIn("../texturecubemap/#about", page.links)
         self.assertIn("../texturecubemap/", page.links)
         self.assertIn("../texturemipmapgen/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturearray.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturearray.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturearray.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturearray.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
         self.assertIn("cargo run --example texturearray", document)
         self.assertIn("scripts/build-wasm.sh --release texturearray", document)
         self.assertIn("./texturearray.js?build=seo-test", document)
@@ -659,17 +731,23 @@ class RenderExampleTests(unittest.TestCase):
             "mipmap-filtering", "sample-the-tunnel", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "texturemipmapgen")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "texturemipmapgen")
         self.assertIn("mipmap-samplers-caption", page.ids)
-        self.assertIn('role="region" aria-labelledby="mipmap-samplers-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="mipmap-samplers-caption" tabindex="0"', document)
         self.assertIn("../texturearray/#about", page.links)
         self.assertIn("../texturearray/", page.links)
         self.assertIn("../textoverlay/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturemipmapgen.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen_mipmap.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/texturemipmapgen.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/texturemipmapgen_mipmap.wgsl", page.links)
         self.assertIn("cargo run --example texturemipmapgen", document)
-        self.assertIn("scripts/build-wasm.sh --release texturemipmapgen", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release texturemipmapgen", document)
         self.assertIn("./texturemipmapgen.js?build=seo-test", document)
         self.assertIn("./texturemipmapgen_bg.wasm?build=seo-test", document)
         self.assertNotIn("screenshots/texturearray", document)
@@ -682,19 +760,27 @@ class RenderExampleTests(unittest.TestCase):
             "unicode-and-rtl", "prepare-and-render", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "textoverlay")
-        self.assertIn('role="region" aria-labelledby="text-overlay-styles-caption" tabindex="0"', document)
-        self.assertEqual(page.elements_by_id["persian-text-sample"]["lang"], "fa")
-        self.assertEqual(page.elements_by_id["persian-text-sample"]["dir"], "rtl")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "textoverlay")
+        self.assertIn(
+            'role="region" aria-labelledby="text-overlay-styles-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["persian-text-sample"]["lang"], "fa")
+        self.assertEqual(
+            page.elements_by_id["persian-text-sample"]["dir"], "rtl")
         self.assertIn("سلام ایران", document)
         self.assertIn("متن راست به چپ", document)
         self.assertIn("../texturemipmapgen/#about", page.links)
         self.assertIn("../texturemipmapgen/", page.links)
         self.assertIn("../textmesh/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/textoverlay.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textoverlay.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/textoverlay.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textoverlay.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf", page.links)
         self.assertIn("cargo run --example textoverlay", document)
         self.assertIn("scripts/build-wasm.sh --release textoverlay", document)
         self.assertIn("./textoverlay.js?build=seo-test", document)
@@ -709,18 +795,26 @@ class RenderExampleTests(unittest.TestCase):
             "combine-text-meshes", "render-and-light", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "textmesh")
-        self.assertIn('role="region" aria-labelledby="text-mesh-options-caption" tabindex="0"', document)
-        self.assertEqual(page.elements_by_id["persian-mesh-sample"]["lang"], "fa")
-        self.assertEqual(page.elements_by_id["persian-mesh-sample"]["dir"], "rtl")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "textmesh")
+        self.assertIn(
+            'role="region" aria-labelledby="text-mesh-options-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["persian-mesh-sample"]["lang"], "fa")
+        self.assertEqual(
+            page.elements_by_id["persian-mesh-sample"]["dir"], "rtl")
         self.assertIn("هی وب جی پی یو!", document)
         self.assertIn("../textoverlay/#about", page.links)
         self.assertIn("../textoverlay/", page.links)
         self.assertIn("../htmlmesh/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/textmesh.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textmesh.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text_mesh.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/textmesh.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/textmesh.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/sib/blob/960c39bcde152f50c87fa3926c8bc8ff53e2b5eb/src/render/text_mesh.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/fonts/Vazirmatn-Regular.ttf", page.links)
         self.assertIn("cargo run --example textmesh", document)
         self.assertIn("scripts/build-wasm.sh --release textmesh", document)
         self.assertIn("./textmesh.js?build=seo-test", document)
@@ -736,15 +830,21 @@ class RenderExampleTests(unittest.TestCase):
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
         self.assertEqual(page.elements_by_id["demo"]["data-example"], "gltf")
-        self.assertIn('role="region" aria-labelledby="gltf-asset-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="gltf-asset-caption" tabindex="0"', document)
         self.assertIn("../htmlmesh/#about", page.links)
         self.assertIn("../htmlmesh/", page.links)
         self.assertIn("../gears/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltf.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltf.wgsl", page.links)
-        self.assertIn("https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured/glTF", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltf.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltf.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured/glTF", page.links)
         self.assertIn("cargo run --example gltf", document)
         self.assertIn("scripts/build-wasm.sh --release gltf", document)
         self.assertIn("./gltf.js?build=seo-test", document)
@@ -760,12 +860,15 @@ class RenderExampleTests(unittest.TestCase):
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
         self.assertEqual(page.elements_by_id["demo"]["data-example"], "gears")
-        self.assertIn('role="region" aria-labelledby="gear-specs-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="gear-specs-caption" tabindex="0"', document)
         self.assertIn("../gltf/#about", page.links)
         self.assertIn("../gltf/", page.links)
         self.assertIn("../stencilbuffer/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/gears.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gears.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/gears.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gears.wgsl", page.links)
         self.assertIn("cargo run --example gears", document)
         self.assertIn("scripts/build-wasm.sh --release gears", document)
         self.assertIn("1,600 vertices", document)
@@ -784,18 +887,26 @@ class RenderExampleTests(unittest.TestCase):
             "draw-expanded-outline", "depth-stencil-pass", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "stencilbuffer")
-        self.assertIn('role="region" aria-labelledby="stencil-pipelines-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "stencilbuffer")
+        self.assertIn(
+            'role="region" aria-labelledby="stencil-pipelines-caption" tabindex="0"', document)
         self.assertIn("../gears/#about", page.links)
         self.assertIn("../gears/", page.links)
         self.assertIn("../gltfskinning/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/stencilbuffer.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/stencilbuffer.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/venus.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/975b07df28e2c91485548ed9ee351553af3483b0", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/stencilbuffer.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/stencilbuffer.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/venus.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/975b07df28e2c91485548ed9ee351553af3483b0", page.links)
         self.assertIn("cargo run --example stencilbuffer", document)
-        self.assertIn("scripts/build-wasm.sh --release stencilbuffer", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release stencilbuffer", document)
         self.assertIn("31,398 triangles", document)
         self.assertIn("94,194", document)
         self.assertIn("Depth24PlusStencil8", document)
@@ -812,19 +923,29 @@ class RenderExampleTests(unittest.TestCase):
             "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "gltfskinning")
-        self.assertIn('role="region" aria-labelledby="skinning-bindings-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "gltfskinning")
+        self.assertIn(
+            'role="region" aria-labelledby="skinning-bindings-caption" tabindex="0"', document)
         self.assertIn("../gltf/#about", page.links)
         self.assertIn("../stencilbuffer/", page.links)
         self.assertIn("../instancing/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltfskinning.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/d58e37c192066f69c042fc9cbc3be0260eb0f58d", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltfskinning.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_skin.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/jax.bin", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/jax_base_color.png", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/d58e37c192066f69c042fc9cbc3be0260eb0f58d", page.links)
         self.assertIn("cargo run --example gltfskinning", document)
         self.assertIn("scripts/build-wasm.sh --release gltfskinning", document)
         self.assertIn("35,880", document)
@@ -846,14 +967,19 @@ class RenderExampleTests(unittest.TestCase):
             "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "instancing")
-        self.assertIn('role="region" aria-labelledby="instancing-draws-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "instancing")
+        self.assertIn(
+            'role="region" aria-labelledby="instancing-draws-caption" tabindex="0"', document)
         self.assertIn("../gltfskinning/#about", page.links)
         self.assertIn("../gltfskinning/", page.links)
         self.assertIn("../indirectdraw/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/instancing.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/instancing.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/e541272cf963fe2f0c72dc15a3aff775f4ed7038", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/instancing.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/instancing.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/e541272cf963fe2f0c72dc15a3aff775f4ed7038", page.links)
         self.assertIn("cargo run --example instancing", document)
         self.assertIn("scripts/build-wasm.sh --release instancing", document)
         self.assertIn("2,048", document)
@@ -874,18 +1000,27 @@ class RenderExampleTests(unittest.TestCase):
             "ground-sky-and-depth", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "indirectdraw")
-        self.assertIn('role="region" aria-labelledby="indirect-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="indirect-pipelines-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "indirectdraw")
+        self.assertIn(
+            'role="region" aria-labelledby="indirect-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="indirect-pipelines-caption" tabindex="0"', document)
         self.assertIn("../instancing/#about", page.links)
         self.assertIn("../instancing/", page.links)
         self.assertIn("../pipelines/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/indirectdraw.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/indirectdraw.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plants.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/texturearray_plants_rgba.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/49096c775bfc19702ebd7238f2119a767b87ab78", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/indirectdraw.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/indirectdraw.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plants.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/texturearray_plants_rgba.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/49096c775bfc19702ebd7238f2119a767b87ab78", page.links)
         self.assertIn("cargo run --example indirectdraw", document)
         self.assertIn("scripts/build-wasm.sh --release indirectdraw", document)
         self.assertIn("24,576", document)
@@ -907,24 +1042,38 @@ class RenderExampleTests(unittest.TestCase):
             "blend-fire-and-smoke", "light-fireplace", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "particlesystem")
-        self.assertIn('role="region" aria-labelledby="particle-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="particle-buffers-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="particle-pipelines-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "particlesystem")
+        self.assertIn(
+            'role="region" aria-labelledby="particle-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="particle-buffers-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="particle-pipelines-caption" tabindex="0"', document)
         self.assertIn("../pipelines/#about", page.links)
         self.assertIn("../pipelines/", page.links)
         self.assertIn("../occlusionquery/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/particlesystem.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/particlesystem.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/fireplace.obj", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_colormap_bc3.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_normalmap_bc3.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_fire.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_smoke.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/7644ad9ca461bf78c5c286ad842b6681855180df", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/particlesystem.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/particlesystem.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/fireplace.obj", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_colormap_bc3.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/fireplace_normalmap_bc3.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_fire.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_smoke.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/7644ad9ca461bf78c5c286ad842b6681855180df", page.links)
         self.assertIn("cargo run --example particlesystem", document)
-        self.assertIn("scripts/build-wasm.sh --release particlesystem", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release particlesystem", document)
         self.assertIn("512", document)
         self.assertIn("24,576-byte", document)
         self.assertIn("24,992", document)
@@ -945,23 +1094,36 @@ class RenderExampleTests(unittest.TestCase):
             "run-the-example",
         ])
         self.assertNotIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "occlusionquery")
-        self.assertIn('role="region" aria-labelledby="occlusion-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="occlusion-resources-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="occlusion-passes-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "occlusionquery")
+        self.assertIn(
+            'role="region" aria-labelledby="occlusion-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="occlusion-resources-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="occlusion-passes-caption" tabindex="0"', document)
         self.assertIn("../particlesystem/#about", page.links)
         self.assertIn("../particlesystem/", page.links)
         self.assertIn("../radialblur/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/occlusionquery.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/occlusionquery.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plane_z.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sphere.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/982afb7012500ff4cb26ae6cb6307e96e59dadbd", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/occlusionquery.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/occlusionquery.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/joystick.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/plane_z.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/sphere.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/982afb7012500ff4cb26ae6cb6307e96e59dadbd", page.links)
         self.assertIn("cargo run --example occlusionquery", document)
-        self.assertIn("scripts/build-wasm.sh --release occlusionquery", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release occlusionquery", document)
         self.assertIn("371,338", document)
         self.assertIn("447,424", document)
         self.assertIn("13,642", document)
@@ -987,19 +1149,29 @@ class RenderExampleTests(unittest.TestCase):
             "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "radialblur")
-        self.assertIn('role="region" aria-labelledby="radial-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="radial-resources-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="radial-passes-caption" tabindex="0"', document)
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "radialblur")
+        self.assertIn(
+            'role="region" aria-labelledby="radial-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="radial-resources-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="radial-passes-caption" tabindex="0"', document)
         self.assertIn("../occlusionquery/#about", page.links)
         self.assertIn("../occlusionquery/", page.links)
         self.assertIn("../bloom/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/radialblur.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/radialblur.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/glowsphere.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_gradient_rgba.ktx", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/7f54cadf3f26d9e07c19d16d9251c7832b91a44e", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/radialblur.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/radialblur.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/glowsphere.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/textures/particle_gradient_rgba.ktx", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/7f54cadf3f26d9e07c19d16d9251c7832b91a44e", page.links)
         self.assertIn("cargo run --example radialblur", document)
         self.assertIn("scripts/build-wasm.sh --release radialblur", document)
         self.assertIn("147,558", document)
@@ -1032,18 +1204,28 @@ class RenderExampleTests(unittest.TestCase):
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
         self.assertEqual(page.elements_by_id["demo"]["data-example"], "bloom")
-        self.assertIn('role="region" aria-labelledby="bloom-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="bloom-resources-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="bloom-passes-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="bloom-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="bloom-resources-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="bloom-passes-caption" tabindex="0"', document)
         self.assertIn("../radialblur/#about", page.links)
         self.assertIn("../radialblur/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/bloom.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/bloom.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo_glow.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/55132cbb36b7d1b2bccd842f20544d69f257db0f", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/bloom.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/bloom.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/retroufo_glow.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/55132cbb36b7d1b2bccd842f20544d69f257db0f", page.links)
         self.assertIn("cargo run --example bloom", document)
         self.assertIn("scripts/build-wasm.sh --release bloom", document)
         self.assertIn("2,198,325", document)
@@ -1082,27 +1264,40 @@ class RenderExampleTests(unittest.TestCase):
             "render-lit-scene", "animate-light", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "shadowmapping")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "shadowmapping")
         self.assertEqual(
             page.elements_by_id["demo"]["aria-label"],
             "Live WebGPU demo: shadow mapping",
         )
         self.assertIn('"Live WebGPU rendering: shadow mapping"', document)
-        self.assertIn('role="region" aria-labelledby="shadow-assets-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="shadow-resources-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="shadow-passes-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="shadow-assets-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="shadow-resources-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="shadow-passes-caption" tabindex="0"', document)
         self.assertIn("../bloom/#about", page.links)
         self.assertIn("../bloom/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmapping.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmapping.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/4463644abffd90766934dba59daa1d71d379476a", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/f3801edef8ed726a011d0aa352fbc2428fccfe94", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/5a44b27f48f8aaa78515e9c787afcec847668ff7", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/shadowmapping.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/shadowmapping.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/gltf_scene.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/src/asset.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/assets/models/teapot.gltf", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/4463644abffd90766934dba59daa1d71d379476a", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/f3801edef8ed726a011d0aa352fbc2428fccfe94", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/5a44b27f48f8aaa78515e9c787afcec847668ff7", page.links)
         self.assertIn("cargo run --example shadowmapping", document)
-        self.assertIn("scripts/build-wasm.sh --release shadowmapping", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release shadowmapping", document)
         self.assertIn("225,816", document)
         self.assertIn("167,328", document)
         self.assertIn("4,690", document)
@@ -1132,7 +1327,8 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../shadowmappingcascade/">Next: WebGPU cascaded shadow mapping &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 39, "name": "WebGPU shadow mapping", '
             '"url": "https://pooya.ai/webgpu/shadowmapping/"',
@@ -1143,7 +1339,8 @@ class RenderExampleTests(unittest.TestCase):
             'alt="A white teapot casting a long dark shadow across a beige floor against a gray background"',
             gallery,
         )
-        self.assertIn("project nine comparison samples onto a procedural floor", gallery)
+        self.assertIn(
+            "project nine comparison samples onto a procedural floor", gallery)
 
     def test_repository_pbr_basic_has_its_own_article_and_navigation(self):
         document = renderer.render_example("pbr", "seo-test")
@@ -1161,16 +1358,23 @@ class RenderExampleTests(unittest.TestCase):
             "Live WebGPU demo: PBR Basic",
         )
         self.assertIn('"Live WebGPU rendering: PBR Basic"', document)
-        self.assertIn('role="region" aria-labelledby="pbr-geometry-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="pbr-resources-caption" tabindex="0"', document)
-        self.assertIn('role="region" aria-labelledby="pbr-passes-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="pbr-geometry-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="pbr-resources-caption" tabindex="0"', document)
+        self.assertIn(
+            'role="region" aria-labelledby="pbr-passes-caption" tabindex="0"', document)
         self.assertIn("../shadowmappingomni/#about", page.links)
         self.assertIn("../shadowmappingomni/", page.links)
         self.assertIn("../pbrtexture/", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbr.rs", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbr.wgsl", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/657a1bca82bacf4017c814077c7ed8391e2d4893", page.links)
-        self.assertIn("https://github.com/PooyaEimandar/webgpu/commit/21636cd62fd68f378d72693382c2b9af1cbcf811", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbr.rs", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/blob/main/shaders/pbr.wgsl", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/657a1bca82bacf4017c814077c7ed8391e2d4893", page.links)
+        self.assertIn(
+            "https://github.com/PooyaEimandar/webgpu/commit/21636cd62fd68f378d72693382c2b9af1cbcf811", page.links)
         self.assertIn("cargo run --example pbr", document)
         self.assertIn("scripts/build-wasm.sh --release pbr", document)
         self.assertIn("2,337", document)
@@ -1195,7 +1399,8 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../pbrtexture/">Next: WebGPU PBR texture &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 36, "name": "WebGPU PBR Basic", '
             '"url": "https://pooya.ai/webgpu/pbr/"',
@@ -1219,7 +1424,8 @@ class RenderExampleTests(unittest.TestCase):
             "render-skybox-model-and-controls", "run-the-example",
         ])
         self.assertNotIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "pbrtexture")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "pbrtexture")
         self.assertEqual(
             page.elements_by_id["demo"]["aria-label"],
             "Live WebGPU demo: PBR textures",
@@ -1270,7 +1476,8 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../pbribl/">Next: WebGPU PBR image-based lighting &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 37, "name": "WebGPU PBR textures", '
             '"url": "https://pooya.ai/webgpu/pbrtexture/"',
@@ -1331,7 +1538,8 @@ class RenderExampleTests(unittest.TestCase):
             "N dot V", "V dot H",
         ):
             self.assertIn(fact, document)
-        self.assertIn("box-filtered mip pyramid, not a GGX-prefiltered environment", document)
+        self.assertIn(
+            "box-filtered mip pyramid, not a GGX-prefiltered environment", document)
         self.assertIn("./pbribl.js?build=seo-test", document)
         self.assertIn("./pbribl_bg.wasm?build=seo-test", document)
         self.assertNotIn("screenshots/pbrtexture.jpg", document)
@@ -1343,20 +1551,24 @@ class RenderExampleTests(unittest.TestCase):
             '      <p class="copyright">',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 38, "name": "WebGPU PBR image-based lighting", '
             '"url": "https://pooya.ai/webgpu/pbribl/"',
             gallery,
         )
-        self.assertIn("<strong>WebGPU PBR image-based lighting</strong>", gallery)
+        self.assertIn(
+            "<strong>WebGPU PBR image-based lighting</strong>", gallery)
         self.assertIn(
             'alt="Ten gold spheres with changing roughness and metallic reflections across a suspension bridge cubemap"',
             gallery,
         )
         self.assertIn("seven box-filtered cubemap mips", gallery)
-        self.assertLess(gallery.index('href="./pbr/"'), gallery.index('href="./pbrtexture/"'))
-        self.assertLess(gallery.index('href="./pbrtexture/"'), gallery.index('href="./pbribl/"'))
+        self.assertLess(gallery.index('href="./pbr/"'),
+                        gallery.index('href="./pbrtexture/"'))
+        self.assertLess(gallery.index('href="./pbrtexture/"'),
+                        gallery.index('href="./pbribl/"'))
 
     def test_repository_parallax_mapping_has_its_own_article_and_navigation(self):
         document = renderer.render_example("parallaxmapping", "seo-test")
@@ -1367,7 +1579,8 @@ class RenderExampleTests(unittest.TestCase):
             "shade-shifted-surface", "render-plane-and-overlay", "run-the-example",
         ])
         self.assertIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "parallaxmapping")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "parallaxmapping")
         self.assertEqual(
             page.elements_by_id["demo"]["aria-label"],
             "Live WebGPU demo: parallax occlusion mapping",
@@ -1398,7 +1611,8 @@ class RenderExampleTests(unittest.TestCase):
         ):
             self.assertIn(link, page.links)
         self.assertIn("cargo run --example parallaxmapping", document)
-        self.assertIn("scripts/build-wasm.sh --release parallaxmapping", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release parallaxmapping", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
             "Height layers</dt><dd>48", "Plane triangles</dt><dd>2",
@@ -1421,13 +1635,15 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 33, "name": "WebGPU parallax occlusion mapping", '
             '"url": "https://pooya.ai/webgpu/parallaxmapping/"',
             gallery,
         )
-        self.assertIn("<strong>WebGPU parallax occlusion mapping</strong>", gallery)
+        self.assertIn(
+            "<strong>WebGPU parallax occlusion mapping</strong>", gallery)
         self.assertIn(
             'alt="A flat WebGPU plane appearing densely covered with raised rocks through parallax occlusion mapping"',
             gallery,
@@ -1447,7 +1663,8 @@ class RenderExampleTests(unittest.TestCase):
             "control-the-camera", "run-the-example",
         ])
         self.assertNotIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "multisampling")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "multisampling")
         self.assertEqual(
             page.elements_by_id["demo"]["aria-label"],
             "Live WebGPU demo: 4x MSAA multisampling",
@@ -1465,16 +1682,21 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("multisampling-assets-caption", "Multisampling runtime asset and embedded data"),
-            ("multisampling-draws-caption", "Voyager geometry and material draw ranges"),
-            ("multisampling-resources-caption", "Multisampling GPU resources and render attachments"),
-            ("multisampling-passes-caption", "Multisampling render passes, attachments, and submitted work"),
+            ("multisampling-assets-caption",
+             "Multisampling runtime asset and embedded data"),
+            ("multisampling-draws-caption",
+             "Voyager geometry and material draw ranges"),
+            ("multisampling-resources-caption",
+             "Multisampling GPU resources and render attachments"),
+            ("multisampling-passes-caption",
+             "Multisampling render passes, attachments, and submitted work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertIn("../parallaxmapping/#about", page.links)
         self.assertIn("../parallaxmapping/", page.links)
         self.assertIn("../multisamplingalphatocoverage/", page.links)
@@ -1494,7 +1716,8 @@ class RenderExampleTests(unittest.TestCase):
         ):
             self.assertIn(link, page.links)
         self.assertIn("cargo run --example multisampling", document)
-        self.assertIn("scripts/build-wasm.sh --release multisampling", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release multisampling", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
             "Rasterization samples</dt><dd>4&times;",
@@ -1527,7 +1750,8 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 34, "name": "WebGPU 4x MSAA multisampling", '
             '"url": "https://pooya.ai/webgpu/multisampling/"',
@@ -1552,7 +1776,8 @@ class RenderExampleTests(unittest.TestCase):
         )
 
     def test_repository_multisampling_alpha_to_coverage_has_article_and_navigation(self):
-        document = renderer.render_example("multisamplingalphatocoverage", "seo-test")
+        document = renderer.render_example(
+            "multisamplingalphatocoverage", "seo-test")
         page = HeadParser(document)
         self.assertEqual(page.h2_ids, [
             "turn-alpha-into-coverage", "load-oak-asset",
@@ -1591,17 +1816,23 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("alpha-coverage-assets-caption", "Alpha-to-coverage runtime asset and compiled inputs"),
-            ("alpha-coverage-geometry-caption", "Oak geometry, materials, and instanced draw work"),
-            ("alpha-coverage-resources-caption", "Alpha-to-coverage explicit GPU resources"),
-            ("alpha-coverage-pipeline-caption", "How sampled alpha affects the four-sample pipeline"),
-            ("alpha-coverage-passes-caption", "Alpha-to-coverage passes and submitted scene work"),
+            ("alpha-coverage-assets-caption",
+             "Alpha-to-coverage runtime asset and compiled inputs"),
+            ("alpha-coverage-geometry-caption",
+             "Oak geometry, materials, and instanced draw work"),
+            ("alpha-coverage-resources-caption",
+             "Alpha-to-coverage explicit GPU resources"),
+            ("alpha-coverage-pipeline-caption",
+             "How sampled alpha affects the four-sample pipeline"),
+            ("alpha-coverage-passes-caption",
+             "Alpha-to-coverage passes and submitted scene work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertIn("../multisampling/#about", page.links)
         self.assertIn("../multisampling/", page.links)
         self.assertIn("../deferred/", page.links)
@@ -1619,7 +1850,8 @@ class RenderExampleTests(unittest.TestCase):
             "https://github.com/PooyaEimandar/webgpu/commit/88837b4e9f531bbe7b8b157803747708d169e88d",
         ):
             self.assertIn(link, page.links)
-        self.assertIn("cargo run --example multisamplingalphatocoverage", document)
+        self.assertIn(
+            "cargo run --example multisamplingalphatocoverage", document)
         self.assertIn(
             "scripts/build-wasm.sh --release multisamplingalphatocoverage",
             document,
@@ -1672,13 +1904,15 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 35, "name": "WebGPU alpha-to-coverage foliage", '
             '"url": "https://pooya.ai/webgpu/multisamplingalphatocoverage/"',
             gallery,
         )
-        self.assertIn("<strong>WebGPU alpha-to-coverage foliage</strong>", gallery)
+        self.assertIn(
+            "<strong>WebGPU alpha-to-coverage foliage</strong>", gallery)
         self.assertIn(
             'alt="Dense grove of alpha-textured oak trees rendered with 4x WebGPU MSAA and alpha-to-coverage against a dark blue background."',
             gallery,
@@ -1701,7 +1935,8 @@ class RenderExampleTests(unittest.TestCase):
             "record-two-passes", "control-camera", "run-the-example",
         ])
         self.assertNotIn("data-static-demo", page.elements_by_id["about"])
-        self.assertEqual(page.elements_by_id["demo"]["data-example"], "deferred")
+        self.assertEqual(
+            page.elements_by_id["demo"]["data-example"], "deferred")
         self.assertEqual(
             page.elements_by_id["demo"]["aria-label"],
             "Live WebGPU demo: deferred shading",
@@ -1724,17 +1959,23 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("deferred-assets-caption", "Deferred shading runtime assets and compiled inputs"),
-            ("deferred-geometry-caption", "Deferred shading geometry and explicit GPU buffers"),
-            ("deferred-gbuffer-caption", "Full-resolution Deferred G-buffer attachments"),
-            ("deferred-lights-caption", "Six lights evaluated by every deferred composition fragment"),
-            ("deferred-passes-caption", "Deferred shading render passes and explicit draw work"),
+            ("deferred-assets-caption",
+             "Deferred shading runtime assets and compiled inputs"),
+            ("deferred-geometry-caption",
+             "Deferred shading geometry and explicit GPU buffers"),
+            ("deferred-gbuffer-caption",
+             "Full-resolution Deferred G-buffer attachments"),
+            ("deferred-lights-caption",
+             "Six lights evaluated by every deferred composition fragment"),
+            ("deferred-passes-caption",
+             "Deferred shading render passes and explicit draw work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertIn("../multisamplingalphatocoverage/#about", page.links)
         self.assertIn("../multisamplingalphatocoverage/", page.links)
         self.assertIn("../deferredmultisampling/", page.links)
@@ -1794,7 +2035,8 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 29, "name": "WebGPU deferred shading", '
             '"url": "https://pooya.ai/webgpu/deferred/"',
@@ -1809,7 +2051,8 @@ class RenderExampleTests(unittest.TestCase):
             "Write world position, normal, and albedo into three G-buffer targets, then light animated Jax and the floor with six lights in one fullscreen pass.",
             gallery,
         )
-        self.assertLess(gallery.index('href="./bloom/"'), gallery.index('href="./deferred/"'))
+        self.assertLess(gallery.index('href="./bloom/"'),
+                        gallery.index('href="./deferred/"'))
         self.assertLess(
             gallery.index('href="./deferred/"'),
             gallery.index('href="./deferredmultisampling/"'),
@@ -1853,17 +2096,23 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("deferred-msaa-assets-caption", "Deferred multisampling runtime assets and compiled inputs"),
-            ("deferred-msaa-geometry-caption", "Deferred multisampling scene geometry and explicit GPU buffers"),
-            ("deferred-msaa-gbuffer-caption", "Four-sample Deferred MSAA G-buffer attachments at 1280 by 720"),
-            ("deferred-msaa-resolve-caption", "Manual Deferred MSAA resolve work in the normal composition path"),
-            ("deferred-msaa-passes-caption", "Deferred multisampling render passes and submitted work"),
+            ("deferred-msaa-assets-caption",
+             "Deferred multisampling runtime assets and compiled inputs"),
+            ("deferred-msaa-geometry-caption",
+             "Deferred multisampling scene geometry and explicit GPU buffers"),
+            ("deferred-msaa-gbuffer-caption",
+             "Four-sample Deferred MSAA G-buffer attachments at 1280 by 720"),
+            ("deferred-msaa-resolve-caption",
+             "Manual Deferred MSAA resolve work in the normal composition path"),
+            ("deferred-msaa-passes-caption",
+             "Deferred multisampling render passes and submitted work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertIn("../deferred/#about", page.links)
         self.assertIn("../multisampling/#about", page.links)
         self.assertIn("../deferred/", page.links)
@@ -1937,7 +2186,8 @@ class RenderExampleTests(unittest.TestCase):
         ):
             self.assertIn(limitation, document)
         self.assertIn("./deferredmultisampling.js?build=seo-test", document)
-        self.assertIn("./deferredmultisampling_bg.wasm?build=seo-test", document)
+        self.assertIn(
+            "./deferredmultisampling_bg.wasm?build=seo-test", document)
         self.assertIn("screenshots/deferredmultisampling.jpg", document)
         self.assertNotIn("screenshots/deferred.jpg", document)
         self.assertIn(
@@ -1948,13 +2198,15 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 30, "name": "WebGPU deferred multisampling", '
             '"url": "https://pooya.ai/webgpu/deferredmultisampling/"',
             gallery,
         )
-        self.assertIn("<strong>WebGPU deferred multisampling</strong>", gallery)
+        self.assertIn(
+            "<strong>WebGPU deferred multisampling</strong>", gallery)
         self.assertIn(
             'alt="Animated Jax character walking across a checkerboard floor under colored deferred lights rendered with 4x MSAA"',
             gallery,
@@ -2010,18 +2262,25 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("deferred-shadows-assets-caption", "Deferred Shadows runtime assets and compiled inputs"),
-            ("deferred-shadows-buffers-caption", "Deferred Shadows scene geometry and explicit GPU buffers"),
-            ("deferred-shadows-maps-caption", "Deferred shadow-map resources and filtering rules"),
-            ("deferred-shadows-gbuffer-caption", "Single-sample Deferred Shadows G-buffer at 1280 by 720"),
-            ("deferred-shadows-lights-caption", "Eight moving spotlights evaluated by Deferred Shadows"),
-            ("deferred-shadows-passes-caption", "Deferred Shadows render passes and submitted work"),
+            ("deferred-shadows-assets-caption",
+             "Deferred Shadows runtime assets and compiled inputs"),
+            ("deferred-shadows-buffers-caption",
+             "Deferred Shadows scene geometry and explicit GPU buffers"),
+            ("deferred-shadows-maps-caption",
+             "Deferred shadow-map resources and filtering rules"),
+            ("deferred-shadows-gbuffer-caption",
+             "Single-sample Deferred Shadows G-buffer at 1280 by 720"),
+            ("deferred-shadows-lights-caption",
+             "Eight moving spotlights evaluated by Deferred Shadows"),
+            ("deferred-shadows-passes-caption",
+             "Deferred Shadows render passes and submitted work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertIn("../deferredmultisampling/#about", page.links)
         self.assertIn("../deferredmultisampling/", page.links)
         self.assertIn("../ssao/", page.links)
@@ -2049,7 +2308,8 @@ class RenderExampleTests(unittest.TestCase):
         ):
             self.assertIn(link, page.links)
         self.assertIn("cargo run --example deferredshadows", document)
-        self.assertIn("scripts/build-wasm.sh --release deferredshadows", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release deferredshadows", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
             "Shadow maps</dt><dd>3 &times; 1024&sup2;",
@@ -2112,7 +2372,8 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 31, "name": "WebGPU deferred shadows", '
             '"url": "https://pooya.ai/webgpu/deferredshadows/"',
@@ -2179,16 +2440,20 @@ class RenderExampleTests(unittest.TestCase):
         )
         for caption, caption_text in (
             ("ssao-assets-caption", "SSAO runtime assets and compiled inputs"),
-            ("ssao-targets-caption", "Full-resolution G-buffer and SSAO targets at 1280 by 720"),
-            ("ssao-sampling-caption", "Normal-path SSAO and blur source work per output pixel"),
+            ("ssao-targets-caption",
+             "Full-resolution G-buffer and SSAO targets at 1280 by 720"),
+            ("ssao-sampling-caption",
+             "Normal-path SSAO and blur source work per output pixel"),
             ("ssao-controls-caption", "Live SSAO controls, defaults, and shader effects"),
-            ("ssao-passes-caption", "SSAO frame passes and explicit scene or fullscreen draws"),
+            ("ssao-passes-caption",
+             "SSAO frame passes and explicit scene or fullscreen draws"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertEqual(document.count('<div class="article-table"'), 5)
         self.assertIn("../deferredshadows/#about", page.links)
         self.assertIn("../deferredshadows/", page.links)
@@ -2282,13 +2547,15 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 32, "name": "WebGPU screen-space ambient occlusion", '
             '"url": "https://pooya.ai/webgpu/ssao/"',
             gallery,
         )
-        self.assertIn("<strong>WebGPU screen-space ambient occlusion</strong>", gallery)
+        self.assertIn(
+            "<strong>WebGPU screen-space ambient occlusion</strong>", gallery)
         self.assertIn(
             'alt="Animated Jax character on a colorful checkerboard beside WebGPU SSAO controls"',
             gallery,
@@ -2354,17 +2621,23 @@ class RenderExampleTests(unittest.TestCase):
             document,
         )
         for caption, caption_text in (
-            ("compute-particles-assets-caption", "Compute Particles runtime assets and embedded inputs"),
-            ("compute-particles-resources-caption", "Fixed logical GPU resources owned by Compute Particles"),
-            ("compute-particles-simulation-caption", "Compute simulation constants and state transitions"),
-            ("compute-particles-render-caption", "Billboard expansion and fragment composition"),
-            ("compute-particles-passes-caption", "Compute Particles frame graph and submitted work"),
+            ("compute-particles-assets-caption",
+             "Compute Particles runtime assets and embedded inputs"),
+            ("compute-particles-resources-caption",
+             "Fixed logical GPU resources owned by Compute Particles"),
+            ("compute-particles-simulation-caption",
+             "Compute simulation constants and state transitions"),
+            ("compute-particles-render-caption",
+             "Billboard expansion and fragment composition"),
+            ("compute-particles-passes-caption",
+             "Compute Particles frame graph and submitted work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertEqual(document.count('<div class="article-table"'), 5)
         self.assertIn("../ssao/#about", page.links)
         self.assertIn("../ssao/", page.links)
@@ -2390,7 +2663,8 @@ class RenderExampleTests(unittest.TestCase):
         ):
             self.assertIn(link, page.links)
         self.assertIn("cargo run --example computeparticles", document)
-        self.assertIn("scripts/build-wasm.sh --release computeparticles", document)
+        self.assertIn(
+            "scripts/build-wasm.sh --release computeparticles", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
             "Particles</dt><dd>262,144",
@@ -2451,7 +2725,8 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 4, "name": "WebGPU compute particles", '
             '"url": "https://pooya.ai/webgpu/computeparticles/"',
@@ -2524,16 +2799,20 @@ class RenderExampleTests(unittest.TestCase):
         )
         for caption, caption_text in (
             ("nbody-assets-caption", "Compute N-body runtime assets and embedded inputs"),
-            ("nbody-resources-caption", "Compute N-body initialization and fixed logical GPU resources"),
-            ("nbody-tiling-caption", "Source-level calculate-pass workload for 12,288 bodies"),
-            ("nbody-controls-caption", "Compute N-body live controls and current defaults"),
+            ("nbody-resources-caption",
+             "Compute N-body initialization and fixed logical GPU resources"),
+            ("nbody-tiling-caption",
+             "Source-level calculate-pass workload for 12,288 bodies"),
+            ("nbody-controls-caption",
+             "Compute N-body live controls and current defaults"),
             ("nbody-passes-caption", "Compute N-body frame graph and submitted work"),
         ):
             self.assertIn(
                 f'role="region" aria-labelledby="{caption}" tabindex="0"',
                 document,
             )
-            self.assertIn(f'<caption id="{caption}">{caption_text}</caption>', document)
+            self.assertIn(
+                f'<caption id="{caption}">{caption_text}</caption>', document)
         self.assertEqual(document.count('<div class="article-table"'), 5)
         self.assertIn("../computecullandlod/#about", page.links)
         self.assertIn("../computecullandlod/", page.links)
@@ -2630,7 +2909,8 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+        gallery = (renderer.WEB_ROOT /
+                   "index.html").read_text(encoding="utf-8")
         self.assertIn(
             '"position": 7, "name": "WebGPU N-body simulation", '
             '"url": "https://pooya.ai/webgpu/computenbody/"',
