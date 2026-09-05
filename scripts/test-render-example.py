@@ -21,6 +21,28 @@ SPEC = importlib.util.spec_from_file_location(
 renderer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(renderer)
 
+
+def read_gallery():
+    """Read web/index.html, un-wrapping the text inside description spans.
+
+    The gallery is maintained by an HTML formatter, which reflows long lines
+    and so splits description text across a newline plus indentation. HTML
+    collapses that whitespace when rendered, so asserting the exact source
+    bytes failed on a pure reformat even though the page was unchanged.
+
+    Only the text inside `<span>` elements is collapsed, not the whole file:
+    the card regex below anchors on `^      </a>`, so the document's line
+    structure has to survive intact.
+    """
+    raw = (renderer.WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    return re.sub(
+        r"<span>(.*?)</span>",
+        lambda m: "<span>" + re.sub(r"\s+", " ", m.group(1)).strip() + "</span>",
+        raw,
+        flags=re.S,
+    )
+
+
 TEMPLATE = """<!doctype html>
 <html lang="en" class="__PAGE_CLASS__">
 <head>__PAGE_HEAD__</head>
@@ -480,13 +502,12 @@ class RenderExampleTests(unittest.TestCase):
                 )
 
     def test_repository_gallery_matches_every_article_metadata_record(self):
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             "<title>Rust WebGPU Examples & Tutorials | wgpu &amp; WGSL</title>",
             gallery,
         )
-        self.assertIn("<h1>Rust WebGPU examples & tutorials</h1>", gallery)
+        self.assertIn("<h1>Rust WebGPU examples & Tutorials</h1>", gallery)
         self.assertIn(
             'content="index, follow, max-image-preview:large"', gallery)
         nodes = [
@@ -1327,8 +1348,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../shadowmappingcascade/">Next: WebGPU cascaded shadow mapping &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 39, "name": "WebGPU shadow mapping", '
             '"url": "https://pooya.ai/webgpu/shadowmapping/"',
@@ -1399,8 +1419,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../pbrtexture/">Next: WebGPU PBR texture &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 36, "name": "WebGPU PBR Basic", '
             '"url": "https://pooya.ai/webgpu/pbr/"',
@@ -1476,8 +1495,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="../pbribl/">Next: WebGPU PBR image-based lighting &rarr;</a>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 37, "name": "WebGPU PBR textures", '
             '"url": "https://pooya.ai/webgpu/pbrtexture/"',
@@ -1551,8 +1569,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <p class="copyright">',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 38, "name": "WebGPU PBR image-based lighting", '
             '"url": "https://pooya.ai/webgpu/pbribl/"',
@@ -1635,8 +1652,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 33, "name": "WebGPU parallax occlusion mapping", '
             '"url": "https://pooya.ai/webgpu/parallaxmapping/"',
@@ -1750,8 +1766,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 34, "name": "WebGPU 4x MSAA multisampling", '
             '"url": "https://pooya.ai/webgpu/multisampling/"',
@@ -1904,8 +1919,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 35, "name": "WebGPU alpha-to-coverage foliage", '
             '"url": "https://pooya.ai/webgpu/multisamplingalphatocoverage/"',
@@ -2035,8 +2049,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 29, "name": "WebGPU deferred shading", '
             '"url": "https://pooya.ai/webgpu/deferred/"',
@@ -2198,8 +2211,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 30, "name": "WebGPU deferred multisampling", '
             '"url": "https://pooya.ai/webgpu/deferredmultisampling/"',
@@ -2372,8 +2384,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 31, "name": "WebGPU deferred shadows", '
             '"url": "https://pooya.ai/webgpu/deferredshadows/"',
@@ -2547,8 +2558,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 32, "name": "WebGPU screen-space ambient occlusion", '
             '"url": "https://pooya.ai/webgpu/ssao/"',
@@ -2725,8 +2735,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 4, "name": "WebGPU compute particles", '
             '"url": "https://pooya.ai/webgpu/computeparticles/"',
@@ -2909,8 +2918,7 @@ class RenderExampleTests(unittest.TestCase):
             f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
             document,
         )
-        gallery = (renderer.WEB_ROOT /
-                   "index.html").read_text(encoding="utf-8")
+        gallery = read_gallery()
         self.assertIn(
             '"position": 7, "name": "WebGPU N-body simulation", '
             '"url": "https://pooya.ai/webgpu/computenbody/"',

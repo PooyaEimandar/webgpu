@@ -60,3 +60,11 @@ jobs:
 
       - name: Tests
         run: cargo test --all-targets
+
+      # The Pages workflow gates its deploy on these, but only on a push to
+      # main — so a broken gallery/metadata pairing was only discovered at
+      # deploy time. Run them here too, on every PR.
+      - name: Web metadata and sitemap
+        run: |
+          python3 scripts/test-render-example.py
+          python3 scripts/test-render-sitemap.py
