@@ -22,7 +22,7 @@ path = "examples/nanite.rs"
 test = true
 
 [dependencies]
-base64 = { version = "0.22.1" }
+base64 = { version = "0.23.1" }
 bvh = { version = "0.12.0", default-features = false, features = ["std"] }
 bytes = { version = "1.12.1" }
 bytemuck = { version = "1.25.2", features = ["derive"] }
@@ -34,8 +34,11 @@ gltf = { version = "1.4.1", default-features = false, features = [
     "names",
     "utils",
 ] }
-http = { version = "1.4.2" }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+http = { version = "1.5.0" }
+image = { version = "0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
 # bvh 0.12 links nalgebra 0.34, and accel.rs hands Point3 values straight to
 # the bvh builder, so it must use that exact version — a newer nalgebra's
 # Point3 is a distinct type and will not coerce.
@@ -43,7 +46,7 @@ nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = fal
     "std",
 ] }
 sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
-rapier3d = "0.34.0"
+rapier3d = "0.35.3"
 
 # Just for Rapier Physics Engine, because it is generic-heavy
 [profile.dev]
@@ -63,8 +66,7 @@ sib = { git = "https://github.com/PooyaEimandar/sib", features = [
     "net-h1-server",
     "render",
 ] }
-ureq = { version = "3.3.0" }
-wry = { version = "0.55.1" }
+ureq = { version = "3.4.1" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6.2" }
@@ -87,12 +89,17 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSString",
     "std",
 ] }
+# htmlmesh's native webview. Kept macOS-only: the snapshot path that turns the
+# live page into a texture is WKWebView-specific, so on other platforms wry
+# could open a page but never render one -- while on Linux it binds WebKitGTK
+# and drags glib, gtk, webkit2gtk and libsoup into every build, including CI.
+wry = { version = "0.57.0" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { version = "0.3.103" }
-wasm-bindgen = { version = "0.2.126" }
-wasm-bindgen-futures = { version = "0.4.76" }
-web-sys = { version = "0.3.103", features = [
+js-sys = { version = "0.3.105" }
+wasm-bindgen = { version = "0.2.128" }
+wasm-bindgen-futures = { version = "0.4.78" }
+web-sys = { version = "0.3.105", features = [
     "Blob",
     "BlobPropertyBag",
     "console",

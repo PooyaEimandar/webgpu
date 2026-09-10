@@ -284,7 +284,7 @@ pub(super) fn build_jax_triangles(
     let normal_transform = transform.inverse().transpose();
     let mut triangles = Vec::with_capacity(jax.mesh.indices.len() / 3);
 
-    for face in jax.mesh.indices.chunks_exact(3) {
+    for face in jax.mesh.indices.as_chunks::<3>().0 {
         let Some((a, b, c)) = posed_triangle(&posed, face) else {
             continue;
         };
@@ -660,7 +660,7 @@ fn append_primitive(
         .unwrap_or_else(|| (0..positions.len() as u32).collect());
     let material_index = primitive.material().index().unwrap_or(0) as u32;
 
-    for face in indices.chunks_exact(3) {
+    for face in indices.as_chunks::<3>().0 {
         let Some((&p0, &p1, &p2)) = positions
             .get(face[0] as usize)
             .zip(positions.get(face[1] as usize))

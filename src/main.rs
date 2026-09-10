@@ -1129,7 +1129,7 @@ mod native {
     fn parse_query(query: &str) -> Result<HashMap<String, String>, String> {
         let mut params = HashMap::new();
         for pair in query.split('&').filter(|pair| !pair.is_empty()) {
-            let (key, value) = pair.split_once('=').map_or((pair, ""), |split| split);
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
             params.insert(percent_decode(key)?, percent_decode(value)?);
         }
         Ok(params)

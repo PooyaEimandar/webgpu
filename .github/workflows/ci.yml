@@ -33,14 +33,18 @@ jobs:
         run: rustup component add rustfmt clippy
 
       # winit and wgpu link against the system windowing stack, which the test
-      # binaries need even though CI never opens a window.
+      # binaries need even though CI never opens a window. libclang is for
+      # boring-sys, which generates its bindings with bindgen. No GTK/WebKit
+      # packages are needed here: wry is a macOS-only dependency, so nothing in
+      # the Linux graph reaches glib, gtk, webkit2gtk or libsoup.
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libxrandr-dev libxi-dev libxcursor-dev libgl1-mesa-dev \
-            libasound2-dev libudev-dev pkg-config cmake
+            libasound2-dev libudev-dev pkg-config cmake \
+            libclang-dev
 
       - name: Cache cargo registry and build
         uses: actions/cache@v4

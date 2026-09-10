@@ -1275,7 +1275,7 @@ fn build_ray_tracing_gltf_scene(
     let mut triangles = Vec::with_capacity(scene.mesh.indices.len() / 3);
     let mut bounds = None::<(glam::Vec3, glam::Vec3)>;
 
-    for triangle_indices in scene.mesh.indices.chunks_exact(3) {
+    for triangle_indices in scene.mesh.indices.as_chunks::<3>().0 {
         let Some(a) = skinned.get(triangle_indices[0] as usize) else {
             continue;
         };

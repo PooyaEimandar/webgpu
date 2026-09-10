@@ -1071,7 +1071,7 @@ impl HtmlSurface {
     }
 
     fn clear(&mut self, color: [u8; 4]) {
-        for pixel in self.rgba.chunks_exact_mut(4) {
+        for pixel in self.rgba.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&color);
         }
     }
@@ -1843,6 +1843,11 @@ impl HtmlRefreshRate {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+// Off macOS there is no webview, so nothing ever produces one of these: the
+// page-load and IPC callbacks that build them are part of the wry builder,
+// which is macOS-only. The type still has to exist because the backend's
+// channel and poll loop are shared across native targets.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
 enum NativeHtmlEvent {
     Started(String),
@@ -1857,6 +1862,9 @@ struct NativeHtmlSnapshot {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+// Likewise: only the macOS snapshot path produces these, so off macOS the
+// poll loop below always returns an empty vector.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum NativeHtmlTextureEvent {
     Captured(NativeHtmlSnapshot),
     Error(String),
@@ -1878,9 +1886,42 @@ enum NativePointerDevice {
     Touch,
 }
 
+// wry is compiled on macOS only (see Cargo.toml): the WKWebView snapshot path
+// that turns the live page into a texture has no counterpart elsewhere, and on
+// Linux wry binds WebKitGTK, which pulls glib, gtk, webkit2gtk and libsoup into
+// every build. Off macOS there is therefore no webview type to name, so this
+// placeholder gives the field below something to be `None` of. Every method
+// then keeps a single body on all native targets and simply takes the "not
+// available" branch it already had for a webview that failed to build. Nothing
+// ever constructs it, which is the whole point of it existing.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+type PlatformWebView = wry::WebView;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
+type PlatformWebView = UnavailableWebView;
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
+#[allow(dead_code, reason = "stands in for wry::WebView; never constructed")]
+struct UnavailableWebView;
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
+#[allow(dead_code, reason = "stands in for wry::WebView; never constructed")]
+impl UnavailableWebView {
+    fn load_html(&self, _html: &str) -> Result<(), &'static str> {
+        unreachable!("no webview is built off macOS")
+    }
+
+    fn load_url(&self, _url: &str) -> Result<(), &'static str> {
+        unreachable!("no webview is built off macOS")
+    }
+
+    fn evaluate_script(&self, _script: &str) -> Result<(), &'static str> {
+        unreachable!("no webview is built off macOS")
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct NativeHtmlBackend {
-    webview: Option<wry::WebView>,
+    webview: Option<PlatformWebView>,
     events: mpsc::Receiver<NativeHtmlEvent>,
     current_url: Option<String>,
     pending_capture_url: Option<String>,
@@ -1905,6 +1946,14 @@ impl NativeHtmlBackend {
         let load_tx = tx;
         #[cfg(target_os = "macos")]
         let (snapshot_tx, snapshot_rx) = mpsc::channel();
+        #[cfg(not(target_os = "macos"))]
+        let webview: Result<PlatformWebView, &'static str> = {
+            // Consume what the macOS path uses so the signature and the
+            // channel wiring stay identical on every native target.
+            let _ = (window, initial_html, ipc_tx, load_tx);
+            Err("wry is not compiled for this platform (macOS only)")
+        };
+        #[cfg(target_os = "macos")]
         let webview = wry::WebViewBuilder::new()
             .with_visible(true)
             .with_focused(false)
@@ -1964,6 +2013,8 @@ impl NativeHtmlBackend {
     }
 
     fn poll(&mut self) -> Vec<NativeHtmlTextureEvent> {
+        // Only the macOS snapshot arm below pushes into this.
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
         let mut texture_events = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {

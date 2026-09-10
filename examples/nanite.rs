@@ -1125,9 +1125,14 @@ impl NaniteExample {
                 let view = readback
                     .slice(..self.page_feedback_size())
                     .get_mapped_range();
+                // as_chunks yields [u8; 4] directly, so from_le_bytes takes the
+                // array whole and the width is checked rather than spelled out
+                // twice.
                 let words = view
-                    .chunks_exact(std::mem::size_of::<u32>())
-                    .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_le_bytes(*bytes))
                     .collect::<Vec<_>>();
                 if let Some(cache) = &mut self.page_cache {
                     cache.enqueue_feedback(&words);
@@ -2655,7 +2660,7 @@ fn quantized_lod_indices(
     let mut result = Vec::with_capacity(indices.len());
     let mut unique_triangles = HashSet::<[u32; 3]>::new();
 
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         let mut mapped = [0u32; 3];
         for corner in 0..3 {
             let source_index = triangle[corner];
@@ -2719,7 +2724,7 @@ fn spatially_sorted_indices(
 
     let extent = (maximum - minimum).max(glam::Vec3::splat(0.00001));
     let mut triangles = Vec::with_capacity(indices.len() / 3);
-    for (order, triangle) in indices.chunks_exact(3).enumerate() {
+    for (order, triangle) in indices.as_chunks::<3>().0.iter().enumerate() {
         let mut centroid = glam::Vec3::ZERO;
         for index in triangle {
             let vertex = vertices.get(*index as usize).ok_or_else(|| {

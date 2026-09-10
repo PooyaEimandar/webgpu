@@ -548,7 +548,7 @@ fn panel_rects(context: &RenderContext) -> [PanelRect; PIPELINE_COUNT] {
 fn wireframe_indices(indices: &[u32]) -> Vec<u32> {
     let mut lines = Vec::with_capacity(indices.len() * 2);
 
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         lines.extend_from_slice(&[
             triangle[0],
             triangle[1],
