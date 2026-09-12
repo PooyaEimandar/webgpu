@@ -12,12 +12,6 @@
       <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
     </header>
 
-    <dl class="demo-facts" aria-label="glTF skinning demo at a glance">
-      <div><dt>Skin joints</dt><dd>46</dd></div>
-      <div><dt>Model triangles</dt><dd>11,960</dd></div>
-      <div><dt>Animation clip</dt><dd>1.0 s</dd></div>
-    </dl>
-
     <nav class="article-toc" aria-labelledby="contents-title">
       <p id="contents-title">On this page</p>
       <ol>
@@ -33,7 +27,7 @@
 
     <h2 id="gpu-skinned-character" tabindex="-1">From a glTF skeleton to animated vertices</h2>
     <p>The earlier <a href="../gltf/#about">glTF loading example</a> rendered one rigid textured cube. Vertex skinning adds a hierarchy of animated joints. Each mesh vertex stores up to four joint indices and four weights; every frame, the CPU evaluates the skeleton and the vertex shader blends the corresponding matrices before projection.</p>
-    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/d58e37c192066f69c042fc9cbc3be0260eb0f58d">original glTF skinning commit</a> introduced the technique with the remotely hosted CesiumMan sample. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs">Rust example</a> instead loads the bundled Jax character, turns it 30&deg; around Y, and uses the current direct perspective projection. Its <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltfskinning.wgsl">WGSL shader</a> is unchanged from that commit. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>, loops automatically, and has no mouse, keyboard, camera, or playback controls.</p>
+    <p>My eight-year-old son suggested Jax from The Amazing Digital Circus as the test character for my samples. The current <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/gltfskinning.rs">Rust example</a> loads the bundled Jax character, turns it 30&deg; around Y, and uses the current direct perspective projection. Its <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/gltfskinning.wgsl">WGSL shader</a> is unchanged from the <a href="https://github.com/PooyaEimandar/webgpu/commit/d58e37c192066f69c042fc9cbc3be0260eb0f58d">original glTF skinning commit</a>. The demo runs through <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>, loops automatically, and has no mouse, keyboard, camera, or playback controls.</p>
 
     <figure class="article-figure">
       <picture>

@@ -12,12 +12,6 @@
       <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
     </header>
 
-    <dl class="demo-facts" aria-label="Nanite-style WebGPU demo at a glance">
-      <div><dt>Meshlet LODs</dt><dd>4</dd></div>
-      <div><dt>Geometry pages</dt><dd>30</dd></div>
-      <div><dt>Startup tiers</dt><dd>272&ndash;8,857</dd></div>
-    </dl>
-
     <nav class="article-toc" aria-labelledby="contents-title">
       <p id="contents-title">On this page</p>
       <ol>
@@ -37,7 +31,7 @@
 
     <h2 id="nanite-style-design" tabindex="-1">Build a WebGPU teaching renderer inspired by Nanite</h2>
     <p>The <a href="../raytracinggltf/#about">previous glTF ray-tracing article</a> traces an imported triangle scene in compute. This example returns to rasterization and asks a different scaling question: how can the renderer choose less geometry with distance, make page residency visible to the GPU, compact surviving work, and avoid one CPU draw call per object?</p>
-    <p>The <a href="https://github.com/PooyaEimandar/webgpu/commit/4d6adfa84331e1c4f684f3fe9218b67a1363e80e">introducing Nanite commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/nanite.rs">Rust example</a>, the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_compute.wgsl">compute</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_render.wgsl">render</a> shaders, the HZB <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_copy.wgsl">copy</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_reduce.wgsl">reduction</a> shaders, screenshots, meshlet paging, HZB recovery, and indirect submission. The <a href="https://github.com/PooyaEimandar/webgpu/commit/a0d7a41e144706b5f79dc30f95b253100f5a2a33">adapter-scaled population update</a> replaced one maximum default with four startup tiers. The <a href="https://github.com/PooyaEimandar/webgpu/commit/c73b19eceb187417370e82ebeedb8446554bce38">collapsible-panel change</a> and <a href="https://github.com/PooyaEimandar/webgpu/commit/0a6f61003b053d261bf2e264063527aad3d8ba14">mobile joystick fix</a> produced the current interaction path. Rendering and application setup use <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>.</p>
+    <p>Rendering and application setup use <a href="https://github.com/PooyaEimandar/sib"><code>sib::render</code></a>. The <a href="https://github.com/PooyaEimandar/webgpu/commit/4d6adfa84331e1c4f684f3fe9218b67a1363e80e">introducing Nanite commit</a> added the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/nanite.rs">Rust example</a>, the <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_compute.wgsl">compute</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_render.wgsl">render</a> shaders, and the HZB <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_copy.wgsl">copy</a> and <a href="https://github.com/PooyaEimandar/webgpu/blob/main/shaders/nanite_hzb_reduce.wgsl">reduction</a> shaders.</p>
     <p><strong>Nanite-style</strong> is deliberate wording. This is not Unreal Engine's Nanite implementation. It uses CPU-generated grid-quantized LODs, fixed-size meshlet pages, a CPU-managed residency cache, ordinary WGSL vertex shaders, and four WebGPU indirect commands. It has no mesh shaders, persistent cluster hierarchy, GPU decompression, disk page store, or production-quality simplifier.</p>
 
     <figure class="article-figure">
@@ -135,7 +129,7 @@
     <p>This is a residency demonstration, not network or disk streaming. All four LODs are generated from the already downloaded Jax mesh and retained as CPU vectors. The requested slot count is 32 but clamps to the current asset's 30 total pages. Consequently all pages fit after warm-up and the LRU eviction path should remain at zero for this asset. A larger virtual set or smaller requested cache would be needed to demonstrate sustained cache pressure.</p>
 
     <h2 id="select-cull-and-draw" tabindex="-1">Select LODs, compact visible records, and draw indirectly</h2>
-    <p>The first 64-thread kernel assigns one LOD per active LOD instance after a whole-model frustum test and residency fallback. The static culling dispatch then spans two workgroups in X&mdash;enough for the maximum 125 meshlets&mdash;and one Y row per active instance. Threads beyond the selected level's meshlet count return. Full-detail instances use a separate one-dimensional culling dispatch.</p>
+    <p>The first 64-thread kernel assigns one LOD per active LOD instance after a whole-model frustum test and residency fallback. The static culling dispatch then spans two workgroups in X, enough for the maximum 125 meshlets, and one Y row per active instance. Threads beyond the selected level's meshlet count return. Full-detail instances use a separate one-dimensional culling dispatch.</p>
     <p>Survivors atomically allocate entries in a 48-byte <code>VisibleDraw</code> array. Each record stores the instance transform and either a meshlet/page reference or the source full-detail instance index. The atomic counts live directly inside four indirect argument records:</p>
 
     <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>

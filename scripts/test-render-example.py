@@ -1481,8 +1481,7 @@ class RenderExampleTests(unittest.TestCase):
         for fact in (
             "50,453,345", "2,372,173", "1,776,320", "32,814",
             "100,623", "33,541", "1,978,020", "83,886,080",
-            "109,223,928", "9,437,184", "1,048,576", "Bind entries</dt><dd>13",
-            "Depth32Float", "NdotV", "VdotH",
+            "109,223,928", "9,437,184", "1,048,576", "Depth32Float", "NdotV", "VdotH",
         ):
             self.assertIn(fact, document)
         self.assertIn("./pbrtexture.js?build=seo-test", document)
@@ -1632,8 +1631,7 @@ class RenderExampleTests(unittest.TestCase):
             "scripts/build-wasm.sh --release parallaxmapping", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Height layers</dt><dd>48", "Plane triangles</dt><dd>2",
-            "Asset requests</dt><dd>3", "9,789,600", "9,786,708",
+            "9,789,600", "9,786,708",
             "5,592,544", "4,194,404", "5,592,404", "4,194,304",
             "2,652", "204-byte", "216-byte GPU mesh", "11 mips",
             "392 bytes", "160-byte", "16-byte", "128 iterations",
@@ -1736,9 +1734,6 @@ class RenderExampleTests(unittest.TestCase):
             "scripts/build-wasm.sh --release multisampling", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Rasterization samples</dt><dd>4&times;",
-            "Voyager triangles</dt><dd>20,378",
-            "Runtime scene assets</dt><dd>1",
             "3,203,450", "2,396,228", "23,914", "61,134",
             "44-byte stride", "1,052,216", "244,536", "144-byte uniform",
             "12,582,916", "13,879,812", "14,745,600", "29,491,200",
@@ -1873,9 +1868,6 @@ class RenderExampleTests(unittest.TestCase):
         )
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Rasterization samples</dt><dd>4&times;",
-            "Tree instances</dt><dd>25",
-            "Submitted triangles</dt><dd>132,550",
             "1,706,820", "1,275,656", "207,780",
             "5,499", "15,906", "5,302", "397,650",
             "44-byte vertex stream", "241,956", "63,624", "300",
@@ -2016,9 +2008,6 @@ class RenderExampleTests(unittest.TestCase):
         self.assertIn("scripts/build-wasm.sh --release deferred", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "G-buffer color targets</dt><dd>3",
-            "Deferred lights</dt><dd>6",
-            "Geometry-pass triangles</dt><dd>11,962",
             "68,324", "1,957,752", "13,008", "2,039,084",
             "35,880", "76 bytes", "2,726,880", "143,520",
             "11,960 triangles", "8,192", "46 used", "2,879,368",
@@ -2159,9 +2148,6 @@ class RenderExampleTests(unittest.TestCase):
         )
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "G-buffer samples</dt><dd>4&times;",
-            "Light evaluations per pixel</dt><dd>24",
-            "G-buffer bytes per pixel</dt><dd>96",
             "68,324", "1,957,752", "13,008", "2,039,084",
             "35,880 positions", "35,880 source <code>u16</code> indices",
             "46-joint", "Walking_1", "138 channels", "91 STEP", "47 LINEAR",
@@ -2324,9 +2310,6 @@ class RenderExampleTests(unittest.TestCase):
             "scripts/build-wasm.sh --release deferredshadows", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Shadow maps</dt><dd>3 &times; 1024&sup2;",
-            "Spotlights</dt><dd>8",
-            "PCF taps per shadowed light</dt><dd>9",
             "68,324", "1,957,752", "13,008", "2,039,084",
             "12,553", "350 lines of WGSL", "122,752",
             "35,880 vertices", "35,880 source <code>u16</code> indices",
@@ -2496,9 +2479,6 @@ class RenderExampleTests(unittest.TestCase):
         self.assertIn("scripts/build-wasm.sh --release ssao", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "SSAO neighbors</dt><dd>32",
-            "Blur taps</dt><dd>25",
-            "Render passes</dt><dd>8",
             "68,324", "1,957,752", "13,008", "2,039,084",
             "146 accessor declarations", "59 nodes", "16,832", "452 lines of WGSL",
             "Six graphics pipelines", "122,752", "Walking_1", "138 channels",
@@ -2677,9 +2657,6 @@ class RenderExampleTests(unittest.TestCase):
             "scripts/build-wasm.sh --release computeparticles", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Particles</dt><dd>262,144",
-            "Compute workgroups</dt><dd>1,024",
-            "Ping-pong storage</dt><dd>16 MiB",
             "16,484", "64&times;64 RGBA8; 1 mip", "16,384 bytes",
             "1,124", "256&times;0 header; RGBA8; 1 mip",
             "1,024 bytes at 256&times;1",
@@ -2853,9 +2830,6 @@ class RenderExampleTests(unittest.TestCase):
         self.assertIn("scripts/build-wasm.sh --release computenbody", document)
         self.assertIn("cargo run --bin serve", document)
         for fact in (
-            "Particles</dt><dd>12,288",
-            "Pair terms per frame</dt><dd>150,994,944",
-            "Shared tile per workgroup</dt><dd>4 KiB",
             "16,484", "64&times;64 RGBA8; 1 mip", "16,384-byte",
             "1,124", "256&times;0 header; RGBA8; 1 mip",
             "1,024 bytes at 256&times;1", "2,445", "85 lines",

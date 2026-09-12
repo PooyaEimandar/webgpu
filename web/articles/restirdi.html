@@ -12,12 +12,6 @@
       <p class="byline">By <a href="https://pooya.ai/" rel="author">Pooya Eimandar</a><span aria-hidden="true">&middot;</span>Rust / wgpu / WGSL</p>
     </header>
 
-    <dl class="demo-facts" aria-label="WebGPU ReSTIR direct illumination at a glance">
-      <div><dt>Static triangles</dt><dd>262,266</dd></div>
-      <div><dt>Default DI candidates</dt><dd>12 per pixel</dd></div>
-      <div><dt>Normal compute passes</dt><dd>8 per frame</dd></div>
-    </dl>
-
     <nav class="article-toc" aria-labelledby="contents-title">
       <p id="contents-title">On this page</p>
       <ol>
@@ -43,11 +37,11 @@
         <source srcset="../screenshots/restirdi.webp" type="image/webp" />
         <img src="__ARTICLE_IMAGE__" alt="__ARTICLE_IMAGE_ALT__" width="1280" height="720" loading="lazy" decoding="async" />
       </picture>
-      <figcaption>The 1280&times;720 capture shows Jax crossing the Sponza atrium, a soft floor shadow, and the full egui panel. It is stored as a 298,874-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.jpg">JPEG</a> and 115,138-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.webp">WebP</a>. The panel records tuned values&mdash;16 candidates, eight neighbors, radius 36, and history 64&mdash;rather than the current 12, 2, 12, and 20 defaults. Its Apple M2 Max timing and 1080&times;678 ray target describe that capture only.</figcaption>
+      <figcaption>The 1280&times;720 capture shows Jax crossing the Sponza atrium, a soft floor shadow, and the full egui panel. It is stored as a 298,874-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.jpg">JPEG</a> and 115,138-byte <a href="https://github.com/PooyaEimandar/webgpu/blob/main/screenshots/restirdi.webp">WebP</a>. The panel records tuned values of 16 candidates, eight neighbors, radius 36, and history 64, rather than the current 12, 2, 12, and 20 defaults. Its Apple M2 Max timing and 1080&times;678 ray target describe that capture only.</figcaption>
     </figure>
 
     <h2 id="load-two-scenes" tabindex="-1">Load a static Sponza BVH and refit animated Jax bounds</h2>
-    <p>The loader reads Sponza's glTF, binary geometry, 69 referenced textures, and committed BVH. The static scene contains 262,266 triangles, 25 materials, and 524,531 BVH nodes&mdash;one leaf per triangle in a full binary hierarchy. Every compact node is 32 bytes. Its header records magic <code>RSTBVH01</code>, format version 1, node stride, triangle and node counts, and a geometry fingerprint, so a stale hierarchy is rejected instead of silently pairing with different geometry.</p>
+    <p>The loader reads Sponza's glTF, binary geometry, 69 referenced textures, and committed BVH. The static scene contains 262,266 triangles, 25 materials, and 524,531 BVH nodes, one leaf per triangle in a full binary hierarchy. Every compact node is 32 bytes. Its header records magic <code>RSTBVH01</code>, format version 1, node stride, triangle and node counts, and a geometry fingerprint, so a stale hierarchy is rejected instead of silently pairing with different geometry.</p>
     <p>Jax adds one material and 11,960 animated triangles. Rust builds its 23,919-node topology once, advances skeletal animation every update, and at most every 1/30 second regenerates posed triangles and refits bounds without changing child indices. Before the new pose is uploaded, the prior 128-byte triangle records are packed two per 16-texel row in an <code>Rgba32Float</code> texture. The primary shader uses that pose to generate object motion for temporal reprojection.</p>
 
     <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>
@@ -139,7 +133,7 @@ reservoir_stream(
     </div>
 
     <h2 id="resources-controls" tabindex="-1">Budget per-pixel history and tune the renderer live</h2>
-    <p>Two 64-byte G-buffers, three 48-byte reservoir buffers, and six <code>Rgba16Float</code> textures&mdash;two HDR, two denoise, and two moment targets&mdash;consume 320 logical bytes per ray pixel before alignment and descriptors. The target preserves surface aspect ratio, caps the largest dimension at 1080, then applies the 0.35-to-1.0 ray scale. Resizing or changing scale rebuilds all size-dependent resources and clears history. At 1080&times;608, those listed frame resources alone occupy 210,124,800 bytes, about 200.4 MiB.</p>
+    <p>Two 64-byte G-buffers, three 48-byte reservoir buffers, and six <code>Rgba16Float</code> textures consume 320 logical bytes per ray pixel before alignment and descriptors. The six textures are two HDR, two denoise, and two moment targets. The target preserves surface aspect ratio, caps the largest dimension at 1080, then applies the 0.35-to-1.0 ray scale. Resizing or changing scale rebuilds all size-dependent resources and clears history. At 1080&times;608, those listed frame resources alone occupy 210,124,800 bytes, about 200.4 MiB.</p>
     <p>The geometry buffer reserves 35,100,928 bytes for 274,226 triangle records. Static and dynamic BVHs reserve 17,550,400 bytes, and the previous-pose texture reserves 1,530,880 bytes. The 26-layer base-color, normal, and metallic-roughness arrays generate complete CPU mip chains and contain 54,525,848 logical texel bytes. These figures describe declared payload, not measured VRAM after driver padding, egui, the surface, staging, or implementation overhead.</p>
 
     <p class="table-scroll-hint">Scroll sideways to see all table columns.</p>

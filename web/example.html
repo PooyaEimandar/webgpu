@@ -253,34 +253,6 @@
         padding: 0 8px;
       }
 
-      .demo-facts {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
-        margin: 0 0 48px;
-        padding: 24px 0;
-        border-top: 1px solid #222630;
-        border-bottom: 1px solid #222630;
-      }
-
-      .demo-facts dt {
-        color: #8c96a5;
-        font-size: 0.75rem;
-      }
-
-      .demo-facts div {
-        display: flex;
-        flex-direction: column;
-      }
-
-      .demo-facts dd {
-        margin: auto 0 0;
-        padding-top: 4px;
-        color: #f4f7fb;
-        font-size: 1.5rem;
-        line-height: 1.3;
-      }
-
       .example-article h2 {
         margin: 48px 0 16px;
         color: #f4f7fb;
@@ -452,6 +424,38 @@
         border-top: 1px solid #222630;
       }
 
+      /* The demo-only layout locks the viewport to the canvas, so the site
+         footer belongs to the scrollable article pages. */
+      .site-footer {
+        display: none;
+      }
+
+      .has-article .site-footer {
+        display: block;
+        padding: 0 24px 40px;
+        border-top: 1px solid #222630;
+      }
+
+      .site-nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px 24px;
+        max-width: 760px;
+        margin: 0 auto;
+        padding-top: 28px;
+        font-size: 0.8125rem;
+      }
+
+      .site-nav a {
+        color: #8c96a5;
+      }
+
+      .site-nav a:hover,
+      .site-nav a:focus-visible {
+        color: #f4f7fb;
+      }
+
       .article-footer .copyright {
         flex-basis: 100%;
         margin: 8px 0 0;
@@ -600,6 +604,17 @@
       </section>
       __ARTICLE__
     </main>
+    <footer class="site-footer">
+      <nav class="site-nav" aria-label="Site navigation">
+        <a href="https://pooya.ai/">Home</a>
+        <a href="https://pooya.ai/timeline/">Timeline</a>
+        <a href="../">WebGPU</a>
+        <a href="https://github.com/PooyaEimandar" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://www.youtube.com/channel/UC5XZoDB5YHd07WSWeMAYyZQ" target="_blank" rel="noopener noreferrer">YouTube</a>
+        <a href="https://github.com/sponsors/PooyaEimandar" target="_blank" rel="noopener noreferrer">Sponsor</a>
+        <a href="mailto:mail@pooya.ai">Contact</a>
+      </nav>
+    </footer>
     <script type="module">
       const root = document.documentElement;
       const demo = document.getElementById("demo");

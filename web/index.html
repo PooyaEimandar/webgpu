@@ -122,6 +122,47 @@
       padding: 48px 0;
     }
 
+    .site-footer {
+      width: min(1040px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+      border-top: 1px solid #222630;
+      color: #8c96a5;
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    /* The gallery styles bare p/span/a for its cards (span is display:block and
+       p is capped at 680px). Reset them to inline text inside the footer. */
+    .site-footer p {
+      max-width: none;
+      margin: 0;
+      color: inherit;
+      font-size: inherit;
+      line-height: 1.6;
+    }
+
+    .site-footer span {
+      display: inline;
+      color: inherit;
+      font-size: inherit;
+      line-height: inherit;
+    }
+
+    .site-footer a {
+      display: inline;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      color: inherit;
+      text-decoration: underline;
+    }
+
+    .site-footer a:hover,
+    .site-footer a:focus-visible {
+      color: #f4f7fb;
+    }
+
     .source-link {
       position: fixed;
       top: 16px;
@@ -805,6 +846,14 @@
       </a>
     </div>
   </main>
+  <footer class="site-footer">
+    <p>&copy; <span data-current-year>2026</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>
+  </footer>
+  <script>
+    for (const year of document.querySelectorAll("[data-current-year]")) {
+      year.textContent = String(new Date().getFullYear());
+    }
+  </script>
 </body>
 
 </html>
