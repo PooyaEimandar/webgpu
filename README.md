@@ -60,10 +60,6 @@ Try the WASM demos [here](https://pooya.ai/webgpu/)
 
 The `residentevil2` example uses [Claire Redfield - The Darkside Chronicles](https://sketchfab.com/3d-models/claire-redfield-the-darkside-chronicles-8016829b88aa4cd089e7e2c0c93d898f) by many-bees under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-## ReSTIR acceleration
-
-The ReSTIR examples use `bvh` for the shared native and WASM acceleration structure. A native asset tool builds Sponza's SAH BVH in parallel, serializes compact 32-byte GPU nodes, and commits the versioned result so both platforms load the same hierarchy without rebuilding it at startup. Jax builds its topology once and refits the animated bounds at runtime.
-
 ## Running
 
 Native:
