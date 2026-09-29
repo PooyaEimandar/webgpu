@@ -617,7 +617,7 @@ class RenderExampleTests(unittest.TestCase):
                     f"scripts/build-wasm.sh --release {example}", document)
                 self.assertIn("cargo run --bin serve", document)
                 self.assertIn('<footer class="article-footer">', fragment)
-                self.assertIn("data-current-year", fragment)
+                self.assertIn("data-current-year", document)
                 self.assertGreaterEqual(len(metadata["title"]), 30)
                 self.assertLessEqual(len(metadata["title"]), 70)
                 self.assertGreaterEqual(len(metadata["description"]), 120)
@@ -1565,7 +1565,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/pbribl.rs">Read the PBR image-based lighting source &nearr;</a>\n'
             '      <a href="../pbrtexture/">&larr; Previous: WebGPU PBR texture</a>\n'
             '      <a href="../parallaxmapping/">Next: WebGPU parallax occlusion mapping &rarr;</a>\n'
-            '      <p class="copyright">',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -1647,7 +1647,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/parallaxmapping.rs">Read the Parallax Mapping source &nearr;</a>\n'
             '      <a href="../pbribl/">&larr; Previous: WebGPU PBR image-based lighting</a>\n'
             '      <a href="../multisampling/">Next: WebGPU 4x MSAA multisampling &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -1758,7 +1758,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisampling.rs">Read the Multisampling source &nearr;</a>\n'
             '      <a href="../parallaxmapping/">&larr; Previous: WebGPU parallax occlusion mapping</a>\n'
             '      <a href="../multisamplingalphatocoverage/">Next: WebGPU alpha-to-coverage &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -1908,7 +1908,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/multisamplingalphatocoverage.rs">Read the Alpha-to-coverage source &nearr;</a>\n'
             '      <a href="../multisampling/">&larr; Previous: WebGPU 4x MSAA multisampling</a>\n'
             '      <a href="../deferred/">Next: WebGPU deferred shading &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2035,7 +2035,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferred.rs">Read the Deferred shading source &nearr;</a>\n'
             '      <a href="../multisamplingalphatocoverage/">&larr; Previous: WebGPU alpha-to-coverage</a>\n'
             '      <a href="../deferredmultisampling/">Next: WebGPU deferred multisampling &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2194,7 +2194,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferredmultisampling.rs">Read the Deferred multisampling source &nearr;</a>\n'
             '      <a href="../deferred/">&larr; Previous: WebGPU deferred shading</a>\n'
             '      <a href="../deferredshadows/">Next: WebGPU deferred shadows &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2364,7 +2364,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/deferredshadows.rs">Read the Deferred Shadows source &nearr;</a>\n'
             '      <a href="../deferredmultisampling/">&larr; Previous: WebGPU deferred multisampling</a>\n'
             '      <a href="../ssao/">Next: WebGPU screen-space ambient occlusion &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2535,7 +2535,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/ssao.rs">Read the SSAO source &nearr;</a>\n'
             '      <a href="../deferredshadows/">&larr; Previous: WebGPU deferred shadows</a>\n'
             '      <a href="../computeparticles/">Next: WebGPU compute particles &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2709,7 +2709,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computeparticles.rs">Read the Compute Particles source &nearr;</a>\n'
             '      <a href="../ssao/">&larr; Previous: WebGPU screen-space ambient occlusion</a>\n'
             '      <a href="../computecloth/">Next: WebGPU compute cloth simulation &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()
@@ -2889,7 +2889,7 @@ class RenderExampleTests(unittest.TestCase):
             '      <a href="https://github.com/PooyaEimandar/webgpu/blob/main/examples/computenbody.rs">Read the Compute N-body source &nearr;</a>\n'
             '      <a href="../computecullandlod/">&larr; Previous: WebGPU compute culling and LOD</a>\n'
             '      <a href="../computeraytracing/">Next: WebGPU compute shader ray tracing &rarr;</a>\n'
-            f'      <p class="copyright">&copy; <span data-current-year>{renderer.date.today().year}</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights reserved.</p>',
+            '    </footer>',
             document,
         )
         gallery = read_gallery()

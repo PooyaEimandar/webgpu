@@ -436,32 +436,22 @@
         border-top: 1px solid #222630;
       }
 
-      .site-nav {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 12px 24px;
+      .site-footer p {
         max-width: 760px;
         margin: 0 auto;
         padding-top: 28px;
+        color: #8c96a5;
         font-size: 0.8125rem;
-      }
-
-      .site-nav a {
-        color: #8c96a5;
-      }
-
-      .site-nav a:hover,
-      .site-nav a:focus-visible {
-        color: #f4f7fb;
-      }
-
-      .article-footer .copyright {
-        flex-basis: 100%;
-        margin: 8px 0 0;
-        color: #8c96a5;
-        font-size: 0.75rem;
         text-align: center;
+      }
+
+      .site-footer a {
+        color: inherit;
+      }
+
+      .site-footer a:hover,
+      .site-footer a:focus-visible {
+        color: #f4f7fb;
       }
 
       @media (max-width: 680px) {
@@ -605,15 +595,8 @@
       __ARTICLE__
     </main>
     <footer class="site-footer">
-      <nav class="site-nav" aria-label="Site navigation">
-        <a href="https://pooya.ai/">Home</a>
-        <a href="https://pooya.ai/timeline/">Timeline</a>
-        <a href="../">WebGPU</a>
-        <a href="https://github.com/PooyaEimandar" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://www.youtube.com/channel/UC5XZoDB5YHd07WSWeMAYyZQ" target="_blank" rel="noopener noreferrer">YouTube</a>
-        <a href="https://github.com/sponsors/PooyaEimandar" target="_blank" rel="noopener noreferrer">Sponsor</a>
-        <a href="mailto:mail@pooya.ai">Contact</a>
-      </nav>
+      <p>&copy; <span data-current-year>2026</span> <a href="https://pooya.ai">Pooya Eimandar</a>. All rights
+        reserved.</p>
     </footer>
     <script type="module">
       const root = document.documentElement;
