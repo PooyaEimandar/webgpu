@@ -48,10 +48,17 @@ struct Uniforms {
 impl Uniforms {
     fn new(aspect_ratio: f32, animation_time: f32) -> Self {
         let view_pos = glam::Vec3::new(0.0, 0.0, 4.65);
-        let view =
-            glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.0, -18.0), glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.05, 128.0);
+        let view = glam::camera::rh::view::look_at_mat4(
+            view_pos,
+            glam::Vec3::new(0.0, 0.0, -18.0),
+            glam::Vec3::Y,
+        );
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.05,
+            128.0,
+        );
         let model = glam::Mat4::from_rotation_z(animation_time * 0.16 * std::f32::consts::TAU);
 
         Self {
@@ -231,7 +238,7 @@ impl Example for TextureMipmapGenerationExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout()],
+                    buffers: &[Some(Vertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

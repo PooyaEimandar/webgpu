@@ -29,9 +29,13 @@ impl Uniforms {
         let yaw = -35.0_f32.to_radians();
         let distance = radius * 2.55;
         let eye = glam::Vec3::new(yaw.sin() * distance, radius * 0.12, yaw.cos() * distance);
-        let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, radius * 16.0);
+        let view = glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::ZERO, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            radius * 16.0,
+        );
         let model = view
             * glam::Mat4::from_rotation_y(-45.0_f32.to_radians())
             * glam::Mat4::from_translation(-center);
@@ -388,7 +392,7 @@ fn create_pipeline(
                 module: shader,
                 entry_point: Some(vertex_entry),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

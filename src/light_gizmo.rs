@@ -120,7 +120,7 @@ impl LightGizmoRenderer {
                     module: &module,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[GizmoVertex::layout()],
+                    buffers: &[Some(GizmoVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,

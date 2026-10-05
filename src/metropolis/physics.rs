@@ -84,6 +84,9 @@ pub struct PhysicsWorld {
     narrow_phase: NarrowPhase,
     impulse_joints: ImpulseJointSet,
     multibody_joints: MultibodyJointSet,
+    // Rapier 0.36 threads a soft-body set through every step. Nothing here
+    // is deformable, so it stays empty.
+    soft_bodies: SoftBodySet,
     ccd_solver: CCDSolver,
     integration: IntegrationParameters,
     controller: KinematicCharacterController,
@@ -235,6 +238,7 @@ impl PhysicsWorld {
             narrow_phase: NarrowPhase::new(),
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
+            soft_bodies: SoftBodySet::new(),
             ccd_solver: CCDSolver::new(),
             integration: IntegrationParameters::default(),
             controller,
@@ -396,6 +400,7 @@ impl PhysicsWorld {
             &mut self.colliders,
             &mut self.impulse_joints,
             &mut self.multibody_joints,
+            &mut self.soft_bodies,
             &mut self.ccd_solver,
             &(),
             &(),

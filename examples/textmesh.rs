@@ -23,13 +23,17 @@ impl Uniforms {
             * glam::Mat4::from_rotation_x(8.0_f32.to_radians())
             * glam::Mat4::from_scale(glam::Vec3::splat(mesh_scale));
         let camera_distance = if aspect_ratio >= 1.0 { 5.5 } else { 7.1 };
-        let view = glam::Mat4::look_at_rh(
+        let view = glam::camera::rh::view::look_at_mat4(
             glam::Vec3::new(0.0, 0.12, camera_distance),
             glam::Vec3::new(0.0, 0.0, 0.0),
             glam::Vec3::Y,
         );
-        let projection =
-            glam::Mat4::perspective_rh(43.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            43.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            100.0,
+        );
 
         Self {
             model_view_projection: (projection * view * model).to_cols_array_2d(),
@@ -143,7 +147,7 @@ impl Example for TextMeshExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[text_mesh::TextMeshVertex::layout()],
+                    buffers: &[Some(text_mesh::TextMeshVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

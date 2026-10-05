@@ -381,6 +381,9 @@ mod tests {
         Ok(())
     }
 
+    // The encoder only exists natively: the browser build decodes a prebuilt
+    // asset and never writes one.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compact_asset_round_trips() -> RenderResult<()> {
         let triangles = [triangle(glam::Vec3::ZERO), triangle(glam::Vec3::splat(2.0))];

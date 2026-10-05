@@ -69,13 +69,17 @@ impl Uniforms {
         } else {
             glam::Vec3::new(-1.9, 3.15, 10.4)
         };
-        let view = glam::Mat4::look_at_rh(
+        let view = glam::camera::rh::view::look_at_mat4(
             camera_position,
             glam::Vec3::new(0.1, 0.05, 0.0),
             glam::Vec3::Y,
         );
-        let projection =
-            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
         let mut instances = [InstanceData::default(); MAX_LAYERS];
         let center = (layer_count as f32 - 1.0) * 0.5;
         let scale = if aspect_ratio >= 1.0 { 1.15 } else { 0.95 };
@@ -248,7 +252,7 @@ impl Example for TextureArrayExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout()],
+                    buffers: &[Some(Vertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

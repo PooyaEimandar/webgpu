@@ -87,9 +87,13 @@ impl SceneUniforms {
     fn new(aspect_ratio: f32) -> Self {
         let view_pos = glam::Vec3::new(4.2, 2.8, 5.4);
         let view_target = glam::Vec3::new(0.0, -0.45, 0.0);
-        let view = glam::Mat4::look_at_rh(view_pos, view_target, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 128.0);
+        let view = glam::camera::rh::view::look_at_mat4(view_pos, view_target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            128.0,
+        );
 
         Self {
             view_projection: (projection * view).to_cols_array_2d(),
@@ -299,7 +303,7 @@ impl ComputeClothExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("Compute cloth")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -352,9 +356,14 @@ impl ComputeClothExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -394,7 +403,7 @@ impl ComputeClothExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -833,7 +842,7 @@ fn create_cloth_pipeline(
                 module: shader,
                 entry_point: Some("cloth_vs"),
                 compilation_options: Default::default(),
-                buffers: &[ClothParticle::layout()],
+                buffers: &[Some(ClothParticle::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
@@ -867,7 +876,7 @@ fn create_sphere_pipeline(
                 module: shader,
                 entry_point: Some("sphere_vs"),
                 compilation_options: Default::default(),
-                buffers: &[SphereVertex::layout()],
+                buffers: &[Some(SphereVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

@@ -1,0 +1,7 @@
+# Pinned so a new stable release cannot turn CI red on its own: clippy gains
+# lints with every release, and CI runs with -D warnings. Bump deliberately,
+# fixing whatever the new lints report in the same change.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

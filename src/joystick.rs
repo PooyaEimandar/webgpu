@@ -372,7 +372,7 @@ impl JoystickOverlay {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[OverlayVertex::layout()],
+                    buffers: &[Some(OverlayVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -585,7 +585,7 @@ impl FpsCamera {
     }
 
     pub fn view_matrix(self) -> glam::Mat4 {
-        glam::Mat4::look_at_rh(self.eye, self.eye + self.forward(), glam::Vec3::Y)
+        glam::camera::rh::view::look_at_mat4(self.eye, self.eye + self.forward(), glam::Vec3::Y)
     }
 
     pub fn target(self) -> glam::Vec3 {

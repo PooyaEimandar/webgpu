@@ -504,10 +504,10 @@ class RenderExampleTests(unittest.TestCase):
     def test_repository_gallery_matches_every_article_metadata_record(self):
         gallery = read_gallery()
         self.assertIn(
-            "<title>Rust WebGPU Examples & Tutorials | wgpu &amp; WGSL</title>",
+            "<title>Rust WebGPU Examples &amp; Tutorials | wgpu &amp; WGSL</title>",
             gallery,
         )
-        self.assertIn("<h1>Rust WebGPU examples & Tutorials</h1>", gallery)
+        self.assertIn("<h1>Rust WebGPU Examples &amp; Tutorials</h1>", gallery)
         self.assertIn(
             'content="index, follow, max-image-preview:large"', gallery)
         nodes = [

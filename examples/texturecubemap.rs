@@ -60,15 +60,20 @@ struct Uniforms {
 impl Uniforms {
     fn new(aspect_ratio: f32) -> Self {
         let camera_position = glam::Vec3::new(0.0, 0.0, 3.6);
-        let view = glam::Mat4::look_at_rh(camera_position, glam::Vec3::ZERO, glam::Vec3::Y);
+        let view =
+            glam::camera::rh::view::look_at_mat4(camera_position, glam::Vec3::ZERO, glam::Vec3::Y);
         let skybox_view = glam::Mat4::from_cols(
             view.x_axis,
             view.y_axis,
             view.z_axis,
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
         );
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
         let model = glam::Mat4::from_scale(glam::Vec3::splat(1.12));
         let clip_projection = projection;
 
@@ -319,7 +324,7 @@ impl Example for TextureCubemap {
                     module: &shader,
                     entry_point: Some("skybox_vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[SkyboxVertex::layout()],
+                    buffers: &[Some(SkyboxVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -351,7 +356,7 @@ impl Example for TextureCubemap {
                     module: &shader,
                     entry_point: Some("reflect_vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[ReflectVertex::layout()],
+                    buffers: &[Some(ReflectVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

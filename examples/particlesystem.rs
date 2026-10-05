@@ -179,7 +179,12 @@ struct SceneCamera {
 impl SceneCamera {
     fn new(aspect_ratio: f32) -> Self {
         let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
+            * glam::camera::rh::proj::directx::perspective(
+                60.0_f32.to_radians(),
+                aspect_ratio,
+                0.001,
+                256.0,
+            );
         let view = glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, CAMERA_ZOOM))
             * glam::Mat4::from_translation(glam::Vec3::new(0.0, 15.0, 0.0))
             * glam::Mat4::from_rotation_x(CAMERA_ROTATION_X.to_radians())
@@ -861,7 +866,7 @@ fn create_environment_pipeline(
                 module: shader,
                 entry_point: Some("vs_environment"),
                 compilation_options: Default::default(),
-                buffers: &[EnvironmentVertex::layout()],
+                buffers: &[Some(EnvironmentVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
@@ -900,7 +905,7 @@ fn create_particle_pipeline(
                 module: shader,
                 entry_point: Some("vs_particle"),
                 compilation_options: Default::default(),
-                buffers: &[QuadVertex::layout(), ParticleInstance::layout()],
+                buffers: &[Some(QuadVertex::layout()), Some(ParticleInstance::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

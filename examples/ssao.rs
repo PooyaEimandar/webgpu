@@ -570,7 +570,7 @@ impl SsaoExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("Screen space ambient occlusion")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -648,9 +648,14 @@ impl SsaoExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -690,7 +695,7 @@ impl SsaoExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -1182,7 +1187,12 @@ impl Example for SsaoExample {
 }
 
 fn camera_matrices(aspect_ratio: f32, camera_state: FpsCamera) -> (glam::Mat4, glam::Vec3) {
-    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        60.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        256.0,
+    );
     let view = camera_state.view_matrix();
 
     (projection * view, camera_state.eye)
@@ -1298,8 +1308,9 @@ fn fill_light_specs(animation_time: f32) -> [LightSpec; LIGHT_COUNT - SHADOW_LIG
 }
 
 fn shadow_view_projection(position: glam::Vec3, target: glam::Vec3) -> glam::Mat4 {
-    let projection = glam::Mat4::perspective_rh(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
-    let view = glam::Mat4::look_at_rh(position, target, glam::Vec3::Y);
+    let projection =
+        glam::camera::rh::proj::directx::perspective(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
+    let view = glam::camera::rh::view::look_at_mat4(position, target, glam::Vec3::Y);
     projection * view
 }
 
@@ -1724,7 +1735,7 @@ fn create_shadow_skinned_pipeline(
             module: shader,
             entry_point: Some("vs_shadow_skinned"),
             compilation_options: Default::default(),
-            buffers: &[SkinnedVertex::layout()],
+            buffers: &[Some(SkinnedVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1762,7 +1773,7 @@ fn create_skinned_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt_skinned"),
             compilation_options: Default::default(),
-            buffers: &[SkinnedVertex::layout()],
+            buffers: &[Some(SkinnedVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1809,7 +1820,7 @@ fn create_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,

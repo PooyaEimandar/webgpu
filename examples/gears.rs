@@ -42,13 +42,17 @@ struct Uniforms {
 
 impl Uniforms {
     fn new(aspect_ratio: f32, model: glam::Mat4) -> Self {
-        let view = glam::Mat4::look_at_rh(
+        let view = glam::camera::rh::view::look_at_mat4(
             glam::Vec3::new(0.0, 7.0, -17.0),
             glam::Vec3::new(0.0, 2.5, 0.0),
             -glam::Vec3::Y,
         );
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.001, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.001,
+            256.0,
+        );
         let normal = (view * model).inverse().transpose();
 
         Self {
@@ -218,7 +222,7 @@ impl Example for GearsExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[GearVertex::layout()],
+                    buffers: &[Some(GearVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

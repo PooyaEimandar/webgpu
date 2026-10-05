@@ -82,7 +82,7 @@ impl Example for Triangle {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout()],
+                    buffers: &[Some(Vertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

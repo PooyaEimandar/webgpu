@@ -30,8 +30,9 @@ jobs:
           python3 scripts/test-render-example.py
           python3 scripts/test-render-sitemap.py
 
-      - name: Install Rust target
-        run: rustup target add wasm32-unknown-unknown
+      # rust-toolchain.toml pins the compiler and lists the wasm target.
+      - name: Install Rust toolchain
+        run: rustup toolchain install
 
       - name: Install wasm-bindgen
         run: |
@@ -40,7 +41,7 @@ jobs:
           cargo install wasm-bindgen-cli --version "$version" --locked
 
       - name: Build release WASM
-        run: scripts/build-wasm.sh --release
+        run: scripts/build-wasm.sh --release --locked
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -26,9 +26,9 @@ base64 = { version = "0.23.1" }
 bvh = { version = "0.12.0", default-features = false, features = ["std"] }
 bytes = { version = "1.12.1" }
 bytemuck = { version = "1.25.2", features = ["derive"] }
-egui = { version = "0.35.0", default-features = false }
-egui-wgpu = { version = "0.35.0", default-features = false }
-egui-winit = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.2", default-features = false }
+egui-wgpu = { version = "0.36.2", default-features = false }
+egui-winit = { version = "0.36.2", default-features = false }
 gltf = { version = "1.4.1", default-features = false, features = [
     "KHR_materials_pbrSpecularGlossiness",
     "names",
@@ -45,8 +45,19 @@ image = { version = "0.25.10", default-features = false, features = [
 nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = false, features = [
     "std",
 ] }
-sib = { git = "https://github.com/PooyaEimandar/sib", features = ["render"] }
-rapier3d = "0.35.3"
+# Pinned to an exact revision, the same one the pooya.ai site builds against.
+# Left floating, any `cargo update` moves sib to its newest commit and takes
+# wgpu and glam across whatever breaking changes landed there.
+sib = { git = "https://github.com/PooyaEimandar/sib", rev = "0e023300e80c89bc6247f8ed7a9b498c7653a707", features = [
+    "render",
+] }
+rapier3d = "0.36.0"
+
+# egui-winit 0.36 does not compile for wasm32, and wgpu 30 needs egui 0.36.
+# This is the published 0.36.2 with a one-method fix; vendor/egui-winit/
+# README.vendored.md has the details and says when it can be deleted.
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }
 
 # Just for Rapier Physics Engine, because it is generic-heavy
 [profile.dev]
@@ -61,12 +72,12 @@ bvh = { version = "0.12.0", default-features = false, features = [
     "std",
 ] }
 serde_json = { version = "1.0.151" }
-sib = { git = "https://github.com/PooyaEimandar/sib", features = [
+sib = { git = "https://github.com/PooyaEimandar/sib", rev = "0e023300e80c89bc6247f8ed7a9b498c7653a707", features = [
     "net-file-server",
     "net-h1-server",
     "render",
 ] }
-ureq = { version = "3.4.1" }
+ureq = { version = "3.4.2" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6.2" }
@@ -96,10 +107,10 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
 wry = { version = "0.57.0" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { version = "0.3.105" }
-wasm-bindgen = { version = "0.2.128" }
-wasm-bindgen-futures = { version = "0.4.78" }
-web-sys = { version = "0.3.105", features = [
+js-sys = { version = "0.3.106" }
+wasm-bindgen = { version = "0.2.129" }
+wasm-bindgen-futures = { version = "0.4.79" }
+web-sys = { version = "0.3.106", features = [
     "Blob",
     "BlobPropertyBag",
     "console",

@@ -27,6 +27,7 @@ const INCLUDES: &[(&str, &str)] = &[
         include_str!("../shaders/include/spot_shadow.wgsl"),
     ),
     ("tonemap", include_str!("../shaders/include/tonemap.wgsl")),
+    ("skinning", include_str!("../shaders/include/skinning.wgsl")),
 ];
 
 const DIRECTIVE: &str = "//!include";
@@ -129,6 +130,7 @@ mod tests {
                 "struct ClusterParams",
                 "fn range_attenuation",
                 "fn aces_film",
+                "fn skin_matrix",
             ] {
                 let count = expanded.matches(symbol).count();
                 assert!(count <= 1, "{name} declares {symbol} {count} times");

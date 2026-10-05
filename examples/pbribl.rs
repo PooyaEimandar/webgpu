@@ -91,9 +91,13 @@ impl SceneUniforms {
     fn new(aspect_ratio: f32, max_prefilter_lod: f32, surface_is_srgb: bool) -> Self {
         let eye = glam::Vec3::new(0.55, 0.85, 12.0);
         let target = glam::Vec3::new(-0.7, 0.15, 0.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
         let skybox_view = glam::Mat4::from_mat3(glam::Mat3::from_mat4(view));
         let model = glam::Mat4::from_rotation_y(90.0_f32.to_radians());
         let p = 15.0;
@@ -400,7 +404,7 @@ impl Example for PbrIblExample {
                     module: &shader,
                     entry_point: Some("vs_skybox"),
                     compilation_options: Default::default(),
-                    buffers: &[SkyboxVertex::layout()],
+                    buffers: &[Some(SkyboxVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -432,7 +436,7 @@ impl Example for PbrIblExample {
                     module: &shader,
                     entry_point: Some("vs_pbr"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout(), InstanceData::layout()],
+                    buffers: &[Some(Vertex::layout()), Some(InstanceData::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

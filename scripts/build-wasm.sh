@@ -3,6 +3,7 @@ set -eu
 
 PROFILE="debug"
 PROFILE_FLAG=""
+LOCKED_FLAG=""
 EXAMPLES=""
 
 while [ "$#" -gt 0 ]; do
@@ -15,13 +16,18 @@ while [ "$#" -gt 0 ]; do
       PROFILE="debug"
       PROFILE_FLAG=""
       ;;
+    --locked)
+      # Fail instead of rewriting Cargo.lock; the deploy build uses this so it
+      # ships exactly the dependency set that was committed and tested.
+      LOCKED_FLAG="--locked"
+      ;;
     -h|--help)
-      echo "usage: scripts/build-wasm.sh [--debug|--release] [example ...]"
+      echo "usage: scripts/build-wasm.sh [--debug|--release] [--locked] [example ...]"
       exit 0
       ;;
     --*)
       echo "unknown argument: $1" >&2
-      echo "usage: scripts/build-wasm.sh [--debug|--release] [example ...]" >&2
+      echo "usage: scripts/build-wasm.sh [--debug|--release] [--locked] [example ...]" >&2
       exit 1
       ;;
     *)
@@ -41,7 +47,7 @@ mkdir -p "$OUT_DIR"
 for EXAMPLE in $EXAMPLES; do
   EXAMPLE_OUT_DIR="$OUT_DIR/$EXAMPLE"
   echo "Building $EXAMPLE for wasm32-unknown-unknown ($PROFILE)"
-  cargo build --target wasm32-unknown-unknown $PROFILE_FLAG --example "$EXAMPLE"
+  cargo build --target wasm32-unknown-unknown $PROFILE_FLAG $LOCKED_FLAG --example "$EXAMPLE"
   mkdir -p "$EXAMPLE_OUT_DIR"
   echo "Generating web bindings for $EXAMPLE"
   wasm-bindgen \

@@ -525,12 +525,18 @@ impl Example for BloomExample {
 }
 
 fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4) {
-    let projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        45.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        256.0,
+    );
     let yaw = 17.0_f32.to_radians();
     let pitch = 7.5_f32.to_radians();
     let orbit = glam::Quat::from_rotation_y(yaw) * glam::Quat::from_rotation_x(pitch);
     let eye = orbit * glam::Vec3::new(0.0, 0.0, -10.25);
-    let view = glam::Mat4::look_at_rh(eye, glam::Vec3::new(0.0, -1.0, 0.0), glam::Vec3::Y);
+    let view =
+        glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::new(0.0, -1.0, 0.0), glam::Vec3::Y);
 
     (projection, view)
 }
@@ -630,7 +636,7 @@ fn create_glow_pipeline(
             module: shader,
             entry_point: Some("vs_colorpass"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -664,7 +670,7 @@ fn create_phong_pipeline(
                 module: shader,
                 entry_point: Some("vs_phongpass"),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

@@ -76,9 +76,17 @@ struct Uniforms {
 impl Uniforms {
     fn new(aspect_ratio: f32, animation_time: f32, shatter_enabled: bool) -> Self {
         let view_pos = camera_position();
-        let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+        let view = glam::camera::rh::view::look_at_mat4(
+            view_pos,
+            glam::Vec3::new(0.0, 0.05, 0.0),
+            glam::Vec3::Y,
+        );
+        let projection = glam::camera::rh::proj::directx::perspective(
+            46.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            100.0,
+        );
 
         Self {
             view_projection: (projection * view).to_cols_array_2d(),
@@ -2893,9 +2901,17 @@ impl HtmlMeshExample {
         );
         let aspect_ratio = context.aspect_ratio();
         let view_pos = camera_position();
-        let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+        let view = glam::camera::rh::view::look_at_mat4(
+            view_pos,
+            glam::Vec3::new(0.0, 0.05, 0.0),
+            glam::Vec3::Y,
+        );
+        let projection = glam::camera::rh::proj::directx::perspective(
+            46.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            100.0,
+        );
         let view_projection = projection * view;
         let inverse = view_projection.inverse();
         let near = inverse * glam::Vec4::new(ndc.x, ndc.y, 0.0, 1.0);
@@ -3265,7 +3281,7 @@ impl HtmlMeshExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("HTML mesh")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -3350,9 +3366,14 @@ impl HtmlMeshExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -3392,7 +3413,7 @@ impl HtmlMeshExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -3489,7 +3510,7 @@ impl Example for HtmlMeshExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout()],
+                    buffers: &[Some(Vertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -3986,8 +4007,17 @@ fn plane_screen_corners(context: &RenderContext) -> Option<[glam::Vec2; 4]> {
     let height = context.surface_config.height.max(1) as f32;
     let aspect_ratio = context.aspect_ratio();
     let view_pos = camera_position();
-    let view = glam::Mat4::look_at_rh(view_pos, glam::Vec3::new(0.0, 0.05, 0.0), glam::Vec3::Y);
-    let projection = glam::Mat4::perspective_rh(46.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+    let view = glam::camera::rh::view::look_at_mat4(
+        view_pos,
+        glam::Vec3::new(0.0, 0.05, 0.0),
+        glam::Vec3::Y,
+    );
+    let projection = glam::camera::rh::proj::directx::perspective(
+        46.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        100.0,
+    );
     let transform = projection * view * plane_model();
     let corners = [
         glam::Vec3::new(-PLANE_HALF_WIDTH, PLANE_HALF_HEIGHT, 0.0),

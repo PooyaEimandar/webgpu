@@ -28,8 +28,8 @@ impl Uniforms {
         let centered_model = glam::Mat4::from_translation(-center);
         let eye = glam::Vec3::new(0.0, radius * 0.52, radius * 1.08);
         let target = glam::Vec3::new(0.0, -radius * 0.12, 0.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-        let projection = glam::Mat4::perspective_rh(
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
             60.0_f32.to_radians(),
             panel_aspect_ratio,
             0.1,
@@ -449,7 +449,7 @@ fn create_pipeline(
                 module: shader,
                 entry_point: Some(vertex_entry),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

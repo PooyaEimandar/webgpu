@@ -60,9 +60,14 @@ struct VertexUniforms {
 impl VertexUniforms {
     fn new(aspect_ratio: f32, animation_time: f32) -> Self {
         let camera_pos = glam::Vec3::new(0.0, 1.25, -1.5);
-        let view = glam::Mat4::look_at_rh(camera_pos, glam::Vec3::ZERO, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let view =
+            glam::camera::rh::view::look_at_mat4(camera_pos, glam::Vec3::ZERO, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
         let model = glam::Mat4::from_scale(glam::Vec3::splat(0.2));
         let light_angle = animation_time * std::f32::consts::TAU;
         let light_pos = glam::Vec3::new(light_angle.sin() * 1.5, 2.0, light_angle.cos() * 1.5);
@@ -316,7 +321,7 @@ impl Example for ParallaxMappingExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[ParallaxVertex::layout()],
+                    buffers: &[Some(ParallaxVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

@@ -34,8 +34,8 @@ const QUERY_STATUS_IDLE: u8 = 0;
 const QUERY_STATUS_PENDING: u8 = 1;
 const QUERY_STATUS_READY: u8 = 2;
 const QUERY_STATUS_FAILED: u8 = 3;
-// wgpu 29's WebGPU backend does not forward RenderPassDescriptor::occlusion_query_set
-// to the browser render pass descriptor yet. Keep native on the real query path and
+// wgpu 30's WebGPU backend still does not forward RenderPassDescriptor::occlusion_query_set
+// to the browser render pass descriptor. Keep native on the real query path and
 // keep WASM rendering with a deterministic visibility fallback.
 const USE_GPU_OCCLUSION_QUERY: bool = !cfg!(target_arch = "wasm32");
 
@@ -81,8 +81,12 @@ impl Uniforms {
         color: [f32; 4],
         visible: bool,
     ) -> Self {
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            1.0,
+            256.0,
+        );
 
         Self {
             projection: projection.to_cols_array_2d(),
@@ -363,8 +367,9 @@ impl OcclusionQueryExample {
         match self.query_map_status.load(Ordering::Acquire) {
             QUERY_STATUS_READY => {
                 if let Some(buffer) = &self.query_readback_buffer {
-                    let view = buffer.slice(..QUERY_BUFFER_SIZE).get_mapped_range();
-                    if view.len() >= QUERY_BUFFER_SIZE as usize {
+                    if let Ok(view) = buffer.slice(..QUERY_BUFFER_SIZE).get_mapped_range()
+                        && view.len() >= QUERY_BUFFER_SIZE as usize
+                    {
                         let mut first = [0_u8; 8];
                         let mut second = [0_u8; 8];
                         first.copy_from_slice(&view[0..8]);
@@ -372,7 +377,6 @@ impl OcclusionQueryExample {
                         self.passed_samples =
                             [u64::from_le_bytes(first), u64::from_le_bytes(second)];
                     }
-                    drop(view);
                     buffer.unmap();
                     self.update_visibility_from_queries();
                 }
@@ -759,7 +763,7 @@ fn create_query_pipeline(
                 module: shader,
                 entry_point: Some("vs_simple"),
                 compilation_options: Default::default(),
-                buffers: &[Vertex::layout()],
+                buffers: &[Some(Vertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
@@ -793,7 +797,7 @@ fn create_solid_pipeline(
                 module: shader,
                 entry_point: Some("vs_mesh"),
                 compilation_options: Default::default(),
-                buffers: &[Vertex::layout()],
+                buffers: &[Some(Vertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
@@ -823,7 +827,7 @@ fn create_occluder_pipeline(
                 module: shader,
                 entry_point: Some("vs_occluder"),
                 compilation_options: Default::default(),
-                buffers: &[Vertex::layout()],
+                buffers: &[Some(Vertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

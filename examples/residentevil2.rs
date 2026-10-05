@@ -375,8 +375,8 @@ impl ResidentEvil2Example {
         aspect_ratio: f32,
     ) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
         let camera = FIXED_CAMERAS[camera_index.min(CAMERA_COUNT - 1)];
-        let view = glam::Mat4::look_at_rh(camera.eye, camera.target, glam::Vec3::Y);
-        let projection = glam::Mat4::perspective_rh(
+        let view = glam::camera::rh::view::look_at_mat4(camera.eye, camera.target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
             camera.fov_y_degrees.to_radians(),
             aspect_ratio.max(0.01),
             0.1,
@@ -707,7 +707,7 @@ impl ResidentEvil2Example {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("Collision debug")
                     .default_pos(egui::pos2(10.0, 160.0))
@@ -754,9 +754,14 @@ impl ResidentEvil2Example {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -795,7 +800,7 @@ impl ResidentEvil2Example {
                     &screen_descriptor,
                 );
             }
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -1577,7 +1582,7 @@ fn create_character_pipeline(
                 module,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[SkinnedVertex::layout()],
+                buffers: &[Some(SkinnedVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module,
@@ -1616,7 +1621,7 @@ fn create_shadow_pipeline(
                 module,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[ShadowVertex::layout()],
+                buffers: &[Some(ShadowVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module,
@@ -1737,6 +1742,7 @@ mod tests {
         staged_scale / (depth * tan_half_fov)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn maximum_pose_displacement(
         start: &[webgpu::gltf_skin::PosedVertex],
         end: &[webgpu::gltf_skin::PosedVertex],
@@ -1797,6 +1803,9 @@ mod tests {
         assert_eq!(opposite.z, WORLD_MAX_Z);
     }
 
+    // The synchronous glTF loader is native-only; the browser build loads
+    // the same file through an async fetch.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn imported_slow_run_animation_changes_claire_pose() -> RenderResult<()> {
         let mut claire = load_skinned_gltf_scene(CLAIRE_URL)?;
@@ -1815,6 +1824,9 @@ mod tests {
         Ok(())
     }
 
+    // The synchronous glTF loader is native-only; the browser build loads
+    // the same file through an async fetch.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn imported_idle_animation_loops_and_restarts() -> RenderResult<()> {
         let mut claire = load_skinned_gltf_scene(CLAIRE_URL)?;
@@ -1833,6 +1845,9 @@ mod tests {
         Ok(())
     }
 
+    // The synchronous glTF loader is native-only; the browser build loads
+    // the same file through an async fetch.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn imported_backward_animation_changes_claire_pose() -> RenderResult<()> {
         let mut claire = load_skinned_gltf_scene(CLAIRE_URL)?;

@@ -515,7 +515,7 @@ impl RayTracingGltfExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("Ray tracing glTF")
                     .default_pos(egui::pos2(10.0, 190.0))
@@ -541,9 +541,14 @@ impl RayTracingGltfExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -583,7 +588,7 @@ impl RayTracingGltfExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }

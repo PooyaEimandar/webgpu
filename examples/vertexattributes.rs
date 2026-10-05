@@ -42,9 +42,14 @@ struct Uniforms {
 impl Uniforms {
     fn new(aspect_ratio: f32, frame: u64) -> Self {
         let view_position = glam::Vec3::new(0.0, 1.8, 3.8);
-        let view = glam::Mat4::look_at_rh(view_position, glam::Vec3::ZERO, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 64.0);
+        let view =
+            glam::camera::rh::view::look_at_mat4(view_position, glam::Vec3::ZERO, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            aspect_ratio.max(0.01),
+            0.1,
+            64.0,
+        );
         let model = glam::Mat4::from_rotation_y(frame as f32 * 0.008)
             * glam::Mat4::from_rotation_x(-24.0_f32.to_radians());
         let light_position = glam::Vec3::new(1.6, 2.8, 2.4);
@@ -359,14 +364,14 @@ impl Example for VertexAttributesExample {
             context,
             &pipeline_layout,
             &shader,
-            &[InterleavedVertex::layout()],
+            &[Some(InterleavedVertex::layout())],
             Some("interleaved vertex attribute pipeline"),
         );
         let separate = create_pipeline(
             context,
             &pipeline_layout,
             &shader,
-            &separate_vertex_layouts(),
+            &separate_vertex_layouts().map(Some),
             Some("separate vertex attribute pipeline"),
         );
         let mesh = build_attribute_mesh(72);
@@ -520,7 +525,7 @@ fn create_pipeline(
     context: &RenderContext,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
-    buffers: &[wgpu::VertexBufferLayout<'_>],
+    buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
     label: Option<&'static str>,
 ) -> wgpu::RenderPipeline {
     context

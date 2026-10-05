@@ -129,7 +129,7 @@ encoder.copy_buffer_to_buffer(
     <p>Excluding the overlay, a native frame submits six draws and 27,284 submitted triangles because it renders all three meshes twice. The WASM fallback submits three scene draws and 13,642 triangles. Every object still enters the visible pass, so this is a visibility-result visualization rather than an occlusion-culling optimization.</p>
 
     <h2 id="browser-fallback" tabindex="-1">Understand the browser fallback</h2>
-    <p>The current source sets <code>USE_GPU_OCCLUSION_QUERY</code> to false for <code>wasm32</code>. wgpu 29 does not yet forward <code>RenderPassDescriptor::occlusion_query_set</code> to the browser render-pass descriptor, so the WebAssembly build skips the query pass, resolve, copy, mapping, and polling paths.</p>
+    <p>The current source sets <code>USE_GPU_OCCLUSION_QUERY</code> to false for <code>wasm32</code>. wgpu 30 still does not forward <code>RenderPassDescriptor::occlusion_query_set</code> to the browser render-pass descriptor, so the WebAssembly build skips the query pass, resolve, copy, mapping, and polling paths.</p>
     <p>Instead, every browser update assigns <code>[0, 18_432]</code>: the teapot is always marked hidden and the sphere always marked visible. That keeps the same visual explanation and overlay layout without claiming unsupported readback. Moving the browser camera changes the view but cannot change those two sample counts. Run the native example to exercise the real query lifecycle described above.</p>
 
     <h2 id="move-the-camera" tabindex="-1">Move the FPS camera</h2>

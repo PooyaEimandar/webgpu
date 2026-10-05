@@ -32,9 +32,13 @@ impl Uniforms {
             * glam::Mat4::from_rotation_x(12.0_f32.to_radians())
             * glam::Mat4::from_translation(-center);
         let eye = glam::Vec3::new(0.0, radius * 0.56, radius * 3.35);
-        let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, radius * 24.0);
+        let view = glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::ZERO, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            radius * 24.0,
+        );
 
         Self {
             view_projection: (projection * view).to_cols_array_2d(),
@@ -217,7 +221,7 @@ impl Example for GltfExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[mesh::MeshVertex::layout()],
+                    buffers: &[Some(mesh::MeshVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

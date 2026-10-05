@@ -33,13 +33,17 @@ struct SceneUniforms {
 
 impl SceneUniforms {
     fn new(aspect_ratio: f32, rotation_y: f32, gradient_pos: f32) -> Self {
-        let projection =
-            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            aspect_ratio,
+            1.0,
+            256.0,
+        );
         let yaw = (-28.75_f32 + rotation_y).to_radians();
         let pitch = -16.25_f32.to_radians();
         let orbit = glam::Quat::from_rotation_y(yaw) * glam::Quat::from_rotation_x(pitch);
         let eye = orbit * glam::Vec3::new(0.0, 0.0, -17.5);
-        let model_view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y);
+        let model_view = glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::ZERO, glam::Vec3::Y);
 
         Self {
             projection: projection.to_cols_array_2d(),
@@ -529,7 +533,7 @@ fn create_color_pass_pipeline(
             module: shader,
             entry_point: Some("vs_colorpass"),
             compilation_options: Default::default(),
-            buffers: &[webgpu::gltf_scene::GltfColoredVertex::layout()],
+            buffers: &[Some(webgpu::gltf_scene::GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -563,7 +567,7 @@ fn create_phong_pass_pipeline(
                 module: shader,
                 entry_point: Some("vs_phongpass"),
                 compilation_options: Default::default(),
-                buffers: &[webgpu::gltf_scene::GltfColoredVertex::layout()],
+                buffers: &[Some(webgpu::gltf_scene::GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

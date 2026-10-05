@@ -68,8 +68,12 @@ struct Uniforms {
 
 impl Uniforms {
     fn new(aspect_ratio: f32, view: glam::Mat4) -> Self {
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio.max(0.01),
+            0.1,
+            256.0,
+        );
 
         Self {
             projection: (projection).to_cols_array_2d(),
@@ -304,7 +308,7 @@ impl Example for AlphaToCoverageExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[TreeVertex::layout(), InstanceData::layout()],
+                    buffers: &[Some(TreeVertex::layout()), Some(InstanceData::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

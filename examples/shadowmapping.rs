@@ -33,8 +33,10 @@ impl ShadowUniforms {
         let (projection, view, eye) = camera_matrices(aspect_ratio);
         let light_position = light_position(animation_time);
         let light_target = glam::Vec3::new(0.0, -0.45, 0.0);
-        let light_projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 40.0);
-        let light_view = glam::Mat4::look_at_rh(light_position, light_target, glam::Vec3::Y);
+        let light_projection =
+            glam::camera::rh::proj::directx::perspective(45.0_f32.to_radians(), 1.0, 1.0, 40.0);
+        let light_view =
+            glam::camera::rh::view::look_at_mat4(light_position, light_target, glam::Vec3::Y);
 
         Self {
             projection: projection.to_cols_array_2d(),
@@ -433,12 +435,18 @@ impl Example for ShadowMappingExample {
 }
 
 fn camera_matrices(aspect_ratio: f32) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
-    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 1.0, 256.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        60.0_f32.to_radians(),
+        aspect_ratio,
+        1.0,
+        256.0,
+    );
     let yaw = -30.0_f32.to_radians();
     let pitch = 25.0_f32.to_radians();
     let orbit = glam::Quat::from_rotation_y(yaw) * glam::Quat::from_rotation_x(pitch);
     let eye = orbit * glam::Vec3::new(0.0, 0.0, -12.5);
-    let view = glam::Mat4::look_at_rh(eye, glam::Vec3::new(0.0, -0.35, 0.0), glam::Vec3::Y);
+    let view =
+        glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::new(0.0, -0.35, 0.0), glam::Vec3::Y);
 
     (projection, view, eye)
 }
@@ -601,7 +609,7 @@ fn create_offscreen_pipeline(
             module: shader,
             entry_point: Some("vs_offscreen"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -641,7 +649,7 @@ fn create_scene_pipeline(
                 module: shader,
                 entry_point: Some("vs_scene"),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

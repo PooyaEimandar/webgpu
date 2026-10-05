@@ -152,7 +152,7 @@ impl CameraState {
             SCENE_CENTER_Z + angle.cos() * radius,
         );
         let projection = camera_projection(aspect_ratio);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
 
         Self {
             eye,
@@ -172,7 +172,7 @@ impl CameraState {
 
 fn camera_projection(aspect_ratio: f32) -> glam::Mat4 {
     glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.32, 0.0))
-        * glam::Mat4::perspective_rh(
+        * glam::camera::rh::proj::directx::perspective(
             56.0_f32.to_radians(),
             aspect_ratio.max(0.01),
             0.1,
@@ -1124,7 +1124,10 @@ impl NaniteExample {
                 })?;
                 let view = readback
                     .slice(..self.page_feedback_size())
-                    .get_mapped_range();
+                    .get_mapped_range()
+                    .map_err(|_| {
+                        RenderError::message("Nanite page-request readback range unavailable")
+                    })?;
                 // as_chunks yields [u8; 4] directly, so from_le_bytes takes the
                 // array whole and the width is checked rather than spelled out
                 // twice.
@@ -1278,7 +1281,7 @@ impl NaniteExample {
 
             if needs_refresh {
                 let raw_input = gui.state.take_egui_input(&context.window);
-                let full_output = gui.context.run_ui(raw_input, |root_ui| {
+                let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                     let egui_context = root_ui.ctx().clone();
                     egui::Window::new("Nanite")
                         .default_pos(egui::pos2(10.0, 10.0))
@@ -1368,11 +1371,17 @@ impl NaniteExample {
                     .handle_platform_output(&context.window, full_output.platform_output);
                 gui.screen_size = screen_size;
                 gui.pixels_per_point = full_output.pixels_per_point;
-                for (id, image_delta) in &full_output.textures_delta.set {
-                    gui.renderer
-                        .update_texture(&context.device, &context.queue, *id, image_delta);
+                for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                    for image_delta in &image_deltas {
+                        gui.renderer.update_texture(
+                            &context.device,
+                            &context.queue,
+                            id,
+                            image_delta,
+                        );
+                    }
                 }
-                free_textures = full_output.textures_delta.free;
+                free_textures = full_output.textures_delta.free.drain().collect();
                 gui.paint_jobs = gui
                     .context
                     .tessellate(full_output.shapes, full_output.pixels_per_point);
@@ -1785,7 +1794,7 @@ impl Example for NaniteExample {
                 &render_pipeline_layout,
                 &render_shader,
                 "vs_skinned",
-                &[SkinnedVertex::layout()],
+                &[Some(SkinnedVertex::layout())],
                 "nanite skinned Jax pipeline",
             ),
             skinned_post: create_render_pipeline(
@@ -1793,7 +1802,7 @@ impl Example for NaniteExample {
                 &render_pipeline_layout,
                 &render_shader,
                 "vs_skinned_post",
-                &[SkinnedVertex::layout()],
+                &[Some(SkinnedVertex::layout())],
                 "nanite recovered skinned Jax pipeline",
             ),
             hzb: hzb_pipelines,
@@ -2465,7 +2474,7 @@ fn create_render_pipeline(
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     vertex_entry: &str,
-    vertex_buffers: &[wgpu::VertexBufferLayout<'static>],
+    vertex_buffers: &[Option<wgpu::VertexBufferLayout<'static>>],
     label: &'static str,
 ) -> wgpu::RenderPipeline {
     context

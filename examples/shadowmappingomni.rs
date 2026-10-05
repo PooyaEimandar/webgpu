@@ -556,10 +556,15 @@ impl Example for ShadowMappingOmniExample {
 }
 
 fn camera_state(aspect_ratio: f32) -> CameraState {
-    let projection = glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 64.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        45.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        64.0,
+    );
     let eye = glam::Vec3::new(0.0, 4.6, -10.8);
     let target = glam::Vec3::new(0.0, -0.55, 0.75);
-    let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+    let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
 
     CameraState {
         projection,
@@ -598,7 +603,12 @@ fn scene_uniforms(
 
 fn cube_face_matrices(light_position: glam::Vec3) -> [glam::Mat4; FACE_COUNT] {
     let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
-        * glam::Mat4::perspective_rh(90.0_f32.to_radians(), 1.0, LIGHT_NEAR, LIGHT_FAR);
+        * glam::camera::rh::proj::directx::perspective(
+            90.0_f32.to_radians(),
+            1.0,
+            LIGHT_NEAR,
+            LIGHT_FAR,
+        );
     let faces = [
         (glam::Vec3::X, -glam::Vec3::Y),
         (-glam::Vec3::X, -glam::Vec3::Y),
@@ -610,7 +620,8 @@ fn cube_face_matrices(light_position: glam::Vec3) -> [glam::Mat4; FACE_COUNT] {
     let mut matrices = [glam::Mat4::IDENTITY; FACE_COUNT];
 
     for (index, (direction, up)) in faces.into_iter().enumerate() {
-        let view = glam::Mat4::look_at_rh(light_position, light_position + direction, up);
+        let view =
+            glam::camera::rh::view::look_at_mat4(light_position, light_position + direction, up);
         matrices[index] = projection * view;
     }
 
@@ -982,7 +993,7 @@ fn create_offscreen_pipeline(
             module: shader,
             entry_point: Some("vs_offscreen"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1022,7 +1033,7 @@ fn create_scene_pipeline(
                 module: shader,
                 entry_point: Some("vs_scene"),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

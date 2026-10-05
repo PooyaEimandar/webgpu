@@ -151,7 +151,12 @@ struct SceneCamera {
 impl SceneCamera {
     fn new(aspect_ratio: f32) -> Self {
         let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 512.0);
+            * glam::camera::rh::proj::directx::perspective(
+                60.0_f32.to_radians(),
+                aspect_ratio,
+                0.1,
+                512.0,
+            );
         let rotation = glam::Mat4::from_rotation_x(-12.0_f32.to_radians())
             * glam::Mat4::from_rotation_y(159.0_f32.to_radians());
         let translation = glam::Mat4::from_translation(glam::Vec3::new(0.4, 1.25, 0.0));
@@ -413,7 +418,7 @@ impl Example for IndirectDrawExample {
                 "indirect draw plants pipeline",
                 "vs_plants",
                 "fs_plants",
-                &[SceneVertex::layout(), InstanceData::layout()],
+                &[Some(SceneVertex::layout()), Some(InstanceData::layout())],
                 true,
                 wgpu::CompareFunction::LessEqual,
                 None,
@@ -425,7 +430,7 @@ impl Example for IndirectDrawExample {
                 "indirect draw ground pipeline",
                 "vs_ground",
                 "fs_ground",
-                &[SceneVertex::layout()],
+                &[Some(SceneVertex::layout())],
                 true,
                 wgpu::CompareFunction::LessEqual,
                 Some(wgpu::Face::Back),
@@ -437,7 +442,7 @@ impl Example for IndirectDrawExample {
                 "indirect draw sky pipeline",
                 "vs_sky",
                 "fs_sky",
-                &[SceneVertex::layout()],
+                &[Some(SceneVertex::layout())],
                 false,
                 wgpu::CompareFunction::LessEqual,
                 Some(wgpu::Face::Front),
@@ -703,7 +708,7 @@ fn create_pipeline(
     label: &'static str,
     vertex_entry: &'static str,
     fragment_entry: &'static str,
-    vertex_buffers: &[wgpu::VertexBufferLayout<'static>],
+    vertex_buffers: &[Option<wgpu::VertexBufferLayout<'static>>],
     depth_write_enabled: bool,
     depth_compare: wgpu::CompareFunction,
     cull_mode: Option<wgpu::Face>,

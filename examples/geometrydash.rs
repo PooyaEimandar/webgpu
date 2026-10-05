@@ -359,7 +359,7 @@ impl Example for Game {
                         module: &module,
                         entry_point: Some("vs_main"),
                         compilation_options: Default::default(),
-                        buffers: &[Vertex::layout()],
+                        buffers: &[Some(Vertex::layout())],
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &module,

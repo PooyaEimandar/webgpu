@@ -501,11 +501,15 @@ impl Example for ShadowMappingCascadeExample {
 }
 
 fn camera_state(aspect_ratio: f32) -> CameraState {
-    let projection =
-        glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, CAMERA_NEAR, CAMERA_FAR);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        45.0_f32.to_radians(),
+        aspect_ratio,
+        CAMERA_NEAR,
+        CAMERA_FAR,
+    );
     let eye = glam::Vec3::new(-0.4, 3.2, -12.0);
     let target = glam::Vec3::new(0.0, -0.65, 12.0);
-    let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+    let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
 
     CameraState {
         projection,
@@ -610,12 +614,12 @@ fn cascade_light_space(corners: &[glam::Vec3; 8], light_direction: glam::Vec3) -
     radius = (radius * 16.0).ceil() / 16.0;
     let min_extents = glam::Vec3::splat(-radius);
     let max_extents = glam::Vec3::splat(radius);
-    let light_view = glam::Mat4::look_at_rh(
+    let light_view = glam::camera::rh::view::look_at_mat4(
         center - light_direction * -min_extents.z,
         center,
         glam::Vec3::Y,
     );
-    let light_projection = glam::Mat4::orthographic_rh(
+    let light_projection = glam::camera::rh::proj::directx::orthographic(
         min_extents.x,
         max_extents.x,
         min_extents.y,
@@ -853,7 +857,7 @@ fn create_depth_pipeline(
             module: shader,
             entry_point: Some("vs_depth"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: None,
         primitive: wgpu::PrimitiveState {
@@ -888,7 +892,7 @@ fn create_scene_pipeline(
                 module: shader,
                 entry_point: Some("vs_scene"),
                 compilation_options: Default::default(),
-                buffers: &[GltfColoredVertex::layout()],
+                buffers: &[Some(GltfColoredVertex::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

@@ -97,8 +97,13 @@ impl CameraState {
         let eye = glam::Vec3::new(angle.sin() * radius, 18.0, angle.cos() * radius);
         let target = glam::Vec3::new(0.0, 0.0, 0.0);
         let projection = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0))
-            * glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 512.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+            * glam::camera::rh::proj::directx::perspective(
+                60.0_f32.to_radians(),
+                aspect_ratio,
+                0.1,
+                512.0,
+            );
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
 
         Self {
             eye,
@@ -275,7 +280,7 @@ impl ComputeCullAndLodExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("Compute cull and LOD")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -308,9 +313,14 @@ impl ComputeCullAndLodExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -350,7 +360,7 @@ impl ComputeCullAndLodExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -755,7 +765,7 @@ fn create_render_pipeline(
                 module: shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[MeshVertex::layout(), InstanceData::layout()],
+                buffers: &[Some(MeshVertex::layout()), Some(InstanceData::layout())],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,

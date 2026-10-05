@@ -104,9 +104,13 @@ impl SceneUniforms {
     ) -> Self {
         let eye = glam::Vec3::new(0.25, 0.08, 4.85);
         let target = glam::Vec3::new(0.0, 0.0, 0.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
         let skybox_view = glam::Mat4::from_mat3(glam::Mat3::from_mat4(view));
         let p = 15.0;
 
@@ -346,7 +350,7 @@ impl PbrTextureExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("PBR texture")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -387,9 +391,14 @@ impl PbrTextureExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -429,7 +438,7 @@ impl PbrTextureExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -632,7 +641,7 @@ impl Example for PbrTextureExample {
                     module: &shader,
                     entry_point: Some("vs_skybox"),
                     compilation_options: Default::default(),
-                    buffers: &[SkyboxVertex::layout()],
+                    buffers: &[Some(SkyboxVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -664,7 +673,7 @@ impl Example for PbrTextureExample {
                     module: &shader,
                     entry_point: Some("vs_pbr"),
                     compilation_options: Default::default(),
-                    buffers: &[TexturedVertex::layout()],
+                    buffers: &[Some(TexturedVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

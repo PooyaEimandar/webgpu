@@ -91,9 +91,13 @@ impl SceneCamera {
             glam::Vec3::new(5.0, 23.0, 40.0)
         };
         let target = glam::Vec3::new(0.0, 0.0, 0.0);
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            256.0,
+        );
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
 
         Self { projection, view }
     }
@@ -498,7 +502,7 @@ fn create_rocks_pipeline(
         "instancing rocks pipeline",
         "vs_rocks",
         "fs_rocks",
-        &[MeshVertex::layout(), InstanceData::layout()],
+        &[Some(MeshVertex::layout()), Some(InstanceData::layout())],
         true,
     )
 }
@@ -515,7 +519,7 @@ fn create_planet_pipeline(
         "instancing planet pipeline",
         "vs_planet",
         "fs_planet",
-        &[MeshVertex::layout()],
+        &[Some(MeshVertex::layout())],
         true,
     )
 }
@@ -545,7 +549,7 @@ fn create_pipeline(
     label: &'static str,
     vertex_entry: &'static str,
     fragment_entry: &'static str,
-    vertex_buffers: &[wgpu::VertexBufferLayout<'static>],
+    vertex_buffers: &[Option<wgpu::VertexBufferLayout<'static>>],
     depth_write_enabled: bool,
 ) -> wgpu::RenderPipeline {
     context

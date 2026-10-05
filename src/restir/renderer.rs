@@ -366,7 +366,14 @@ impl GpuProfiler {
             match readback.state.load(Ordering::Acquire) {
                 READBACK_READY => {
                     let byte_size = u64::from(readback.query_count) * 8;
-                    let mapped = readback.buffer.slice(0..byte_size).get_mapped_range();
+                    // The map callback already reported success, so a failure
+                    // here is unexpected; drop the sample the same way a failed
+                    // map does rather than keep stale timings alive.
+                    let Ok(mapped) = readback.buffer.slice(0..byte_size).get_mapped_range() else {
+                        readback.buffer.unmap();
+                        readback.state.store(READBACK_IDLE, Ordering::Release);
+                        continue;
+                    };
                     let pass_count = (readback.query_count / 2) as usize;
                     let mut total_ms = 0.0;
                     for pass_index in 0..pass_count.min(GPU_PROFILE_PASS_COUNT) {
@@ -507,6 +514,8 @@ pub struct RestirExample {
     gpu_device_info: String,
     debug_dump_path: Option<String>,
     debug_dump_buffer: Option<(wgpu::Buffer, u32, u32, u32)>,
+    /// `RESTIR_NO_DENOISE`, read once at start-up rather than every frame.
+    denoise_disabled_by_env: bool,
 }
 
 impl RestirExample {
@@ -591,11 +600,17 @@ impl RestirExample {
             gpu_device_info: String::new(),
             debug_dump_path: std::env::var("RESTIR_DUMP_PATH").ok(),
             debug_dump_buffer: None,
+            denoise_disabled_by_env: std::env::var("RESTIR_NO_DENOISE").is_ok(),
         }
     }
 
     fn projection(&self, context: &RenderContext) -> glam::Mat4 {
-        glam::Mat4::perspective_rh(55.0_f32.to_radians(), context.aspect_ratio(), 0.05, 120.0)
+        glam::camera::rh::proj::directx::perspective(
+            55.0_f32.to_radians(),
+            context.aspect_ratio(),
+            0.05,
+            120.0,
+        )
     }
 
     fn rebuild_frame_resources(&mut self, context: &RenderContext) -> RenderResult<()> {
@@ -936,6 +951,17 @@ impl RestirExample {
         Ok(())
     }
 
+    /// Whether the a-trous passes run this frame.
+    ///
+    /// The uniform the present shader reads and the decision to encode the
+    /// passes both come from here. They used to be computed separately, so
+    /// with a debug view open the shader was told the frame had been denoised
+    /// when the passes had been skipped, and it read variance from a texture
+    /// that held none.
+    fn denoise_active(&self) -> bool {
+        self.controls.denoise && self.controls.debug_view == 0 && !self.denoise_disabled_by_env
+    }
+
     fn write_uniforms(&mut self, context: &RenderContext) -> RenderResult<glam::Mat4> {
         let frame = self
             .frame_resources
@@ -1000,7 +1026,7 @@ impl RestirExample {
             settings4: [
                 self.controls.ambient,
                 self.controls.gi_bounces as f32,
-                f32::from(self.controls.denoise),
+                f32::from(self.denoise_active()),
                 shadow_quality_samples,
             ],
         };
@@ -1060,7 +1086,7 @@ impl RestirExample {
             return Ok(());
         };
         let raw_input = gui.state.take_egui_input(&context.window);
-        let full_output = gui.context.run_ui(raw_input, |root_ui| {
+        let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
             egui::Window::new(mode.title())
                 .default_pos(egui::pos2(10.0, 10.0))
                 .default_width(330.0)
@@ -1235,9 +1261,14 @@ impl RestirExample {
             .handle_platform_output(&context.window, full_output.platform_output);
         gui.screen_size = [context.surface_config.width, context.surface_config.height];
         gui.pixels_per_point = full_output.pixels_per_point;
-        for (id, image_delta) in &full_output.textures_delta.set {
-            gui.renderer
-                .update_texture(&context.device, &context.queue, *id, image_delta);
+        // egui 0.36 asserts that a frame's texture changes were consumed, so
+        // drain both lists up front; the frees are applied after painting.
+        let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+        for (id, image_deltas) in full_output.textures_delta.set.drain() {
+            for image_delta in &image_deltas {
+                gui.renderer
+                    .update_texture(&context.device, &context.queue, id, image_delta);
+            }
         }
         gui.paint_jobs = gui
             .context
@@ -1279,7 +1310,7 @@ impl RestirExample {
                 &screen_descriptor,
             );
         }
-        for id in &full_output.textures_delta.free {
+        for id in &freed_textures {
             gui.renderer.free_texture(id);
         }
         self.controls = controls;
@@ -1659,9 +1690,9 @@ impl Example for RestirExample {
         {
             buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
             let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
-            let data = buffer.slice(..).get_mapped_range();
-            write_debug_dump(path, &data, *width, *height, *bytes_per_row);
-            drop(data);
+            if let Ok(data) = buffer.slice(..).get_mapped_range() {
+                write_debug_dump(path, &data, *width, *height, *bytes_per_row);
+            }
             buffer.unmap();
             eprintln!("wrote ReSTIR debug dump to {path}");
             std::process::exit(0);
@@ -1712,9 +1743,7 @@ impl Example for RestirExample {
         let frame_bind_group = &frames.compute_bind_groups[parity];
         let groups_x = frames.width.div_ceil(COMPUTE_WORKGROUP_SIZE);
         let groups_y = frames.height.div_ceil(COMPUTE_WORKGROUP_SIZE);
-        let denoise = self.controls.denoise
-            && self.controls.debug_view == 0
-            && std::env::var("RESTIR_NO_DENOISE").is_err();
+        let denoise = self.denoise_active();
         let profiling = self.controls.debug_view == 0 && self.gpu_profiler.is_some();
         let gpu_profiler = profiling.then_some(self.gpu_profiler.as_ref()).flatten();
         let mut profiled_pass_count = 0_u32;

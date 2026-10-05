@@ -958,8 +958,8 @@ impl MetropolisExample {
     /// Sun light-space matrix for a given sun direction, fit to the scene.
     fn sun_view_projection(&self, sun_dir: glam::Vec3) -> glam::Mat4 {
         let eye = self.scene_center - sun_dir * self.shadow_radius * 1.5;
-        let view = glam::Mat4::look_at_rh(eye, self.scene_center, glam::Vec3::Y);
-        let proj = glam::Mat4::orthographic_rh(
+        let view = glam::camera::rh::view::look_at_mat4(eye, self.scene_center, glam::Vec3::Y);
+        let proj = glam::camera::rh::proj::directx::orthographic(
             -self.shadow_radius,
             self.shadow_radius,
             -self.shadow_radius,
@@ -999,15 +999,15 @@ impl MetropolisExample {
             (glam::Vec3::Z, -glam::Vec3::Y),
             (-glam::Vec3::Z, -glam::Vec3::Y),
         ];
-        let probe_proj = glam::Mat4::perspective_rh(
+        let probe_proj = glam::camera::rh::proj::directx::perspective(
             std::f32::consts::FRAC_PI_2,
             1.0,
             0.1,
             self.scene_extent.length() * 2.0,
         );
         for (face, (dir, up)) in faces.into_iter().enumerate() {
-            let view_proj =
-                probe_proj * glam::Mat4::look_at_rh(probe_origin, probe_origin + dir, up);
+            let view_proj = probe_proj
+                * glam::camera::rh::view::look_at_mat4(probe_origin, probe_origin + dir, up);
             let mut face_uniforms = FrameUniforms::zeroed();
             face_uniforms.view_projection = view_proj.to_cols_array_2d();
             face_uniforms.sun_view_projection = self.sun_view_proj.to_cols_array_2d();
@@ -1083,7 +1083,7 @@ impl MetropolisExample {
     }
 
     fn projection(&self, context: &RenderContext) -> glam::Mat4 {
-        glam::Mat4::perspective_rh(
+        glam::camera::rh::proj::directx::perspective(
             60.0_f32.to_radians(),
             context.aspect_ratio().max(0.01),
             0.05,
@@ -2450,7 +2450,7 @@ impl Example for MetropolisExample {
                         module: &shadow_shader,
                         entry_point: Some("vs_static"),
                         compilation_options: Default::default(),
-                        buffers: &[StaticVertex::layout()],
+                        buffers: &[Some(StaticVertex::layout())],
                     },
                     fragment: None,
                     primitive: wgpu::PrimitiveState {
@@ -2472,7 +2472,7 @@ impl Example for MetropolisExample {
                         module: &shadow_shader,
                         entry_point: Some("vs_skinned"),
                         compilation_options: Default::default(),
-                        buffers: &[SkinnedVertex::layout(), InstanceData::layout()],
+                        buffers: &[Some(SkinnedVertex::layout()), Some(InstanceData::layout())],
                     },
                     fragment: None,
                     primitive: wgpu::PrimitiveState {
@@ -2716,7 +2716,7 @@ impl Example for MetropolisExample {
                         module: &forward_shader,
                         entry_point: Some("vs_main"),
                         compilation_options: Default::default(),
-                        buffers: &[SkinnedVertex::layout(), InstanceData::layout()],
+                        buffers: &[Some(SkinnedVertex::layout()), Some(InstanceData::layout())],
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &forward_shader,
@@ -2904,7 +2904,7 @@ impl Example for MetropolisExample {
                         module: &static_shader,
                         entry_point: Some("vs_main"),
                         compilation_options: Default::default(),
-                        buffers: &[StaticVertex::layout()],
+                        buffers: &[Some(StaticVertex::layout())],
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &static_shader,
@@ -4775,7 +4775,7 @@ impl Example for MetropolisExample {
             let mut controls = self.controls;
             if let Some(gui) = &mut self.gui {
                 let raw_input = gui.state.take_egui_input(&context.window);
-                let full_output = gui.context.run_ui(raw_input, |root_ui| {
+                let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                     let max_panel_height =
                         (root_ui.ctx().content_rect().height() - 24.0).max(180.0);
                     egui::Window::new("Metropolis")
@@ -4952,9 +4952,18 @@ impl Example for MetropolisExample {
                     .handle_platform_output(&context.window, full_output.platform_output);
                 gui.screen_size = [context.surface_config.width, context.surface_config.height];
                 gui.pixels_per_point = full_output.pixels_per_point;
-                for (id, image_delta) in &full_output.textures_delta.set {
-                    gui.renderer
-                        .update_texture(&context.device, &context.queue, *id, image_delta);
+                // egui 0.36 asserts that a frame's texture changes were consumed, so
+                // drain both lists up front; the frees are applied after painting.
+                let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+                for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                    for image_delta in &image_deltas {
+                        gui.renderer.update_texture(
+                            &context.device,
+                            &context.queue,
+                            id,
+                            image_delta,
+                        );
+                    }
                 }
                 gui.paint_jobs = gui
                     .context
@@ -4996,7 +5005,7 @@ impl Example for MetropolisExample {
                         &screen_descriptor,
                     );
                 }
-                for id in &full_output.textures_delta.free {
+                for id in &freed_textures {
                     gui.renderer.free_texture(id);
                 }
             }
@@ -5062,9 +5071,9 @@ fn spot_shadow_matrix(pos: glam::Vec3, dir: glam::Vec3, range: f32, outer: f32) 
     } else {
         glam::Vec3::Y
     };
-    let view = glam::Mat4::look_at_rh(pos, pos + dir, up);
+    let view = glam::camera::rh::view::look_at_mat4(pos, pos + dir, up);
     let fov = (outer * 2.0 + 0.2).clamp(0.2, 2.8);
-    let proj = glam::Mat4::perspective_rh(fov, 1.0, 0.1, range.max(1.0));
+    let proj = glam::camera::rh::proj::directx::perspective(fov, 1.0, 0.1, range.max(1.0));
     proj * view
 }
 

@@ -39,13 +39,17 @@ impl Uniforms {
         let model = glam::Mat4::from_rotation_y(rotation)
             * glam::Mat4::from_rotation_x(28.0_f32.to_radians())
             * glam::Mat4::from_scale(glam::Vec3::splat(1.32));
-        let view = glam::Mat4::look_at_rh(
+        let view = glam::camera::rh::view::look_at_mat4(
             glam::Vec3::new(0.0, 0.0, 5.2),
             glam::Vec3::ZERO,
             glam::Vec3::Y,
         );
-        let projection =
-            glam::Mat4::perspective_rh(45.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            45.0_f32.to_radians(),
+            aspect_ratio,
+            0.1,
+            100.0,
+        );
 
         Self {
             model_view_projection: (projection * view * model).to_cols_array_2d(),
@@ -236,7 +240,7 @@ impl Example for TextOverlayExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Vertex::layout()],
+                    buffers: &[Some(Vertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

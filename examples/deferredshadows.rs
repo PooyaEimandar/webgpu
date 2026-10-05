@@ -815,7 +815,12 @@ impl Example for DeferredShadowsExample {
 }
 
 fn camera_matrices(aspect_ratio: f32, camera_state: FpsCamera) -> (glam::Mat4, glam::Vec3) {
-    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        60.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        256.0,
+    );
     let view = camera_state.view_matrix();
 
     (projection * view, camera_state.eye)
@@ -931,8 +936,9 @@ fn fill_light_specs(animation_time: f32) -> [LightSpec; LIGHT_COUNT - SHADOW_LIG
 }
 
 fn shadow_view_projection(position: glam::Vec3, target: glam::Vec3) -> glam::Mat4 {
-    let projection = glam::Mat4::perspective_rh(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
-    let view = glam::Mat4::look_at_rh(position, target, glam::Vec3::Y);
+    let projection =
+        glam::camera::rh::proj::directx::perspective(100.0_f32.to_radians(), 1.0, 0.1, 64.0);
+    let view = glam::camera::rh::view::look_at_mat4(position, target, glam::Vec3::Y);
     projection * view
 }
 
@@ -1255,7 +1261,7 @@ fn create_shadow_skinned_pipeline(
             module: shader,
             entry_point: Some("vs_shadow_skinned"),
             compilation_options: Default::default(),
-            buffers: &[SkinnedVertex::layout()],
+            buffers: &[Some(SkinnedVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1293,7 +1299,7 @@ fn create_skinned_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt_skinned"),
             compilation_options: Default::default(),
-            buffers: &[SkinnedVertex::layout()],
+            buffers: &[Some(SkinnedVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1340,7 +1346,7 @@ fn create_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,

@@ -2049,7 +2049,7 @@ fn shade_pixel(pixel: vec2<u32>, gi: bool) {
     // coverage stop) could operate in GI mode.
     let sun_lighting = stable_sun_lighting(surface, index);
     // Debug views: 1 = albedo, 2 = reservoir light only, 3 = stable direct
-    // only, 4 = ambient only.
+    // only, 4 = ambient only, 5 = the full frame with no temporal history.
     let debug_view = u32(uniforms.settings2.z + 0.5);
     if debug_view == 1u {
         // Store white; the present pass remodulates with G-buffer albedo.
@@ -2110,7 +2110,11 @@ fn shade_pixel(pixel: vec2<u32>, gi: bool) {
     }
     color *= uniforms.settings1.y;
     if debug_view == 5u {
-        store_accumulation(pixel, fresh_accumulation(color, 1.0));
+        // The present pass always remodulates by albedo, so this has to store
+        // demodulated light like the main path below; storing the shaded
+        // colour applied albedo twice and darkened every surface.
+        let unaccumulated = max(color, vec3<f32>(0.0)) / demodulation_albedo(surface.albedo);
+        store_accumulation(pixel, fresh_accumulation(unaccumulated, 1.0));
         return;
     }
     var demodulated = max(color, vec3<f32>(0.0)) / demodulation_albedo(surface.albedo);

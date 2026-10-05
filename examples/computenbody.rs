@@ -229,7 +229,7 @@ impl ComputeNbodyExample {
                 return Ok(());
             };
             let raw_input = gui.state.take_egui_input(&context.window);
-            let full_output = gui.context.run_ui(raw_input, |root_ui| {
+            let mut full_output = gui.context.run_ui(raw_input, |root_ui| {
                 let egui_context = root_ui.ctx().clone();
                 egui::Window::new("N-body simulation")
                     .default_pos(egui::pos2(10.0, 10.0))
@@ -288,9 +288,14 @@ impl ComputeNbodyExample {
                 size_in_pixels: [context.surface_config.width, context.surface_config.height],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            for (id, image_delta) in &full_output.textures_delta.set {
-                gui.renderer
-                    .update_texture(&context.device, &context.queue, *id, image_delta);
+            // egui 0.36 asserts that a frame's texture changes were consumed, so
+            // drain both lists up front; the frees are applied after painting.
+            let freed_textures: Vec<_> = full_output.textures_delta.free.drain().collect();
+            for (id, image_deltas) in full_output.textures_delta.set.drain() {
+                for image_delta in &image_deltas {
+                    gui.renderer
+                        .update_texture(&context.device, &context.queue, id, image_delta);
+                }
             }
             let paint_jobs = gui
                 .context
@@ -330,7 +335,7 @@ impl ComputeNbodyExample {
                 );
             }
 
-            for id in &full_output.textures_delta.free {
+            for id in &freed_textures {
                 gui.renderer.free_texture(id);
             }
         }
@@ -746,8 +751,12 @@ fn create_render_pipeline(
 }
 
 fn scene_matrices(aspect_ratio: f32) -> SceneMatrices {
-    let projection =
-        glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 512.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        60.0_f32.to_radians(),
+        aspect_ratio.max(0.01),
+        0.1,
+        512.0,
+    );
     let yaw = 75.0_f32.to_radians();
     let pitch = 26.0_f32.to_radians();
     let distance = 14.0;
@@ -756,7 +765,7 @@ fn scene_matrices(aspect_ratio: f32) -> SceneMatrices {
         pitch.sin() * distance,
         yaw.cos() * pitch.cos() * distance,
     );
-    let modelview = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y);
+    let modelview = glam::camera::rh::view::look_at_mat4(eye, glam::Vec3::ZERO, glam::Vec3::Y);
 
     SceneMatrices {
         projection,

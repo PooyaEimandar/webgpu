@@ -734,7 +734,12 @@ impl Example for DeferredExample {
 }
 
 fn camera_matrices(aspect_ratio: f32, camera_state: FpsCamera) -> (glam::Mat4, glam::Vec3) {
-    let projection = glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio, 0.1, 256.0);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        60.0_f32.to_radians(),
+        aspect_ratio,
+        0.1,
+        256.0,
+    );
     let view = camera_state.view_matrix();
 
     (projection * view, camera_state.eye)
@@ -993,7 +998,7 @@ fn create_skinned_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt_skinned"),
             compilation_options: Default::default(),
-            buffers: &[SkinnedVertex::layout()],
+            buffers: &[Some(SkinnedVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -1040,7 +1045,7 @@ fn create_mrt_pipeline(
             module: shader,
             entry_point: Some("vs_mrt"),
             compilation_options: Default::default(),
-            buffers: &[GltfColoredVertex::layout()],
+            buffers: &[Some(GltfColoredVertex::layout())],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,

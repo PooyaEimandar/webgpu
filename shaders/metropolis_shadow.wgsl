@@ -34,13 +34,7 @@ fn rotate_x(value: vec3<f32>, angle: f32) -> vec3<f32> {
     return vec3<f32>(value.x, value.y * c - value.z * s, value.y * s + value.z * c);
 }
 
-fn skin_matrix(joints: vec4<f32>, weights: vec4<f32>) -> mat4x4<f32> {
-    let ids = vec4<u32>(joints);
-    return joint_matrices[ids.x] * weights.x
-        + joint_matrices[ids.y] * weights.y
-        + joint_matrices[ids.z] * weights.z
-        + joint_matrices[ids.w] * weights.w;
-}
+//!include skinning
 
 @vertex
 fn vs_skinned(input: SkinnedInput) -> @builtin(position) vec4<f32> {

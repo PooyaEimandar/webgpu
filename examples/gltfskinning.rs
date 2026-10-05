@@ -64,8 +64,8 @@ impl SceneUniforms {
             * glam::Mat4::from_translation(-center);
         let eye = glam::Vec3::new(0.0, radius * 0.52, radius * 2.45);
         let target = glam::Vec3::new(0.0, radius * 0.18, 0.0);
-        let view = glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
-        let projection = glam::Mat4::perspective_rh(
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
+        let projection = glam::camera::rh::proj::directx::perspective(
             60.0_f32.to_radians(),
             aspect_ratio.max(0.01),
             0.1,
@@ -540,7 +540,7 @@ impl Example for GltfSkinningExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[SkinnedVertex::layout()],
+                    buffers: &[Some(SkinnedVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,

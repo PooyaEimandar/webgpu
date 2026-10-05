@@ -787,9 +787,12 @@ mod tests {
             glam::Vec3::new(center.x + 0.4, floor + 2.15, center.z + extent.z * 0.22)
         };
         let target = glam::Vec3::new(center.x, floor + 1.2, center.z);
-        let view_projection =
-            glam::Mat4::perspective_rh(55.0_f32.to_radians(), 16.0 / 9.0, 0.05, 120.0)
-                * glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y);
+        let view_projection = glam::camera::rh::proj::directx::perspective(
+            55.0_f32.to_radians(),
+            16.0 / 9.0,
+            0.05,
+            120.0,
+        ) * glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y);
         let inverse_view_projection = view_projection.inverse();
 
         for y in [-0.75_f32, 0.0, 0.75] {
@@ -829,8 +832,12 @@ mod tests {
         let eye = glam::Vec3::new(center.x + extent.x * 0.22, floor + 2.15, center.z + 0.4);
         let target = glam::Vec3::new(center.x, floor + 1.2, center.z);
         let inverse_view_projection =
-            (glam::Mat4::perspective_rh(55.0_f32.to_radians(), 16.0 / 9.0, 0.05, 120.0)
-                * glam::Mat4::look_at_rh(eye, target, glam::Vec3::Y))
+            (glam::camera::rh::proj::directx::perspective(
+                55.0_f32.to_radians(),
+                16.0 / 9.0,
+                0.05,
+                120.0,
+            ) * glam::camera::rh::view::look_at_mat4(eye, target, glam::Vec3::Y))
             .inverse();
         let mut lights = Vec::with_capacity(32);
         for index in 0..32 {

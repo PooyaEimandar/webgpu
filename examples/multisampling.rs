@@ -52,8 +52,12 @@ impl Uniforms {
     fn new(aspect_ratio: f32, view: glam::Mat4) -> Self {
         let model = glam::Mat4::from_translation(glam::Vec3::new(2.5, 0.35, -7.5))
             * glam::Mat4::from_rotation_y(-90.0_f32.to_radians());
-        let projection =
-            glam::Mat4::perspective_rh(60.0_f32.to_radians(), aspect_ratio.max(0.01), 0.1, 256.0);
+        let projection = glam::camera::rh::proj::directx::perspective(
+            60.0_f32.to_radians(),
+            aspect_ratio.max(0.01),
+            0.1,
+            256.0,
+        );
 
         Self {
             projection: (projection).to_cols_array_2d(),
@@ -287,7 +291,7 @@ impl Example for MultisamplingExample {
                     module: &shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[MultisamplingVertex::layout()],
+                    buffers: &[Some(MultisamplingVertex::layout())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
