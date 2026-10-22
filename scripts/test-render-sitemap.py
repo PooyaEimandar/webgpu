@@ -22,7 +22,8 @@ CANONICAL_ROOT = "https://pooya.ai/webgpu/"
 
 class RenderSitemapTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="webgpu-sitemap-test-")
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="webgpu-sitemap-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.web_root = self.root / "web"
@@ -30,11 +31,16 @@ class RenderSitemapTests(unittest.TestCase):
         self.web_root.mkdir()
         self.examples_root.mkdir()
         self.add_page("index.html")
+        no_history = unittest.mock.patch.object(
+            renderer, "last_changed", return_value=None)
+        no_history.start()
+        self.addCleanup(no_history.stop)
 
     def add_page(self, relative_path):
         page = self.web_root / relative_path
         page.parent.mkdir(parents=True, exist_ok=True)
-        page.write_text("<!doctype html><title>Test page</title>", encoding="utf-8")
+        page.write_text(
+            "<!doctype html><title>Test page</title>", encoding="utf-8")
         return page
 
     def add_source(self, slug):
@@ -98,7 +104,8 @@ class RenderSitemapTests(unittest.TestCase):
             "nested/helper/index.html", "_article_qa_preview.html",
         ):
             self.add_page(path)
-        self.assertEqual(self.urls(self.render()), [CANONICAL_ROOT, CANONICAL_ROOT + "triangle/"])
+        self.assertEqual(self.urls(self.render()), [
+                         CANONICAL_ROOT, CANONICAL_ROOT + "triangle/"])
 
     def test_invalid_slugs_cannot_produce_unsafe_or_noncanonical_urls(self):
         for slug in ("Triangle", "two words", "x&y", "x#part", "x?query", "_preview", ".hidden"):
@@ -106,7 +113,8 @@ class RenderSitemapTests(unittest.TestCase):
             self.add_page(f"{slug}/index.html")
         self.add_source("demo-2_test")
         self.add_page("demo-2_test/index.html")
-        self.assertEqual(self.urls(self.render()), [CANONICAL_ROOT, CANONICAL_ROOT + "demo-2_test/"])
+        self.assertEqual(self.urls(self.render()), [
+                         CANONICAL_ROOT, CANONICAL_ROOT + "demo-2_test/"])
 
     def test_directory_named_index_html_is_not_a_page(self):
         self.add_source("triangle")
@@ -130,7 +138,8 @@ class RenderSitemapTests(unittest.TestCase):
         self.add_page("triangle/index.html")
         root = ET.fromstring(self.render())
         for entry in root:
-            self.assertEqual([child.tag for child in entry], [f"{{{NAMESPACES['s']}}}loc"])
+            self.assertEqual([child.tag for child in entry],
+                             [f"{{{NAMESPACES['s']}}}loc"])
             self.assertTrue(entry[0].text.startswith(CANONICAL_ROOT))
             self.assertTrue(entry[0].text.endswith("/"))
             self.assertNotIn("index.html", entry[0].text)
@@ -155,7 +164,8 @@ class RenderSitemapTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(self.urls(result.stdout), [CANONICAL_ROOT, CANONICAL_ROOT + "triangle/"])
+        self.assertEqual(self.urls(result.stdout), [
+                         CANONICAL_ROOT, CANONICAL_ROOT + "triangle/"])
 
     def test_cli_failure_has_a_useful_error_and_no_partial_xml(self):
         result = subprocess.run(
@@ -163,7 +173,8 @@ class RenderSitemapTests(unittest.TestCase):
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(result.returncode, 1)
-        self.assertIn("render-sitemap: Build output directory not found", result.stderr)
+        self.assertIn(
+            "render-sitemap: Build output directory not found", result.stderr)
         self.assertEqual(result.stdout, "")
 
 
