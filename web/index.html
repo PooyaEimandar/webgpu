@@ -10,12 +10,12 @@
   <meta name="author" content="Pooya Eimandar" />
   <meta name="robots" content="index, follow, max-image-preview:large" />
   <meta name="theme-color" content="#0b0c0f" />
-  <meta name="application-name" content="webgpu examples" />
+  <meta name="application-name" content="Pooya Eimandar" />
   <meta name="keywords"
     content="Rust, WebGPU, wgpu, WASM, Vulkan examples, graphics programming, glTF, shader, rendering" />
   <link rel="canonical" href="https://pooya.ai/webgpu/" />
   <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="webgpu examples" />
+  <meta property="og:site_name" content="Pooya Eimandar" />
   <meta property="og:title" content="Rust WebGPU Examples &amp; Tutorials" />
   <meta property="og:description"
     content="Explore 47 interactive Rust WebGPU examples &amp; source-guided tutorials for browser WebAssembly &amp; native wgpu." />
@@ -34,10 +34,12 @@
       "name": "Rust WebGPU Examples & Tutorials",
       "url": "https://pooya.ai/webgpu/",
       "description": "Explore 47 interactive Rust WebGPU examples with source-guided tutorials covering wgpu, WGSL, compute shaders, ray tracing, PBR, shadows, and glTF.",
+      "isPartOf": { "@id": "https://pooya.ai/#website" },
       "author": {
         "@type": "Person",
+        "@id": "https://pooya.ai/#person",
         "name": "Pooya Eimandar",
-        "url": "https://pooya.ai"
+        "url": "https://pooya.ai/"
       },
       "mainEntity": {
         "@type": "ItemList",
@@ -261,6 +263,11 @@
       padding: 16px;
     }
 
+    .content h2 {
+      margin: 0;
+      font: inherit;
+    }
+
     strong {
       display: block;
       margin-bottom: 8px;
@@ -299,11 +306,11 @@
           <img src="./screenshots/geometrydash.jpg"
             alt="A neon WebGPU rhythm platform game with a green square jumping over pink spikes, cyan blocks, and a progress bar." />
         </picture>
-        <span class="content">
-          <strong>WebGPU Geometry Dash-style game</strong>
+        <div class="content">
+          <h2><strong>WebGPU Geometry Dash-style game</strong></h2>
           <span>One-button rhythm platforming with fixed-step physics, procedural GPU visuals, and touch
             controls.</span>
-        </span>
+        </div>
       </a>
       <a href="./residentevil2/">
         <picture>
@@ -311,22 +318,22 @@
           <img src="./screenshots/residentevil2.jpg"
             alt="Claire Redfield standing before the rainy R.P.D. front gate in a WebGPU fixed-camera scene with a small status and model-credit overlay." />
         </picture>
-        <span class="content">
-          <strong>WebGPU Resident Evil fixed-camera scene</strong>
+        <div class="content">
+          <h2><strong>WebGPU Resident Evil fixed-camera scene</strong></h2>
           <span>GPU-skinned Claire, tank controls, and three persistent fixed-camera views of the rainy R.P.D.
             approach.</span>
-        </span>
+        </div>
       </a>
       <a href="./triangle/">
         <picture>
           <source srcset="./screenshots/triangle.webp" type="image/webp" />
           <img src="./screenshots/triangle.jpg" alt="Colored indexed triangle screenshot" />
         </picture>
-        <span class="content">
-          <strong>WebGPU triangle</strong>
+        <div class="content">
+          <h2><strong>WebGPU triangle</strong></h2>
           <span>A live Rust and wgpu demo with a walkthrough of vertex buffers, WGSL shaders, and the render
             pipeline.</span>
-        </span>
+        </div>
       </a>
       <a href="./vertexattributes/">
         <picture>
@@ -334,11 +341,11 @@
           <img src="./screenshots/vertexattributes.jpg"
             alt="Matching checkerboard surfaces using interleaved and separate WebGPU vertex buffers" />
         </picture>
-        <span class="content">
-          <strong>WebGPU vertex attributes</strong>
+        <div class="content">
+          <h2><strong>WebGPU vertex attributes</strong></h2>
           <span>Compare interleaved and separate buffers, with a Rust and WGSL walkthrough of strides, offsets, and
             shader locations.</span>
-        </span>
+        </div>
       </a>
       <a href="./particlesystem/">
         <picture>
@@ -346,11 +353,11 @@
           <img src="./screenshots/particlesystem.jpg"
             alt="WebGPU campfire with layered flame and smoke billboards over a textured fireplace" />
         </picture>
-        <span class="content">
-          <strong>WebGPU CPU particle system</strong>
+        <div class="content">
+          <h2><strong>WebGPU CPU particle system</strong></h2>
           <span>Simulate 512 fire and smoke particles in Rust, stream their instance data, and render them as
             camera-facing billboard quads.</span>
-        </span>
+        </div>
       </a>
       <a href="./computeparticles/">
         <picture>
@@ -358,11 +365,11 @@
           <img src="./screenshots/computeparticles.jpg"
             alt="Rainbow WebGPU compute particles forming flowing bands across a black background" />
         </picture>
-        <span class="content">
-          <strong>WebGPU compute particles</strong>
+        <div class="content">
+          <h2><strong>WebGPU compute particles</strong></h2>
           <span>Update 262,144 particles in 1,024 compute workgroups, ping-pong two storage buffers, and render the
             GPU-written state as additive billboards.</span>
-        </span>
+        </div>
       </a>
       <a href="./computecloth/">
         <picture>
@@ -370,10 +377,10 @@
           <img src="./screenshots/computecloth.jpg"
             alt="A checkered WebGPU cloth draped over a sphere beside controls for compute iterations, time step, stiffness, damping, and collision radius." />
         </picture>
-        <span class="content">
-          <strong>WebGPU compute cloth simulation</strong>
+        <div class="content">
+          <h2><strong>WebGPU compute cloth simulation</strong></h2>
           <span>Spring-connected cloth grid simulated in compute shaders and rendered as a sphere-colliding mesh.</span>
-        </span>
+        </div>
       </a>
       <a href="./computecullandlod/">
         <picture>
@@ -381,10 +388,10 @@
           <img src="./screenshots/computecullandlod.jpg"
             alt="A three-dimensional grid of colored sphere LODs rendered after WebGPU compute frustum culling, beside live culling statistics." />
         </picture>
-        <span class="content">
-          <strong>WebGPU compute culling and LOD</strong>
+        <div class="content">
+          <h2><strong>WebGPU compute culling and LOD</strong></h2>
           <span>Compute shader frustum culling, LOD bucketing, compacted instance buffers, and indirect draws.</span>
-        </span>
+        </div>
       </a>
       <a href="./nanite/">
         <picture>
@@ -392,11 +399,11 @@
           <img src="./screenshots/nanite.jpg"
             alt="Thousands of animated Jax rabbit characters rendered in colored WebGPU meshlet LOD bands with a Nanite diagnostics panel." />
         </picture>
-        <span class="content">
-          <strong>WebGPU Nanite-style mesh rendering</strong>
+        <div class="content">
+          <h2><strong>WebGPU Nanite-style mesh rendering</strong></h2>
           <span>Adapter-scaled populations, virtual geometry pages, meshlet LODs, two-pass HZB occlusion, indirect
             rasterization, and GPU skinning.</span>
-        </span>
+        </div>
       </a>
       <a href="./metropolis/">
         <picture>
@@ -404,11 +411,11 @@
           <img src="./screenshots/metropolis.jpg"
             alt="Crowd of animated Jax characters filling the colorful Sponza atrium in the WebGPU Metropolis renderer, with the live settings panel open." />
         </picture>
-        <span class="content">
-          <strong>WebGPU Metropolis renderer</strong>
+        <div class="content">
+          <h2><strong>WebGPU Metropolis renderer</strong></h2>
           <span>Forward+ Sponza scene with GPU culling, indirect draws, animated crowds, dynamic shadows, reflections,
             GI, and post-processing.</span>
-        </span>
+        </div>
       </a>
       <a href="./computenbody/">
         <picture>
@@ -416,11 +423,11 @@
           <img src="./screenshots/computenbody.jpg"
             alt="Luminous colored particle clusters evolving in the WebGPU N-body simulation beside live controls" />
         </picture>
-        <span class="content">
-          <strong>WebGPU N-body simulation</strong>
+        <div class="content">
+          <h2><strong>WebGPU N-body simulation</strong></h2>
           <span>Evaluate 151 million pairwise interactions with tiled workgroup memory, then render 12,288 additive
             billboards with live egui controls.</span>
-        </span>
+        </div>
       </a>
       <a href="./computeraytracing/">
         <picture>
@@ -428,11 +435,11 @@
           <img src="./screenshots/computeraytracing.jpg"
             alt="Three glossy spheres reflected across red, green, white, and black walls in a WebGPU compute ray traced room." />
         </picture>
-        <span class="content">
-          <strong>WebGPU compute shader ray tracing</strong>
+        <div class="content">
+          <h2><strong>WebGPU compute shader ray tracing</strong></h2>
           <span>Compute shader software ray tracing into a storage texture, displayed by a fullscreen present
             pass.</span>
-        </span>
+        </div>
       </a>
       <a href="./raytracingshadows/">
         <picture>
@@ -440,10 +447,10 @@
           <img src="./screenshots/raytracingshadows.jpg"
             alt="Three spheres and three colored boxes casting hard ray-traced shadows across a checkerboard floor between red and green walls." />
         </picture>
-        <span class="content">
-          <strong>WebGPU ray-traced shadows</strong>
+        <div class="content">
+          <h2><strong>WebGPU ray-traced shadows</strong></h2>
           <span>Primary and secondary shadow rays traced in a compute shader over procedural scene geometry.</span>
-        </span>
+        </div>
       </a>
       <a href="./raytracingreflections/">
         <picture>
@@ -451,10 +458,10 @@
           <img src="./screenshots/raytracingreflections.jpg"
             alt="Reflective chrome sphere, textured spheres, colorful boxes, and a checkerboard floor ray traced inside a red, green, and gray room." />
         </picture>
-        <span class="content">
-          <strong>WebGPU ray-traced reflections</strong>
+        <div class="content">
+          <h2><strong>WebGPU ray-traced reflections</strong></h2>
           <span>Recursive reflection bounces traced in a compute shader with a sky-gradient miss path.</span>
-        </span>
+        </div>
       </a>
       <a href="./raytracinggltf/">
         <picture>
@@ -462,10 +469,10 @@
           <img src="./screenshots/raytracinggltf.jpg"
             alt="Animated Jax rabbit character ray traced between reflective orange and blue spheres, cyan and yellow boxes, and a checkerboard floor." />
         </picture>
-        <span class="content">
-          <strong>WebGPU glTF ray tracing</strong>
+        <div class="content">
+          <h2><strong>WebGPU glTF ray tracing</strong></h2>
           <span>Compute ray tracing over a skinned and textured glTF mesh with runtime skinning controls.</span>
-        </span>
+        </div>
       </a>
       <a href="./restirdi/">
         <picture>
@@ -473,11 +480,11 @@
           <img src="./screenshots/restirdi.jpg"
             alt="Animated Jax character walking through the Crytek Sponza atrium under WebGPU ReSTIR direct illumination, with reservoir controls open." />
         </picture>
-        <span class="content">
-          <strong>WebGPU ReSTIR direct illumination</strong>
+        <div class="content">
+          <h2><strong>WebGPU ReSTIR direct illumination</strong></h2>
           <span>Direct-light reservoirs reused across time and neighboring pixels over Sponza and animated Jax
             geometry.</span>
-        </span>
+        </div>
       </a>
       <a href="./restirgi/">
         <picture>
@@ -485,11 +492,11 @@
           <img src="./screenshots/restirgi.jpg"
             alt="Animated Jax character crossing the Crytek Sponza atrium with warm WebGPU ReSTIR global illumination and reservoir controls visible." />
         </picture>
-        <span class="content">
-          <strong>WebGPU ReSTIR global illumination</strong>
+        <div class="content">
+          <h2><strong>WebGPU ReSTIR global illumination</strong></h2>
           <span>One-bounce path reservoirs with temporal and spatial reuse over the same animated Sponza test
             scene.</span>
-        </span>
+        </div>
       </a>
       <a href="./htmlmesh/">
         <picture>
@@ -497,11 +504,11 @@
           <img src="./screenshots/htmlmesh.jpg"
             alt="A tilted HTML Mesh page with a green Click button and button counter, rendered on a dark 3D plane beside an egui control panel." />
         </picture>
-        <span class="content">
-          <strong>WebGPU HTML mesh</strong>
+        <div class="content">
+          <h2><strong>WebGPU HTML mesh</strong></h2>
           <span>Offline-rasterized HTML surface mapped onto a 3D plane with ray-mapped pointer and keyboard
             input.</span>
-        </span>
+        </div>
       </a>
       <a href="./texture/">
         <picture>
@@ -509,11 +516,11 @@
           <img src="./screenshots/texture.jpg"
             alt="Husky image mapped onto a lit quad in the WebGPU texture loading demo" />
         </picture>
-        <span class="content">
-          <strong>WebGPU texture loading</strong>
+        <div class="content">
+          <h2><strong>WebGPU texture loading</strong></h2>
           <span>Load a PNG in Rust and wgpu, then explore UV coordinates, samplers, bind groups, and WGSL texture
             sampling.</span>
-        </span>
+        </div>
       </a>
       <a href="./texturemipmapgen/">
         <picture>
@@ -521,11 +528,11 @@
           <img src="./screenshots/texturemipmapgen.jpg"
             alt="Metal plates repeating along a tunnel with large nearby tiles and fine distant detail" />
         </picture>
-        <span class="content">
-          <strong>WebGPU texture mipmap generation</strong>
+        <div class="content">
+          <h2><strong>WebGPU texture mipmap generation</strong></h2>
           <span>Generate eleven mip levels with GPU render passes, then explore LOD and anisotropic filtering on a
             rotating tunnel.</span>
-        </span>
+        </div>
       </a>
       <a href="./texturecubemap/">
         <picture>
@@ -533,11 +540,11 @@
           <img src="./screenshots/texturecubemap.jpg"
             alt="Reflective sphere and bridge skybox sharing a WebGPU cubemap" />
         </picture>
-        <span class="content">
-          <strong>WebGPU texture cubemap</strong>
+        <div class="content">
+          <h2><strong>WebGPU texture cubemap</strong></h2>
           <span>A skybox and reflective sphere, with a Rust and WGSL walkthrough of cubemap face order, cube views, and
             reflection sampling.</span>
-        </span>
+        </div>
       </a>
       <a href="./texturearray/">
         <picture>
@@ -545,11 +552,11 @@
           <img src="./screenshots/texturearray.jpg"
             alt="Seven stacked quads displaying image, solid color, and procedural layers from a WebGPU texture array" />
         </picture>
-        <span class="content">
-          <strong>WebGPU texture array</strong>
+        <div class="content">
+          <h2><strong>WebGPU texture array</strong></h2>
           <span>Seven textured quads in one draw, with Rust and WGSL notes on array layers, instancing, and texture
             sampling.</span>
-        </span>
+        </div>
       </a>
       <a href="./textoverlay/">
         <picture>
@@ -557,11 +564,11 @@
           <img src="./screenshots/textoverlay.jpg"
             alt="A colorful cube with GPU and FPS text at the upper left and blue Persian text at the lower right" />
         </picture>
-        <span class="content">
-          <strong>WebGPU text overlay</strong>
+        <div class="content">
+          <h2><strong>WebGPU text overlay</strong></h2>
           <span>Render FPS and Persian text over a rotating cube, with Rust notes on fonts, glyph atlases, Unicode
             shaping, and overlay passes.</span>
-        </span>
+        </div>
       </a>
       <a href="./textmesh/">
         <picture>
@@ -569,11 +576,11 @@
           <img src="./screenshots/textmesh.jpg"
             alt="Gold Latin and blue Persian text with extruded outlines and lit side faces" />
         </picture>
-        <span class="content">
-          <strong>WebGPU 3D text mesh</strong>
+        <div class="content">
+          <h2><strong>WebGPU 3D text mesh</strong></h2>
           <span>Turn Latin and Persian font outlines into extruded geometry, with Rust notes on shaping, curve sampling,
             indexed meshes, and WGSL lighting.</span>
-        </span>
+        </div>
       </a>
       <a href="./gltf/">
         <picture>
@@ -581,11 +588,11 @@
           <img src="./screenshots/gltf.jpg"
             alt="An angled gray cube textured with blue, green, and white Cesium logos" />
         </picture>
-        <span class="content">
-          <strong>WebGPU glTF 2.0 model loading</strong>
+        <div class="content">
+          <h2><strong>WebGPU glTF 2.0 model loading</strong></h2>
           <span>Load the Khronos textured box from a URL, then turn its glTF nodes, mesh attributes, material, sampler,
             and texture into a wgpu draw.</span>
-        </span>
+        </div>
       </a>
       <a href="./gltfskinning/">
         <picture>
@@ -593,11 +600,11 @@
           <img src="./screenshots/gltfskinning.jpg"
             alt="Purple, red, and gold Jax character walking on a black WebGPU canvas" />
         </picture>
-        <span class="content">
-          <strong>WebGPU glTF vertex skinning</strong>
+        <div class="content">
+          <h2><strong>WebGPU glTF vertex skinning</strong></h2>
           <span>Animate Jax with a 46-joint glTF skeleton, CPU-sampled keyframes, an uploaded matrix palette, and
             four-weight WGSL skinning.</span>
-        </span>
+        </div>
       </a>
       <a href="./instancing/">
         <picture>
@@ -605,11 +612,11 @@
           <img src="./screenshots/instancing.jpg"
             alt="Thousands of gray, brown, and white instanced asteroids arranged in dense rings" />
         </picture>
-        <span class="content">
-          <strong>WebGPU asteroid instancing</strong>
+        <div class="content">
+          <h2><strong>WebGPU asteroid instancing</strong></h2>
           <span>Render 2,048 animated asteroids in one indexed draw using a static instance buffer, procedural geometry,
             and six texture-array layers.</span>
-        </span>
+        </div>
       </a>
       <a href="./indirectdraw/">
         <picture>
@@ -617,11 +624,11 @@
           <img src="./screenshots/indirectdraw.jpg"
             alt="Dense WebGPU jungle with palms, red bromeliads, and green ground cover" />
         </picture>
-        <span class="content">
-          <strong>WebGPU indirect draw</strong>
+        <div class="content">
+          <h2><strong>WebGPU indirect draw</strong></h2>
           <span>Render 24,576 plants from 12 indexed indirect commands using instanced glTF submeshes and a KTX texture
             array.</span>
-        </span>
+        </div>
       </a>
       <a href="./pipelines/">
         <picture>
@@ -629,10 +636,10 @@
           <img src="./screenshots/pipelines.jpg"
             alt="One WebGPU treasure scene shown side by side with glossy Phong shading, banded toon shading, and colored wireframe lines." />
         </picture>
-        <span class="content">
-          <strong>WebGPU multiple render pipelines</strong>
+        <div class="content">
+          <h2><strong>WebGPU multiple render pipelines</strong></h2>
           <span>Original treasure glTF scene rendered through Phong, toon, and wireframe pipelines.</span>
-        </span>
+        </div>
       </a>
       <a href="./gears/">
         <picture>
@@ -640,11 +647,11 @@
           <img src="./screenshots/gears.jpg"
             alt="Red, green, and blue toothed 3D gears with lit faces on a black background" />
         </picture>
-        <span class="content">
-          <strong>Procedural WebGPU gears</strong>
+        <div class="content">
+          <h2><strong>Procedural WebGPU gears</strong></h2>
           <span>Generate three toothed meshes in Rust, share their GPU buffers, animate per-gear uniforms, and light the
             moving surfaces in WGSL.</span>
-        </span>
+        </div>
       </a>
       <a href="./stencilbuffer/">
         <picture>
@@ -652,11 +659,11 @@
           <img src="./screenshots/stencilbuffer.jpg"
             alt="Red toon-shaded Venus statue edged with a white stencil buffer outline" />
         </picture>
-        <span class="content">
-          <strong>WebGPU stencil buffer outlines</strong>
+        <div class="content">
+          <h2><strong>WebGPU stencil buffer outlines</strong></h2>
           <span>Draw a toon-shaded Venus mesh twice, expand it along its normals, and mask the white silhouette with a
             depth-stencil attachment.</span>
-        </span>
+        </div>
       </a>
       <a href="./occlusionquery/">
         <picture>
@@ -664,11 +671,11 @@
           <img src="./screenshots/occlusionquery.jpg"
             alt="Translucent blue WebGPU occluder hiding a teapot while a green sphere remains partly visible" />
         </picture>
-        <span class="content">
-          <strong>WebGPU occlusion queries</strong>
+        <div class="content">
+          <h2><strong>WebGPU occlusion queries</strong></h2>
           <span>Test a teapot and sphere with two native sample-count queries, asynchronous readback, and an explicit
             browser-safe fallback.</span>
-        </span>
+        </div>
       </a>
       <a href="./radialblur/">
         <picture>
@@ -676,11 +683,11 @@
           <img src="./screenshots/radialblur.jpg"
             alt="Magenta WebGPU glow sphere with soft radial light streaks against a black background" />
         </picture>
-        <span class="content">
-          <strong>WebGPU radial blur</strong>
+        <div class="content">
+          <h2><strong>WebGPU radial blur</strong></h2>
           <span>Render a glow mask to a 512 &times; 512 target, sample it 32 times per fragment, and additively
             composite the streaks over the lit scene.</span>
-        </span>
+        </div>
       </a>
       <a href="./bloom/">
         <picture>
@@ -688,11 +695,11 @@
           <img src="./screenshots/bloom.jpg"
             alt="A retro green UFO with cyan lights and a bright yellow beam glowing against a black background" />
         </picture>
-        <span class="content">
-          <strong>WebGPU bloom</strong>
+        <div class="content">
+          <h2><strong>WebGPU bloom</strong></h2>
           <span>Render a dedicated glow mesh to 256 &times; 256, blur it vertically and horizontally with two 9-tap
             filters, then add it over the lit UFO.</span>
-        </span>
+        </div>
       </a>
       <a href="./deferred/">
         <picture>
@@ -700,11 +707,11 @@
           <img src="./screenshots/deferred.jpg"
             alt="Animated rabbit-like Jax character walking across a checkerboard floor under red, yellow, green, blue, and white deferred lights" />
         </picture>
-        <span class="content">
-          <strong>WebGPU deferred shading</strong>
+        <div class="content">
+          <h2><strong>WebGPU deferred shading</strong></h2>
           <span>Write world position, normal, and albedo into three G-buffer targets, then light animated Jax and the
             floor with six lights in one fullscreen pass.</span>
-        </span>
+        </div>
       </a>
       <a href="./deferredmultisampling/">
         <picture>
@@ -712,11 +719,11 @@
           <img src="./screenshots/deferredmultisampling.jpg"
             alt="Animated Jax character walking across a checkerboard floor under colored deferred lights rendered with 4x MSAA" />
         </picture>
-        <span class="content">
-          <strong>WebGPU deferred multisampling</strong>
+        <div class="content">
+          <h2><strong>WebGPU deferred multisampling</strong></h2>
           <span>Store four samples for every position, normal, albedo, and depth G-buffer pixel, then shade and average
             them manually in one fullscreen pass.</span>
-        </span>
+        </div>
       </a>
       <a href="./deferredshadows/">
         <picture>
@@ -724,11 +731,11 @@
           <img src="./screenshots/deferredshadows.jpg"
             alt="Animated Jax character walking across a checkerboard floor under colorful WebGPU spotlights casting multiple shadows" />
         </picture>
-        <span class="content">
-          <strong>WebGPU deferred shadows</strong>
+        <div class="content">
+          <h2><strong>WebGPU deferred shadows</strong></h2>
           <span>Render animated Jax into three 1024 &times; 1024 depth maps, then use up to 27 comparison samples while
             shading eight spotlights in a fullscreen deferred pass.</span>
-        </span>
+        </div>
       </a>
       <a href="./ssao/">
         <picture>
@@ -736,11 +743,11 @@
           <img src="./screenshots/ssao.jpg"
             alt="Animated Jax character on a colorful checkerboard beside WebGPU SSAO controls" />
         </picture>
-        <span class="content">
-          <strong>WebGPU screen-space ambient occlusion</strong>
+        <div class="content">
+          <h2><strong>WebGPU screen-space ambient occlusion</strong></h2>
           <span>Generate a full-resolution AO mask with up to 32 spiral samples, soften it with a weighted 5 &times; 5
             blur, and combine it with deferred shadows.</span>
-        </span>
+        </div>
       </a>
       <a href="./parallaxmapping/">
         <picture>
@@ -748,11 +755,11 @@
           <img src="./screenshots/parallaxmapping.jpg"
             alt="A flat WebGPU plane appearing densely covered with raised rocks through parallax occlusion mapping" />
         </picture>
-        <span class="content">
-          <strong>WebGPU parallax occlusion mapping</strong>
+        <div class="content">
+          <h2><strong>WebGPU parallax occlusion mapping</strong></h2>
           <span>A two-triangle plane ray-marches 48 height layers from alpha, then lights RGB tangent-space normals to
             create parallax occlusion.</span>
-        </span>
+        </div>
       </a>
       <a href="./multisampling/">
         <picture>
@@ -760,11 +767,11 @@
           <img src="./screenshots/multisampling.jpg"
             alt="A white and black Voyager space probe with a dish antenna and long lattice boom on a white WebGPU canvas" />
         </picture>
-        <span class="content">
-          <strong>WebGPU 4x MSAA multisampling</strong>
+        <div class="content">
+          <h2><strong>WebGPU 4x MSAA multisampling</strong></h2>
           <span>Render the textured Voyager in three indexed draws into 4x multisampled color and depth, then resolve
             once into the surface.</span>
-        </span>
+        </div>
       </a>
       <a href="./multisamplingalphatocoverage/">
         <picture>
@@ -772,11 +779,11 @@
           <img src="./screenshots/multisamplingalphatocoverage.jpg"
             alt="Dense grove of alpha-textured oak trees rendered with 4x WebGPU MSAA and alpha-to-coverage against a dark blue background." />
         </picture>
-        <span class="content">
-          <strong>WebGPU alpha-to-coverage foliage</strong>
+        <div class="content">
+          <h2><strong>WebGPU alpha-to-coverage foliage</strong></h2>
           <span>Render 25 instanced oak trees in two indexed draws, converting leaf alpha into four-sample coverage
             before resolving to the surface.</span>
-        </span>
+        </div>
       </a>
       <a href="./pbr/">
         <picture>
@@ -784,11 +791,11 @@
           <img src="./screenshots/pbr.jpg"
             alt="A 7 by 7 grid of gold spheres showing metallic and roughness changes under four lights" />
         </picture>
-        <span class="content">
-          <strong>WebGPU PBR Basic</strong>
+        <div class="content">
+          <h2><strong>WebGPU PBR Basic</strong></h2>
           <span>Compare metallic and roughness across 49 instanced gold spheres with a compact GGX and Schlick specular
             shader.</span>
-        </span>
+        </div>
       </a>
       <a href="./pbrtexture/">
         <picture>
@@ -796,11 +803,11 @@
           <img src="./screenshots/pbrtexture.jpg"
             alt="An ornate black, brass, and wood Cerberus triple-barrel pistol rendered against a sunlit bridge cubemap beside PBR controls" />
         </picture>
-        <span class="content">
-          <strong>WebGPU PBR textures</strong>
+        <div class="content">
+          <h2><strong>WebGPU PBR textures</strong></h2>
           <span>Render the Cerberus glTF with five material maps, four GGX lights, image-based lighting, and live
             exposure controls.</span>
-        </span>
+        </div>
       </a>
       <a href="./pbribl/">
         <picture>
@@ -808,11 +815,11 @@
           <img src="./screenshots/pbribl.jpg"
             alt="Ten gold spheres with changing roughness and metallic reflections across a suspension bridge cubemap" />
         </picture>
-        <span class="content">
-          <strong>WebGPU PBR image-based lighting</strong>
+        <div class="content">
+          <h2><strong>WebGPU PBR image-based lighting</strong></h2>
           <span>Build diffuse irradiance and a split-sum BRDF LUT on the CPU, then approximate rough reflections with
             seven box-filtered cubemap mips.</span>
-        </span>
+        </div>
       </a>
       <a href="./shadowmapping/">
         <picture>
@@ -820,11 +827,11 @@
           <img src="./screenshots/shadowmapping.jpg"
             alt="A white teapot casting a long dark shadow across a beige floor against a gray background" />
         </picture>
-        <span class="content">
-          <strong>WebGPU shadow mapping</strong>
+        <div class="content">
+          <h2><strong>WebGPU shadow mapping</strong></h2>
           <span>Render a teapot into a 1024 &times; 1024 depth map, then project nine comparison samples onto a
             procedural floor as the light moves.</span>
-        </span>
+        </div>
       </a>
       <a href="./shadowmappingcascade/">
         <picture>
@@ -832,11 +839,11 @@
           <img src="./screenshots/shadowmappingcascade.jpg"
             alt="Five colored teapots receding across a long floor, each casting a directional shadow under four-cascade WebGPU shadow mapping." />
         </picture>
-        <span class="content">
-          <strong>WebGPU cascaded shadow mapping</strong>
+        <div class="content">
+          <h2><strong>WebGPU cascaded shadow mapping</strong></h2>
           <span>Four frustum splits rendered into a layered depth texture, with the fragment shader sampling the
             matching cascade.</span>
-        </span>
+        </div>
       </a>
       <a href="./shadowmappingomni/">
         <picture>
@@ -844,11 +851,11 @@
           <img src="./screenshots/shadowmappingomni.jpg"
             alt="Four colored teapots inside a three-walled room, lit by a small moving point light and casting shadows in several directions." />
         </picture>
-        <span class="content">
-          <strong>WebGPU omnidirectional shadow mapping</strong>
+        <div class="content">
+          <h2><strong>WebGPU omnidirectional shadow mapping</strong></h2>
           <span>Six cube-map light passes store point-light distance, then the scene shader samples the cube map for
             omni-directional shadows.</span>
-        </span>
+        </div>
       </a>
     </div>
   </main>

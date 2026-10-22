@@ -59,6 +59,8 @@ for EXAMPLE in $EXAMPLES; do
 done
 
 cp web/index.html "$OUT_DIR/index.html"
+# GitHub Pages serves this for any missing address under /webgpu/.
+cp web/404.html "$OUT_DIR/404.html"
 if [ -d screenshots ]; then
   mkdir -p "$OUT_DIR/screenshots"
   cp screenshots/*.webp "$OUT_DIR/screenshots/" 2>/dev/null || true

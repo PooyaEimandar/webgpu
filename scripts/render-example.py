@@ -7,6 +7,7 @@ import argparse
 import html
 import json
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,13 @@ from urllib.parse import quote
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 SITE_URL = "https://pooya.ai"
 AUTHOR = "Pooya Eimandar"
+# The person pooya.ai's home page describes; every article's author points at it.
+AUTHOR_SCHEMA = {
+    "@type": "Person", "@id": f"{SITE_URL}/#person", "name": AUTHOR, "url": f"{SITE_URL}/",
+}
+# Search results cut titles at about this many characters, so the author's name
+# is appended only when it fits.
+TITLE_LIMIT = 60
 TOKEN_PATTERN = re.compile(r"__[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*__")
 ARTICLE_NAV = """<a class="more-info" href="#about" aria-label="More info about this demo">
   <span>More info</span>
@@ -50,15 +58,48 @@ def json_ld_script(data: dict[str, Any]) -> str:
     return f'<script type="application/ld+json">\n{json_ld}\n</script>'
 
 
+def git_dates(*paths: Path) -> tuple[str, str] | None:
+    """Return the dates the first of `paths` was added and any of them last changed.
+
+    The dates come from the repository's history; without the complete history,
+    as in a shallow clone, there are none rather than wrong ones.
+    """
+    root = paths[0].parent
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *arguments], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    try:
+        if git("rev-parse", "--is-shallow-repository") != "false":
+            return None
+        names = [str(path.resolve()) for path in paths]
+        added = git("log", "--diff-filter=A", "--format=%cs", "--", names[0]).splitlines()
+        changed = git("log", "-1", "--format=%cs", "--", *names)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return (added[-1], changed) if added and changed else None
+
+
+def page_title(title: str) -> str:
+    with_author = f"{title} | {AUTHOR}"
+    return with_author if len(with_author) <= TITLE_LIMIT else title
+
+
 def article_head(
-    example: str, metadata: dict[str, Any], *, has_breadcrumbs: bool = False
+    example: str,
+    metadata: dict[str, Any],
+    *,
+    has_breadcrumbs: bool = False,
+    dates: tuple[str, str] | None = None,
 ) -> str:
     canonical = f"{SITE_URL}/webgpu/{example}/"
     image_url = f"{SITE_URL}/webgpu/screenshots/{quote(metadata['image'], safe='')}"
     title = metadata["title"]
     description = metadata["description"]
     tags = [
-        f"<title>{html.escape(title)} | {AUTHOR}</title>",
+        f"<title>{html.escape(page_title(title))}</title>",
         f'<link rel="canonical" href="{canonical}" />',
     ]
     meta = [
@@ -79,6 +120,11 @@ def article_head(
             ("property", "og:image:width", str(metadata["imageWidth"])),
             ("property", "og:image:height", str(metadata["imageHeight"])),
         ])
+    if dates:
+        meta.extend([
+            ("property", "article:published_time", dates[0]),
+            ("property", "article:modified_time", dates[1]),
+        ])
     meta.extend([
         ("property", "article:author", SITE_URL),
         ("name", "twitter:card", "summary_large_image"),
@@ -97,12 +143,14 @@ def article_head(
         "@id": f"{canonical}#about",
         "headline": title,
         "description": description,
-        "author": {"@type": "Person", "name": AUTHOR, "url": SITE_URL},
+        "author": AUTHOR_SCHEMA,
         "image": image_url,
         "mainEntityOfPage": {"@type": "WebPage", "@id": canonical},
         "url": canonical,
         "inLanguage": "en",
     }
+    if dates:
+        structured_data["datePublished"], structured_data["dateModified"] = dates
     if has_breadcrumbs:
         structured_data["mainEntityOfPage"]["breadcrumb"] = {
             "@id": f"{canonical}#breadcrumbs"
@@ -209,7 +257,12 @@ def render_example(example: str, build_id: str, web_root: Path = WEB_ROOT) -> st
                 ),
                 quote=True,
             ),
-            "__PAGE_HEAD__": article_head(example, metadata, has_breadcrumbs=has_breadcrumbs),
+            "__PAGE_HEAD__": article_head(
+                example,
+                metadata,
+                has_breadcrumbs=has_breadcrumbs,
+                dates=git_dates(article_path, metadata_path),
+            ),
             "__PAGE_CLASS__": "has-article",
             "__ARTICLE__": article,
             "__ARTICLE_NAV__": ARTICLE_NAV,

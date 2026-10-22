@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -49,6 +50,25 @@ class RenderSitemapTests(unittest.TestCase):
         root = ET.fromstring(document)
         self.assertEqual(root.tag, f"{{{NAMESPACES['s']}}}urlset")
         return [entry.text for entry in root.findall("s:url/s:loc", NAMESPACES)]
+
+    def test_lastmod_is_the_last_change_and_is_left_out_without_history(self):
+        self.add_source("triangle")
+        self.add_page("triangle/index.html")
+        dates = {"index.html": "2026-09-30", "triangle.html": "2026-09-29"}
+        with unittest.mock.patch.object(
+            renderer, "last_changed", side_effect=lambda *paths: dates.get(paths[0].name)
+        ):
+            root = ET.fromstring(self.render())
+        entries = {
+            entry.findtext("s:loc", namespaces=NAMESPACES): entry.findtext("s:lastmod", namespaces=NAMESPACES)
+            for entry in root.findall("s:url", NAMESPACES)
+        }
+        self.assertEqual(entries, {
+            CANONICAL_ROOT: "2026-09-30",
+            f"{CANONICAL_ROOT}triangle/": "2026-09-29",
+        })
+        with unittest.mock.patch.object(renderer, "last_changed", return_value=None):
+            self.assertNotIn("lastmod", self.render())
 
     def test_gallery_is_included_with_no_built_demos(self):
         self.add_source("triangle")

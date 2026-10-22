@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # Article dates and sitemap lastmod values come from the commit history.
+          fetch-depth: 0
 
       - name: Validate demo metadata and sitemap
         run: |

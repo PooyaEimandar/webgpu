@@ -137,9 +137,13 @@ keeps rotating while allowing the reader to scroll over its canvas.
 
 The renderer adds the More info link and SVG, article layout class, page title,
 description, canonical URL, author, Open Graph and Twitter metadata, and
-`BlogPosting` JSON-LD. The author is Pooya Eimandar and canonical URLs use
-`https://pooya.ai/webgpu/EXAMPLE/`. No publication or modification dates are
-invented.
+`BlogPosting` JSON-LD. The author is Pooya Eimandar, linked to the person
+`https://pooya.ai/` describes, and canonical URLs use
+`https://pooya.ai/webgpu/EXAMPLE/`. The page title ends in `| Pooya Eimandar`
+only when that keeps it within 60 characters, where search results cut titles.
+
+Publication and modification dates come from git: the commit that added the
+article's HTML, and the last commit that changed its HTML or JSON.
 
 The article allows large search image previews. Loading and WebGPU error
 messages are excluded from snippets with `data-nosnippet`; the article itself
@@ -174,7 +178,9 @@ stderr with a nonzero exit status when the renderer runs as a command.
 
 The WebAssembly build writes `target/web/sitemap.xml` (or the configured
 `WEBGPU_WEB_ROOT`). It includes the gallery and actual built demo pages with
-canonical `https://pooya.ai/webgpu/` URLs. It does not invent `lastmod` dates.
+canonical `https://pooya.ai/webgpu/` URLs. Each `lastmod` is the date of the last
+commit to the page's article, or to `web/index.html` for the gallery, and is
+left out without the complete history rather than guessed.
 To regenerate the sitemap without rebuilding WebAssembly:
 
 ```sh

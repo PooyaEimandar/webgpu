@@ -163,7 +163,8 @@ class RenderExampleTests(unittest.TestCase):
         self.assertEqual(data["@type"], "BlogPosting")
         self.assertEqual(data["headline"], METADATA["title"])
         self.assertEqual(data["author"], {
-            "@type": "Person", "name": "Pooya Eimandar", "url": "https://pooya.ai"
+            "@type": "Person", "@id": "https://pooya.ai/#person",
+            "name": "Pooya Eimandar", "url": "https://pooya.ai/",
         })
         self.assertEqual(data["mainEntityOfPage"]["@id"], canonical)
         self.assertEqual(data["url"], canonical)
@@ -174,6 +175,27 @@ class RenderExampleTests(unittest.TestCase):
         self.assertIsNone(renderer.TOKEN_PATTERN.search(document))
         self.assertIn('./triangle.js?build=123456', document)
         self.assertIn('./triangle_bg.wasm?build=123456', document)
+
+    def test_the_author_suffix_is_dropped_from_titles_search_results_would_cut(self):
+        long_title = "WebGPU Compute Culling and LOD in Rust: GPU-Driven Draws"
+        self.add_article(dict(METADATA, title=long_title))
+        document = self.render()
+        self.assertIn(f"<title>{long_title}</title>", document)
+        self.assertEqual(HeadParser(document).metadata["og:title"], long_title)
+        self.assertEqual(renderer.page_title("Short title"), "Short title | Pooya Eimandar")
+
+    def test_dates_come_from_the_history_and_are_left_out_without_it(self):
+        self.add_article()
+        with patch.object(renderer, "git_dates", return_value=("2026-08-28", "2026-09-29")):
+            document = self.render()
+        data = self.json_ld(document)
+        self.assertEqual((data["datePublished"], data["dateModified"]), ("2026-08-28", "2026-09-29"))
+        head = HeadParser(document)
+        self.assertEqual(head.metadata["article:published_time"], "2026-08-28")
+        self.assertEqual(head.metadata["article:modified_time"], "2026-09-29")
+        # A directory outside any repository has no history to read.
+        article = self.web_root / "articles" / "triangle.html"
+        self.assertIsNone(renderer.git_dates(article, article.with_suffix(".json")))
 
     def test_breadcrumb_schema_matches_generated_navigation(self):
         self.add_article(dict(METADATA, breadcrumbName="Triangle"))
@@ -519,7 +541,8 @@ class RenderExampleTests(unittest.TestCase):
             "@type") == "CollectionPage"]
         self.assertEqual(len(collections), 1)
         collection = collections[0]
-        self.assertEqual(collection["author"]["url"], "https://pooya.ai")
+        self.assertEqual(collection["author"]["@id"], "https://pooya.ai/#person")
+        self.assertEqual(collection["isPartOf"], {"@id": "https://pooya.ai/#website"})
         items = collection["mainEntity"]["itemListElement"]
         self.assertEqual([item["position"]
                          for item in items], list(range(1, 48)))
