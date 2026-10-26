@@ -1,15 +1,15 @@
-# Vendored egui-winit 0.36.2
+# Vendored egui-winit 0.37.0
 
-This is the published `egui-winit` 0.36.2 crate with one change, applied
+This is the published `egui-winit` 0.37.0 crate with one change, applied
 through `[patch.crates-io]` in the root `Cargo.toml`.
 
 ## Why
 
 egui 0.36 made `egui::DroppedFile` platform-specific: native targets implement
 `bytes`, wasm32 implements `bytes_async`. `egui-winit` implements `bytes`
-unconditionally in `src/dropped_file.rs`, so every 0.36.x release fails to
+unconditionally in `src/dropped_file.rs`, so every release since 0.36 (0.37.0 included) fails to
 compile for `wasm32-unknown-unknown`. Every example here ships as a browser
-demo, and wgpu 30 requires egui 0.36, so there is no released version to fall
+demo, and wgpu 30 requires egui 0.36 or newer, so there is no released version to fall
 back to.
 
 ## What changed

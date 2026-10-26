@@ -6,7 +6,7 @@ use bvh::{
     bvh::{Bvh, BvhNode},
 };
 use bytemuck::{Pod, Zeroable};
-use nalgebra034::Point3;
+use nalgebra::Point3;
 use sib::render::{RenderError, RenderResult, glam};
 
 use super::scene::GpuTriangle;

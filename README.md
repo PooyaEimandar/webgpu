@@ -76,3 +76,7 @@ cargo run --bin serve
 ```
 
 Then open `http://127.0.0.1:8080`.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option. The bundled assets keep their own licenses, listed above.

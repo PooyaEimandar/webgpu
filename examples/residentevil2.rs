@@ -600,7 +600,7 @@ impl ResidentEvil2Example {
     fn paint_projected_bounds(context: &egui::Context, overlay: &ProjectedBoundsOverlay) {
         let painter = context.layer_painter(egui::LayerId::new(
             egui::Order::Background,
-            egui::Id::new("resident_evil_2_bounds_overlay"),
+            egui::Id::unique("resident_evil_2_bounds_overlay"),
         ));
         let screen_rect = context.content_rect();
         let claire_color = egui::Color32::from_rgb(45, 255, 205);

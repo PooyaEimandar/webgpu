@@ -2,6 +2,6 @@
 # lints with every release, and CI runs with -D warnings. Bump deliberately,
 # fixing whatever the new lints report in the same change.
 [toolchain]
-channel = "1.99.0"
+channel = "1.99.1"
 components = ["clippy", "rustfmt"]
 targets = ["wasm32-unknown-unknown"]

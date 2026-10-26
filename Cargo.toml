@@ -3,7 +3,7 @@ name = "webgpu"
 version = "0.1.0"
 edition = "2024"
 description = "Rust WebGPU/wgpu examples inspired by Sascha Willems' Vulkan examples."
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [[bin]]
 name = "serve"
@@ -23,12 +23,12 @@ test = true
 
 [dependencies]
 base64 = { version = "0.23.1" }
-bvh = { version = "0.12.0", default-features = false, features = ["std"] }
+bvh = { version = "0.13.0", default-features = false, features = ["std"] }
 bytes = { version = "1.12.1" }
 bytemuck = { version = "1.25.2", features = ["derive"] }
-egui = { version = "0.36.2", default-features = false }
-egui-wgpu = { version = "0.36.2", default-features = false }
-egui-winit = { version = "0.36.2", default-features = false }
+egui = { version = "0.37.0", default-features = false }
+egui-wgpu = { version = "0.37.0", default-features = false }
+egui-winit = { version = "0.37.0", default-features = false }
 gltf = { version = "1.4.1", default-features = false, features = [
     "KHR_materials_pbrSpecularGlossiness",
     "names",
@@ -39,22 +39,22 @@ image = { version = "0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-# bvh 0.12 links nalgebra 0.34, and accel.rs hands Point3 values straight to
-# the bvh builder, so it must use that exact version — a newer nalgebra's
-# Point3 is a distinct type and will not coerce.
-nalgebra034 = { package = "nalgebra", version = "0.34.0", default-features = false, features = [
+# accel.rs hands Point3 values straight to the bvh builder, so this has to be
+# the same nalgebra major that bvh links (0.35 for bvh 0.13); a different one
+# is a distinct Point3 type and will not coerce.
+nalgebra = { version = "0.35.0", default-features = false, features = [
     "std",
 ] }
 # Pinned to an exact revision, the same one the pooya.ai site builds against.
 # Left floating, any `cargo update` moves sib to its newest commit and takes
 # wgpu and glam across whatever breaking changes landed there.
-sib = { git = "https://github.com/PooyaEimandar/sib", rev = "0e023300e80c89bc6247f8ed7a9b498c7653a707", features = [
+sib = { git = "https://github.com/PooyaEimandar/sib", rev = "817cb69cc88705f50a5f6cab645588c8fe38dd63", features = [
     "render",
 ] }
-rapier3d = "0.36.0"
+rapier3d = "0.36.1"
 
-# egui-winit 0.36 does not compile for wasm32, and wgpu 30 needs egui 0.36.
-# This is the published 0.36.2 with a one-method fix; vendor/egui-winit/
+# egui-winit 0.37 does not compile for wasm32, and wgpu 30 needs egui 0.37.
+# This is the published 0.37.0 with a one-method fix; vendor/egui-winit/
 # README.vendored.md has the details and says when it can be deleted.
 [patch.crates-io]
 egui-winit = { path = "vendor/egui-winit" }
@@ -67,21 +67,21 @@ opt-level = 1
 opt-level = 3
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bvh = { version = "0.12.0", default-features = false, features = [
+bvh = { version = "0.13.0", default-features = false, features = [
     "rayon",
     "std",
 ] }
-serde_json = { version = "1.0.151" }
-sib = { git = "https://github.com/PooyaEimandar/sib", rev = "0e023300e80c89bc6247f8ed7a9b498c7653a707", features = [
+serde_json = { version = "1.0.154" }
+sib = { git = "https://github.com/PooyaEimandar/sib", rev = "817cb69cc88705f50a5f6cab645588c8fe38dd63", features = [
     "net-file-server",
     "net-h1-server",
     "render",
 ] }
-ureq = { version = "3.4.2" }
+ureq = { version = "3.5.0" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6.2" }
-objc2 = { version = "0.6.4", features = [
+objc2 = { version = "0.6.5", features = [
     "disable-encoding-assertions",
     "exception",
 ] }
@@ -104,7 +104,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
 # live page into a texture is WKWebView-specific, so on other platforms wry
 # could open a page but never render one -- while on Linux it binds WebKitGTK
 # and drags glib, gtk, webkit2gtk and libsoup into every build, including CI.
-wry = { version = "0.57.0" }
+wry = { version = "0.57.1" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3.106" }
